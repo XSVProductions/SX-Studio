@@ -1,0 +1,10 @@
+*.sh            text eol=lf
+mac/run         text eol=lf
+mac/scripts/*   text eol=lf
+mac/Info.plist  text eol=lf
+*.yml           text eol=lf
+*.ps1           -text
+*.vbs           -text
+*.iss           -text
+*.png           binary
+*.ico           binary

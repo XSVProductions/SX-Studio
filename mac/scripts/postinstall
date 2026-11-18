@@ -1,0 +1,27 @@
+#!/bin/bash
+# Runs as root after AIM MOVERS.app is installed in /Applications.
+# Puts AIM MOVERS + SYNC FROM WINDOWS on the logged-in user's Desktop. Never fails the install.
+U="$(stat -f%Su /dev/console 2>/dev/null)"
+[ -z "$U" ] || [ "$U" = "root" ] && exit 0
+H="$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+[ -d "$H" ] || exit 0
+D="$H/Desktop"
+APP="/Applications/AIM MOVERS.app"
+
+mkdir -p "$H/AwaazTools" && chown "$U" "$H/AwaazTools"
+
+# remove launchers from the older hand-made setup
+rm -f "$D/AIM MOVERS TO DANCEFLOOR.command" 2>/dev/null
+[ -d "$D/AIM MOVERS.app" ] && [ ! -L "$D/AIM MOVERS.app" ] && rm -rf "$D/AIM MOVERS.app"
+for f in df_aim.ps1 df_aim_gui.ps1 aim_movers_1024.png sync_from_windows.sh; do rm -f "$H/AwaazTools/$f"; done
+
+ln -sfn "$APP" "$D/AIM MOVERS" 2>/dev/null && chown -h "$U" "$D/AIM MOVERS" 2>/dev/null
+
+cat > "$D/SYNC FROM WINDOWS.command" <<'EOF' 2>/dev/null
+#!/bin/bash
+bash "/Applications/AIM MOVERS.app/Contents/Resources/sync_from_windows.sh"
+read -r -p "  Press Enter to close " _
+EOF
+chmod 755 "$D/SYNC FROM WINDOWS.command" 2>/dev/null
+chown "$U" "$D/SYNC FROM WINDOWS.command" 2>/dev/null
+exit 0

@@ -37,18 +37,20 @@ jobs:
       - name: Smoke test (install the pkg, start the app's server, call it)
         run: |
           sudo installer -pkg build/mac/*.pkg -target /
-          A="/Applications/AIM MOVERS.app/Contents"
+          A="/Applications/ShowXpress Helper.app/Contents"
           ls -l "$A/MacOS" "$A/Resources"
           test -x "$A/MacOS/run" && test -x "$A/Resources/sync_from_windows.sh" && test -f "$A/Resources/AppIcon.icns"
           pwsh -NoProfile -File "$A/Resources/df_aim_gui.ps1" -NoBrowser -Port 47390 > /tmp/gui.log 2>&1 &
           sleep 8
-          URL="$(pwsh -NoProfile -c '(Get-Content (Join-Path ([IO.Path]::GetTempPath()) "aim_movers_gui.json") -Raw | ConvertFrom-Json).url')"
+          URL="$(pwsh -NoProfile -c '(Get-Content (Join-Path ([IO.Path]::GetTempPath()) "showxpress_helper_gui.json") -Raw | ConvertFrom-Json).url')"
           TOK="${URL##*t=}"
-          curl -fsS "http://localhost:47390/?t=$TOK" | grep -q "Aim Movers"
+          curl -fsS "http://localhost:47390/?t=$TOK" | grep -q "ShowXpress Helper"
           curl -fsS "http://localhost:47390/api/sx?t=$TOK"; echo
           # no show on the build machine -> expect the friendly "run SYNC FROM WINDOWS" message from the engine
           curl -fsS "http://localhost:47390/api/preview?t=$TOK" | tee /tmp/p.json; echo
           grep -q "SYNC FROM WINDOWS" /tmp/p.json
+          curl -fsS "http://localhost:47390/api/skip?t=$TOK" | tee /tmp/s.json; echo
+          grep -q "SYNC FROM WINDOWS" /tmp/s.json
           test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:47390/api/sx?t=wrong")" = 403
           cat /tmp/gui.log
       - uses: actions/upload-artifact@v4
@@ -69,5 +71,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "AIM MOVERS $GITHUB_REF_NAME" \
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "ShowXpress Helper $GITHUB_REF_NAME" \
             --notes "Windows: download the .exe and run it. Mac: download the .pkg and open it. See the README for first-run notes."

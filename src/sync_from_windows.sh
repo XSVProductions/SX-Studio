@@ -3,7 +3,7 @@
 #   The Mac show folder is found the first time and remembered in ~/AwaazTools/show_path.txt
 #   (delete that file to choose again).
 #   Before every sync the Mac show is saved to ~/AwaazTools/previous Mac show (one copy, replaced each time).
-#   Part of AIM MOVERS (installed inside AIM MOVERS.app; Desktop launcher made by the installer).
+#   Part of ShowXpress Helper (installed inside ShowXpress Helper.app; Desktop launcher made by the installer).
 
 SHOW="Awaaz Lightshow"
 TOOLS="$HOME/AwaazTools"

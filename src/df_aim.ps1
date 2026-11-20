@@ -4,7 +4,7 @@
 #     STEP 1 = CENTER : aim every head at the center of tonight's dancefloor.
 #     STEP 2 = CORNER : (optional per head) aim the head at the SAME corner of the floor every time
 #                       (front-left as seen from the DJ). Heads left untouched in step 2 keep normal size.
-#   Close ShowXpress, open AIM MOVERS (df_aim_gui.ps1 = the window; this file does the work), set size, Apply.
+#   Close ShowXpress, open ShowXpress Helper (df_aim_gui.ps1 = the window; this file does the work), set size, Apply.
 #   (Run on its own = old text menu: pick 1, type overall size, Enter = 100.)
 #     - center  -> per head OffsetPan/OffsetTilt   (aim - home)
 #     - corner  -> per head ZoomPan/ZoomTilt so that head's patterns reach the corner you showed it
@@ -26,35 +26,14 @@ param(
   [string]$TestRoot = ""   # testing only: run against a copy of the show, skip the ShowXpress check
 )
 $ErrorActionPreference = 'Stop'
-# Runs on Windows (PowerShell 5.1, Boot Camp side) and macOS (PowerShell 7 "pwsh").
-# Show folder: 1) path in show_path.txt  (Mac: ~/AwaazTools/show_path.txt, written by "SYNC FROM WINDOWS";
-#              Windows: %APPDATA%\AIM MOVERS\show_path.txt - optional)
-#              2) ~/TheLightingController/LightShows/Awaaz Lightshow   3) the only show there that has a CENTER SPOT scene
-$onMac = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
-function Find-Show {
-  $pf = if ($onMac) { Join-Path $HOME 'AwaazTools/show_path.txt' } else { Join-Path $env:APPDATA 'AIM MOVERS/show_path.txt' }
-  if (Test-Path -LiteralPath $pf) {
-    $p = "$(Get-Content -LiteralPath $pf -TotalCount 1)".Trim()
-    if ($p -and (Test-Path -LiteralPath "$p/Live/live.ini")) { return $p }
-  }
-  $ls = Join-Path $HOME 'TheLightingController/LightShows'
-  $def = Join-Path $ls 'Awaaz Lightshow'
-  if (Test-Path -LiteralPath "$def/Live/live.ini") { return $def }
-  if (Test-Path -LiteralPath $ls) {
-    $c = @(Get-ChildItem -LiteralPath $ls -Directory | Where-Object { (Test-Path -LiteralPath (Join-Path $_.FullName 'Live/live.ini')) -and (Test-Path -LiteralPath (Join-Path $_.FullName 'scenes/CENTER SPOT.scex')) })
-    if ($c.Count -eq 1) { return $c[0].FullName }
-  }
-  if ($onMac) { throw "Mac show folder not known yet - run SYNC FROM WINDOWS once first. NOTHING was changed." }
-  throw "Can't find the show. Write its folder path into $pf and try again. NOTHING was changed."
-}
+# Show folder lookup, mover list and the 140/251 model names are shared with skip_flash.ps1:
+. (Join-Path $PSScriptRoot 'show_common.ps1')   # Find-Show, Test-SxRunning, Get-ShowMovers, Get-Label, $m140, $m251
 $root = if ($TestRoot) { $TestRoot } else { Find-Show }
 if (-not (Test-Path -LiteralPath "$root/Live/live.ini")) { throw "Show not found at '$root'. NOTHING was changed." }
 $gdir    = "$root/Editor/Generator/projects"
 $scene   = "$root/scenes/DF AIM (ADJUST).scex"
 # state (original pattern shapes) lives in the show folder so it travels with the show to the Mac
 $stateF  = "$root/df_aim_state.json"
-$m140    = 'Intimidator Hybrid 140SR (19ch)'
-$m251    = 'IntimidatorHybrid251Sr(19ch)'
 # Home = where the shapes are centered when offsets are 0 (16-bit pan,tilt).
 $homePos = @{ $m140 = @(22600, 49700); $m251 = @(34200, 10000) }
 # Reference half-size of the dancefloor at home (16-bit pan,tilt from center to corner) = typical
@@ -76,28 +55,14 @@ $kMin = 0.3; $kMax = 3.0
 
 function Test-SxClosed {
   if ($TestRoot) { return }
-  if (Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) {
+  if (Test-SxRunning) {
     throw "ShowXpress is OPEN - NOTHING was changed. Close ShowXpress (save first) and run this again."
   }
 }
 
 function Test-Like($name, $patterns) { [bool]($patterns | Where-Object { $name -like $_ }) }
 
-function Get-Movers {
-  # all 140SR + 251SR in the show, from the CENTER SPOT scene's fixture list (has all 22)
-  $cs = "$root/scenes/CENTER SPOT.scex"; if (-not (Test-Path -LiteralPath $cs)) { $cs = "$root/scenes/CENTER SPOT (adjust).scex" }
-  [xml]$x = [IO.File]::ReadAllText($cs)
-  $list = foreach ($f in $x.Scene.Fixtures.Fixture) {
-    $nm = $f.GetAttribute('name'); $mo = $f.GetAttribute('model')
-    if ($mo -ne $m140 -and $mo -ne $m251) { continue }
-    $num = 1; $mm = [regex]::Matches($nm, '#(\d+)'); if ($mm.Count) { $num = [int]$mm[$mm.Count-1].Groups[1].Value }
-    if ($nm -like '*#4 #2 #2') { $num = 6 } elseif ($nm -like '*#4 #2') { $num = 5 }
-    [pscustomobject]@{ Id = $f.GetAttribute('id'); Name = $nm; Model = $mo; Num = $num; Is140 = ($mo -eq $m140) }
-  }
-  $list | Sort-Object @{e={-[int]$_.Is140}}, Num
-}
-
-function Get-Label($m) { if ($m.Is140) { "140 #$($m.Num)" } else { "251 #$($m.Num)" } }
+function Get-Movers { Get-ShowMovers $root }
 
 function Get-DefaultCorner($m) { $h = $homePos[$m.Model]; $r = $refHalf[$m.Model]; @(($h[0] - $r[0]), ($h[1] + $r[1])) }
 

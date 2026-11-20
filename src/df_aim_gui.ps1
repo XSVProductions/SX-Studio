@@ -1,14 +1,16 @@
-﻿# AIM MOVERS - small GUI for df_aim.ps1 (Windows PowerShell 5.1 + macOS pwsh 7).
+﻿# ShowXpress Helper (was AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
 # Runs a private web page on this computer only (localhost + random key) and opens it as an app window
-# (Edge/Chrome "app" mode, else the normal browser). The page talks to df_aim.ps1, which does all the work.
+# (Edge/Chrome "app" mode, else the normal browser). Two tabs, each backed by a script that does the work:
+#   Aim Movers -> df_aim.ps1      Skip Flash -> skip_flash.ps1
 # Quits by itself a few minutes after its window is closed.
 param([string]$TestRoot = '', [int]$Port = 47321, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 $here   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engine = Join-Path $here 'df_aim.ps1'
+$skipEngine = Join-Path $here 'skip_flash.ps1'
 $onMac  = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $psExe  = (Get-Process -Id $PID).Path
-$infoF  = Join-Path ([IO.Path]::GetTempPath()) 'aim_movers_gui.json'
+$infoF  = Join-Path ([IO.Path]::GetTempPath()) 'showxpress_helper_gui.json'
 $idleMax = 300   # seconds without the window checking in -> quit
 
 function Open-AppWindow($url) {
@@ -32,17 +34,17 @@ $l.Prefixes.Add("http://localhost:$Port/")
 try { $l.Start() }
 catch {
   if (Test-Path $infoF) { $i = Get-Content $infoF -Raw | ConvertFrom-Json; Open-AppWindow $i.url; return }
-  throw "Port $Port is busy and no running AIM MOVERS was found."
+  throw "Port $Port is busy and no running ShowXpress Helper was found."
 }
 $url = "http://localhost:$Port/?t=$token"
 [IO.File]::WriteAllText($infoF, (@{ url = $url; pid = $PID } | ConvertTo-Json))
 
 function Test-SxOpen { [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) }
 
-function Invoke-Engine([string]$engineArgs) {
+function Invoke-Engine([string]$engineArgs, [string]$script = $engine) {
   $psi = New-Object Diagnostics.ProcessStartInfo
   $psi.FileName = $psExe
-  $a = "-NoProfile -ExecutionPolicy Bypass -File `"$engine`" $engineArgs"
+  $a = "-NoProfile -ExecutionPolicy Bypass -File `"$script`" $engineArgs"
   if ($TestRoot) { $a += " -TestRoot `"$TestRoot`"" }
   $psi.Arguments = $a
   $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
@@ -78,7 +80,7 @@ function Send-Json($ctx, $obj) { Send-Text $ctx 200 'application/json; charset=u
 
 $html = @'
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>Aim Movers</title>
+<html lang="en"><head><meta charset="utf-8"><title>ShowXpress Helper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="/icon.png?t=__TOKEN__">
 <style>
 :root{--bg:#0e1014;--card:#171a21;--line:#262b36;--txt:#e9ecf1;--dim:#8b93a3;--amber:#ffb020;--green:#3ddc84;--red:#ff5c5c;--blue:#5aa9ff}
@@ -122,10 +124,27 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12.5px
 .spin{width:22px;height:22px;border:3px solid #3a3f4b;border-top-color:var(--amber);border-radius:50%;animation:s 0.8s linear infinite;margin-right:10px}@keyframes s{to{transform:rotate(360deg)}}
 .foot{color:#5d6574;font-size:12px;text-align:center}
 .gone{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:40;color:var(--dim)}
-@media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}}
+.tabs{display:flex;gap:3px;background:#12151b;border:1px solid var(--line);border-radius:11px;padding:3px;margin-left:14px}
+.tabs button{border:none;background:transparent;color:var(--dim);padding:7px 16px;border-radius:8px;font-size:13.5px}
+.tabs button:hover{color:var(--txt)}.tabs button.on{background:#262b36;color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
+.view{display:none;gap:18px}.view.on{display:grid}.bar .in{display:none}.bar .in.on{display:flex}
+.gh{display:flex;align-items:center;gap:8px;margin:14px 0 8px}.gh h3{margin:0;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}.gh .cnt{color:#5d6574;font-size:12px}
+.mini{padding:3px 11px;font-size:12px;border-radius:99px;font-weight:600}
+.heads{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
+.hd{position:relative;background:#12151b;border:1px solid var(--line);border-radius:12px;padding:12px 0 10px;text-align:center;cursor:pointer;user-select:none;font-weight:700;font-size:17px;color:#6b7383;transition:background .12s,border-color .12s,color .12s}
+.hd small{display:block;font-size:11px;font-weight:500;color:#4f5665;margin-top:2px}
+.hd:hover{border-color:#3a4150}
+.hd.on{background:rgba(255,176,32,.13);border-color:var(--amber);color:var(--txt)}.hd.on small{color:var(--amber)}
+.hd.chg::after{content:"";position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--blue)}
+.order{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}.order span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px}.order i{color:#4f5665;font-style:normal;font-size:11px}
+.state{font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:99px;border:1px solid}.state.ok{color:var(--green);border-color:rgba(61,220,132,.35)}.state.chg{color:var(--blue);border-color:rgba(90,169,255,.45)}
+@media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
 </style></head><body>
-<header><img class="logo" src="/icon.png?t=__TOKEN__" alt=""><h1>Aim Movers<span>dancefloor setup</span></h1><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div></header>
+<header><img class="logo" src="/icon.png?t=__TOKEN__" alt=""><h1>ShowXpress Helper</h1>
+  <nav class="tabs"><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button></nav>
+  <div id="sx" class="pill ok">Checking ShowXpress&hellip;</div></header>
 <main>
+ <div class="view" id="v-aim">
   <section class="card">
     <h2>Tonight's aims</h2>
     <p class="sub">Read from the scene <b>DF AIM (ADJUST)</b> in ShowXpress.</p>
@@ -158,14 +177,31 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12.5px
       </svg>
     </div>
   </section>
+ </div>
+
+ <div class="view" id="v-skip">
+  <section class="card">
+    <div class="row"><div class="grow"><h2>Skip Flash heads</h2>
+      <p class="sub" style="margin-bottom:0">Tap the movers that are set up tonight. <b>SKIP FLASH</b> will only flash those, so the chase has no dark gaps.</p></div>
+      <span id="skstate" class="state ok" style="display:none"></span><button id="skrefresh">&#8635; Refresh</button></div>
+    <div id="skerr" class="warnbox"></div>
+    <div id="skgroups"></div>
+  </section>
+  <section class="card">
+    <div class="row"><h2 class="grow" style="margin:0">Flash order</h2><div id="sksum" class="summary"></div></div>
+    <div id="skorder" class="order"></div>
+    <p class="sub" style="margin:10px 0 0">The order and the step time come from your scene &mdash; only the list of heads changes.</p>
+  </section>
+ </div>
 
   <section id="result" class="card result"><h2 id="rtitle"></h2><div id="rbody"></div><details><summary>Full details</summary><pre id="rlog"></pre></details></section>
   <div class="foot" id="foot"></div>
 </main>
-<div class="bar"><div class="in"><button id="apply" class="primary">Apply to show</button><button id="home">Reset to normal</button><div class="hint grow" id="hint"></div></div></div>
+<div class="bar"><div class="in" data-for="aim"><button id="apply" class="primary">Apply to show</button><button id="home">Reset to normal</button><div class="hint grow" id="hint"></div></div>
+  <div class="in" data-for="skip"><button id="sksave" class="primary">Save to SKIP FLASH</button><button id="skundo">Undo changes</button><div class="hint grow" id="skhint"></div></div></div>
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
-<div class="gone" id="gone"><h2 style="color:var(--txt)">Aim Movers has closed</h2><p>Open it again from its icon.</p></div>
+<div class="gone" id="gone"><h2 style="color:var(--txt)">ShowXpress Helper has closed</h2><p>Open it again from its icon.</p></div>
 <script>
 const T='__TOKEN__';const $=id=>document.getElementById(id);
 let P=null,sxOpen=false,linked=true;
@@ -200,7 +236,10 @@ function ask(t,p,yes){return new Promise(res=>{$('mt').textContent=t;$('mp').inn
 function busy(on,t){$('busy').style.display=on?'flex':'none';if(t)$('busyt').textContent=t;}
 function showResult(r,what){const box=$('result');box.className='card result '+(r.ok?'ok':'err');
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> Not applied';$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='skip'?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
+  $('rbody').innerHTML='<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul><p class="sub" style="margin:8px 0 0">Open ShowXpress and press <b>SKIP FLASH</b> to check it.</p>';}
  else{const tot=lines.find(l=>/movement scenes checked/.test(l))||'';const ch=lines.filter(l=>/\s[1-9]\d* values changed/.test(l)).map(l=>l.trim().replace(/\s{2,}/g,' — '));
   const wr=lines.filter(l=>/WARNING/.test(l)).map(l=>l.replace(/^\s*WARNING:\s*/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(what==='home'?'Everything is back to normal':'Applied to the show');
@@ -213,8 +252,52 @@ $('apply').onclick=async()=>{let force=false;const w=P.heads.filter(h=>h.warn);
 $('home').onclick=async()=>{if(!await ask('Reset to normal?','All heads go back to the normal center, size 100%, and the DF AIM (ADJUST) scene is reset. Your shapes are kept.','Reset'))return;
  busy(true,'Resetting…');try{const r=await api('/api/home',{});showResult(r,'home');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load.done=0;load();};
 async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
- p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';updBar();if(was&&!sxOpen)load();}catch(e){$('gone').style.display='flex';return;}setTimeout(poll,2000);}
-draw();load();poll();
+ p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';updBar();updSkip();if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();}}catch(e){$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+
+// ---------------- tabs
+function setTab(t){if(t!=='skip')t='aim';try{localStorage.setItem('tab',t)}catch(e){}
+ document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+ document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
+ document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();}
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+
+// ---------------- Skip Flash heads
+let S=null,sel=new Set();
+const saved=()=>new Set(S&&S.ok?S.heads.filter(h=>h.on).map(h=>h.id):[]);
+function dirty(){if(!S||!S.ok)return false;const s=saved();return s.size!==sel.size||[...sel].some(i=>!s.has(i));}
+async function loadSkip(){$('sksum').textContent='Loading…';try{S=await api('/api/skip');}catch(e){S={ok:false,error:'Could not read the show.'}}
+ sel=saved();renderSkip();}
+function flashOrder(){ // same rule as skip_flash.ps1: 140s in the skip order, 251s spread evenly in between
+ const hs=S.heads.filter(h=>sel.has(h.id)),pick=(is140,ord)=>{const g=hs.filter(h=>h.is140===is140);return ord.map(n=>g.find(h=>h.num===n)).filter(Boolean).concat(g.filter(h=>!ord.includes(h.num)));};
+ const a=pick(true,S.order140),b=pick(false,S.order251),out=[];let i=0,j=0;
+ while(i<a.length||j<b.length){const takeA=j>=b.length||(i<a.length&&(i+.5)/a.length<=(j+.5)/b.length);out.push(takeA?a[i++]:b[j++]);}return out;}
+function headTile(h,s){const on=sel.has(h.id),chg=on!==s.has(h.id);
+ return `<div class="hd${on?' on':''}${chg?' chg':''}" data-id="${esc(h.id)}" title="${chg?'changed - not saved yet':''}">#${h.num}<small>${on?'in use':'not here'}</small></div>`;}
+function renderSkip(){if(!S)return;const er=$('skerr');
+ if(!S.ok){er.style.display='block';er.innerHTML=esc(S.error);$('skgroups').innerHTML='';$('skorder').innerHTML='';$('sksum').textContent='';$('skstate').style.display='none';updSkip();return;}
+ er.style.display='none';const s=saved();
+ const grp=(is140,name)=>{const hs=S.heads.filter(h=>h.is140===is140);if(!hs.length)return'';const n=hs.filter(h=>sel.has(h.id)).length;
+  return `<div class="gh"><h3>${name}</h3><span class="cnt">${n} of ${hs.length}</span><div class="grow"></div><button class="mini" data-all="${is140?1:0}">All</button><button class="mini" data-none="${is140?1:0}">None</button></div><div class="heads">${hs.map(h=>headTile(h,s)).join('')}</div>`;};
+ $('skgroups').innerHTML=grp(true,'140SR')+grp(false,'251SR');
+ document.querySelectorAll('.hd').forEach(t=>t.onclick=()=>{const id=t.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderSkip();});
+ const setG=(is140,on)=>{S.heads.filter(h=>h.is140===is140).forEach(h=>on?sel.add(h.id):sel.delete(h.id));renderSkip();};
+ document.querySelectorAll('[data-all]').forEach(b=>b.onclick=()=>setG(b.dataset.all==='1',true));
+ document.querySelectorAll('[data-none]').forEach(b=>b.onclick=()=>setG(b.dataset.none==='1',false));
+ const o=flashOrder();$('skorder').innerHTML=o.length?o.map(h=>`<span>${esc(h.label)}</span>`).join('<i>&rsaquo;</i>'):'<span style="color:var(--dim)">no heads picked</span>';
+ $('sksum').innerHTML=`<b>${o.length}</b> heads &middot; ${S.stepCs/100} s each &middot; one loop <b>${(o.length*S.stepCs/100).toFixed(2)} s</b>`;
+ const st=$('skstate');st.style.display='inline-block';const d=dirty();st.className='state '+(d?'chg':'ok');st.textContent=d?'● Not saved yet':'✓ Matches the show';
+ $('foot').textContent='Show: '+S.show;updSkip();}
+function updSkip(){const ok=S&&S.ok,d=dirty(),n=sel.size;$('sksave').disabled=sxOpen||!ok||!d||n<2;$('skundo').disabled=!ok||!d;
+ $('skhint').innerHTML=!ok?'':sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to save.</span>':
+  n<2?'<span style="color:var(--amber)">Pick at least 2 heads.</span>':d?'Only the SKIP FLASH scene is changed. Heads you turn off are taken out of it.':'SKIP FLASH already uses exactly these heads.';}
+$('skrefresh').onclick=loadSkip;
+$('skundo').onclick=()=>{sel=saved();renderSkip();};
+$('sksave').onclick=async()=>{busy(true,'Saving SKIP FLASH…');let r;try{r=await api('/api/skip/apply',{heads:[...sel]});}catch(e){r={ok:false,error:'Lost connection.'}}
+ busy(false);if(r.ok)await loadSkip();showResult(r,'skip');};
+
+let t0='aim';try{t0=location.hash.slice(1)||localStorage.getItem('tab')||'aim'}catch(e){}
+setTab(t0);draw();load();poll();
 </script></body></html>
 '@
 
@@ -229,7 +312,7 @@ try {
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
     try {
-      if ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open Aim Movers from its icon.'; continue }
+      if ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open ShowXpress Helper from its icon.'; continue }
       $last = Get-Date
       $path = $req.Url.AbsolutePath
       $body = $null
@@ -250,6 +333,16 @@ try {
           Send-Json $ctx (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f")
         }
         '/api/home'    { Send-Json $ctx (Invoke-Engine '-Action Home -NoPrompt') }
+        '/api/skip'    {
+          $r = Invoke-Engine '-Action Preview' $skipEngine
+          if ($r.ok) { $j = (($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1); Send-Text $ctx 200 'application/json; charset=utf-8' $j }
+          else { Send-Json $ctx @{ ok = $false; error = $r.error } }
+        }
+        '/api/skip/apply' {
+          $ids = @($body.heads | ForEach-Object { "$_" })
+          if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 2) { Send-Json $ctx @{ ok = $false; error = 'Pick at least 2 heads.'; out = '' }; break }
+          Send-Json $ctx (Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $skipEngine)
+        }
         default        { Send-Text $ctx 404 'text/plain' 'not found' }
       }
     } catch {

@@ -61,7 +61,7 @@ if ($onMac) {
   if ($apc.Count) { Add-Item 'Gear' 'ok' 'APC mini is plugged in' }
   else { Add-Item 'Gear' 'error' 'APC mini not found' 'The pads and speed faders won''t work.' 'Plug in the APC mini (try another USB port), then restart ShowXpress so it picks it up.' }
 
-  $dmx = @($pnp | Where-Object { $_.FriendlyName -match 'DMX|Nicolaudie|Sunlite|Chauvet|ShowXpress|Enttec|USB Serial Converter|FT232' -or $_.Manufacturer -match 'Nicolaudie|Sunlite|Chauvet|FTDI|Enttec' })
+  $dmx = @($pnp | Where-Object { $_.InstanceId -match 'VID_1069' -or $_.FriendlyName -match 'D512|DMX|Nicolaudie|Sunlite|Chauvet|ShowXpress|Enttec|USB Serial Converter|FT232' -or $_.Manufacturer -match 'EFK|Nicolaudie|Sunlite|Chauvet|FTDI|Enttec' })
   if ($dmx.Count) { Add-Item 'Gear' 'ok' 'DMX interface is plugged in' (($dmx | Select-Object -ExpandProperty FriendlyName -Unique) -join ', ') }
   else { Add-Item 'Gear' 'error' 'No DMX interface found' 'Without it no light gets any signal.' 'Plug in the DMX interface and check the DMX cable to the first light. If it is plugged in and this still shows, tell me what it is called in Device Manager.' }
 

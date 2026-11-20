@@ -16,6 +16,12 @@ $speedEngine  = Join-Path $here 'speed.ps1'
 $healthEngine = Join-Path $here 'health.ps1'
 $rtEngine     = Join-Path $here 'rig_test.ps1'
 $preEngine    = Join-Path $here 'preshow.ps1'
+$colorEngine  = Join-Path $here 'color.ps1'
+$gdEngine     = Join-Path $here 'gdrive.ps1'
+$repo   = 'XSVProductions/showxpress-helper'
+$verF   = Join-Path $here 'version.txt'
+$appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
+$updInfo = $null
 $onMac  = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $psExe  = (Get-Process -Id $PID).Path
 $infoF  = Join-Path ([IO.Path]::GetTempPath()) 'showxpress_helper_gui.json'
@@ -48,6 +54,35 @@ $url = "http://localhost:$Port/?t=$token"
 [IO.File]::WriteAllText($infoF, (@{ url = $url; pid = $PID } | ConvertTo-Json))
 
 function Test-SxOpen { [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) }
+function Get-SxExe {
+  foreach ($p in "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
+  $null
+}
+function Get-Update {
+  # newest release on GitHub, asked once per run (generic User-Agent - nothing about this computer is sent)
+  if ($script:updInfo) { return $script:updInfo }
+  try {
+    if (-not $onMac) { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 }
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'ShowXpress-Helper'; Accept = 'application/vnd.github+json' } -TimeoutSec 10 -UseBasicParsing
+    $lat = "$($rel.tag_name)".TrimStart('v')
+    $as = @($rel.assets | Where-Object { $_.name -match $(if ($onMac) { '\.pkg$' } else { '\.exe$' }) }) | Select-Object -First 1
+    $newer = $false; try { $newer = [version]$lat -gt [version]$appVer } catch {}
+    $script:updInfo = @{ ok = $true; mac = $onMac; current = $appVer; latest = $lat; newer = ($newer -and [bool]$as); asset = "$($as.browser_download_url)"; name = "$($as.name)" }
+  } catch { return @{ ok = $false; mac = $onMac; current = $appVer; error = 'Could not reach GitHub.' } }
+  $script:updInfo
+}
+function Update-SkipFlash($ids) {
+  # SKIP FLASH follows the hung heads too (it needs 2 or more)
+  $ids = @($ids | Where-Object { "$_" -match '^\d+$' })
+  if ($ids.Count -lt 2) { return "`n  SKIP FLASH not changed (it needs at least 2 heads)" }
+  $r = Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $skipEngine
+  if (-not $r.ok) { return "`n  SKIP FLASH NOT updated: $($r.error)" }
+  if ($r.out -match 'nothing to change') { "`n  SKIP FLASH already flashes these $($ids.Count) heads" } else { "`n  SKIP FLASH now flashes $($ids.Count) heads" }
+}
+function Send-Png($ctx, [string]$p) {
+  $ib = [IO.File]::ReadAllBytes($p); $ctx.Response.ContentType = 'image/png'; $ctx.Response.Headers.Add('Cache-Control', 'no-store')
+  $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close()
+}
 
 function Invoke-Engine([string]$engineArgs, [string]$script = $engine) {
   $psi = New-Object Diagnostics.ProcessStartInfo
@@ -200,7 +235,7 @@ header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .sp .i{color:var(--dim);font-size:12px}.sp .i.no{color:#5d6574}
 select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;width:100%}
 .iss.ok .ic{background:rgba(61,220,132,.14);color:var(--green)}
-.rtmap{display:grid;grid-template-columns:1fr minmax(200px,1.3fr) 1fr;gap:12px;background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}
+.rtmap{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}
 .tw{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:8px 10px 10px}.tw h4{margin:0 0 6px;font-size:11.5px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
 .tw .pr{display:grid;grid-template-columns:1fr 1fr;gap:6px}
 .slot{background:#0f1217;border:1px dashed #3a4150;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;min-height:66px;user-select:none}
@@ -208,26 +243,61 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
 .slot .sd{font-size:10.5px;color:#5d6574;display:block}.slot b{font-size:15px}.slot small{color:var(--dim);font-size:11px}
 .dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);vertical-align:-4px;margin-right:5px}
 .dot.fl{animation:bl .5s steps(1) infinite}@keyframes bl{50%{opacity:.12}}
-.mid{grid-row:2;grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed #262b36;border-radius:12px;padding:10px}
+.mid{grid-row:2;grid-column:1/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed #262b36;border-radius:12px;padding:10px}
 .mid .sp2{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}.mid .sp2 span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:var(--txt)}
-.dj{grid-row:3;grid-column:2;align-self:end;text-align:center;color:var(--amber);font-size:12px;font-weight:600;letter-spacing:1px;border-top:2px solid rgba(255,176,32,.5);padding-top:6px}
+.dj{grid-row:4;grid-column:1/4;align-self:end;text-align:center;color:var(--amber);font-size:12px;font-weight:600;letter-spacing:1px;border-top:2px solid rgba(255,176,32,.5);padding-top:6px}
 .tw.off{visibility:hidden}
 .pick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 12px}.pick div{background:#12151b;border:1px solid var(--line);border-radius:9px;padding:7px 6px;cursor:pointer;font-size:12px;text-align:center}
 .pick div:hover{border-color:var(--amber)}.pick div small{display:block;color:#5d6574;font-size:10.5px}.pick div.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
 .legend2{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:12px}.legend2 div{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;font-size:11.5px}.legend2 div b{display:block;font-size:13px}
 .pgrp h3{font-size:12px;letter-spacing:1px;color:var(--dim);margin:14px 0 4px;font-weight:600}
+.hero{display:flex;align-items:center;gap:18px}.hlogo{width:84px;height:84px;filter:drop-shadow(0 0 22px rgba(255,176,32,.35))}.hname{font-size:26px;font-weight:700}.hver{color:var(--dim);font-size:13px}
+.brand img{max-height:96px;max-width:320px;display:block}.brandtxt{font-weight:800;font-size:32px;letter-spacing:7px;color:#fff;text-align:right;line-height:1}.brandtxt span{display:block;font-size:11px;letter-spacing:7.6px;color:var(--amber);font-weight:600;margin-top:5px}
+.htiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.ht{text-align:left;background:#12151b;padding:12px 14px;border-radius:12px}.ht b{display:block;font-size:14px;margin-bottom:2px}.ht span{color:var(--dim);font-size:12.5px;font-weight:400}.ht:hover{border-color:var(--amber)}
+.seg{display:flex;gap:3px;background:#12151b;border:1px solid var(--line);border-radius:11px;padding:3px;width:max-content}.seg button{border:none;background:transparent;color:var(--dim);padding:8px 24px;border-radius:8px}.seg button:hover{color:var(--txt)}.seg button.on{background:#262b36;color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
+.hright{margin-left:auto;display:flex;gap:8px;align-items:center}.hright .pill{margin-left:0}
+.psw{display:inline-block;width:17px;height:17px;border-radius:4px;margin:0 3px 3px 0;cursor:pointer;border:1px solid rgba(255,255,255,.15)}.psw.cur{outline:2px solid var(--amber);outline-offset:1px}.pcl{font-size:12px;color:var(--dim);margin:2px 0 10px}.pcl .pals{margin:3px 0 7px;line-height:0}
+.clwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;margin-top:6px;align-items:start}
+.clpal{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:6px}
+.cp{display:flex;align-items:center;gap:7px;background:#12151b;border:1px solid var(--line);border-radius:9px;padding:6px 8px;font-size:12.5px;cursor:pointer;user-select:none}.cp:hover{border-color:#3a4150}.cp.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
+.cp i{flex:none;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.25)}
+.wheel{position:relative;flex:none;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle closest-side,#fff,rgba(255,255,255,0)),conic-gradient(red,yellow,lime,cyan,blue,magenta,red);cursor:crosshair;touch-action:none}
+.wheel i{position:absolute;width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #000,0 2px 6px rgba(0,0,0,.6);transform:translate(-50%,-50%);pointer-events:none;display:none}
+.clbig{height:120px;border-radius:12px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:10px 12px;margin-bottom:10px}.clbig span{background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;font:12px ui-monospace,Consolas,monospace}
+input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:#0f1217;padding:2px;cursor:pointer}
+@media (max-width:860px){.clwrap{grid-template-columns:1fr}.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
 </style></head><body>
-<header><img class="logo" src="/icon.png?t=__TOKEN__" alt=""><h1>ShowXpress Helper</h1>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button></nav>
-  <div id="sx" class="pill ok">Checking ShowXpress&hellip;</div></header>
+<header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button></nav>
+  <div class="hright"><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button></div></header>
 <main>
- <div class="view" id="v-aim">
+ <div class="view" id="v-home">
   <section class="card">
-    <h2>Tonight's aims</h2>
-    <p class="sub">Read from the scene <b>DF AIM (ADJUST)</b> in ShowXpress.</p>
-    <div class="how">
+   <div class="hero"><img class="hlogo" src="/icon.png?t=__TOKEN__" alt=""><div><div class="hname">ShowXpress Helper</div><div class="hver" id="hver">&nbsp;</div></div><div class="grow"></div>
+    <div id="brand" class="brand"><div class="brandtxt">XSV<span>PRODUCTIONS</span></div></div></div>
+   <div class="htiles">
+    <button class="ht" data-go="rt"><b>1 &middot; Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Skip Flash</span></button>
+    <button class="ht" data-go="aim"><b>2 &middot; Aim Movers</b><span>Fit the dance floor and AROUND ROOM to tonight&rsquo;s venue</span></button>
+    <button class="ht" data-go="color"><b>3 &middot; Tonight&rsquo;s Color</b><span>The decor colour on the movers and uplights</span></button>
+    <button class="ht" data-go="pre"><b>4 &middot; Pre-show Check</b><span>One look before the guests arrive</span></button>
+    <button class="ht" data-go="rig"><b>Tonight&rsquo;s Rig</b><span>Which heads are hung tonight</span></button>
+    <button class="ht" data-go="skip"><b>Skip Flash</b><span>The heads SKIP FLASH uses</span></button>
+    <button class="ht" data-go="apc"><b>APC mini</b><span>Move pads and pick their colours</span></button>
+    <button class="ht" data-go="speed"><b>Speed Faders</b><span>Which fader drives which button</span></button>
+    <button class="ht" data-go="health"><b>Health Check</b><span>Find and fix problems in the show</span></button>
+   </div>
+  </section>
+  <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><button id="gdsync" class="primary" disabled>Sync to Google Drive</button></div></section>
+ </div>
+
+ <div class="view" id="v-aim">
+  <div class="seg"><button data-am="floor" class="on">Dance Floor</button><button data-am="room">Room</button></div>
+  <section class="card">
+    <h2 id="aimttl">Dance floor &mdash; tonight's aims</h2>
+    <p class="sub">Read from the scene <b id="aimsc">DF AIM (ADJUST)</b> in ShowXpress.</p>
+    <div class="how" id="aimhow">
       <div><b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight's dancefloor.</div>
       <div><b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size.</div>
       <div><b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.</div>
@@ -235,15 +305,16 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
     <div class="row"><div id="summary" class="summary grow">Loading&hellip;</div><button id="refresh">&#8635; Refresh</button></div>
     <div id="heads"></div>
     <div id="warnbox" class="warnbox"></div>
+    <div id="aiminst" class="warnbox"></div>
   </section>
 
   <section class="card">
     <h2>Overall pattern size</h2>
-    <p class="sub">100% = patterns reach the corners you aimed. Lower keeps them a bit inside the floor.</p>
+    <p class="sub" id="sizesub">100% = patterns reach the corners you aimed. Lower keeps them a bit inside the floor.</p>
     <div class="sizegrid">
       <div>
         <div class="slider"><div class="top"><label>Width</label><input id="wn" class="num" type="number" min="20" max="300"></div><input id="w" type="range" min="20" max="300" step="1"></div>
-        <div class="slider"><div class="top"><label>Depth</label><input id="dn" class="num" type="number" min="20" max="300"></div><input id="d" type="range" min="20" max="300" step="1"></div>
+        <div class="slider"><div class="top"><label id="dlab">Depth</label><input id="dn" class="num" type="number" min="20" max="300"></div><input id="d" type="range" min="20" max="300" step="1"></div>
         <div class="row"><label class="link"><input id="lnk" type="checkbox" checked> Same both ways</label><div class="grow"></div>
           <div class="chips"><span class="chip" data-v="80">80</span><span class="chip" data-v="90">90</span><span class="chip" data-v="100">100</span><span class="chip" data-v="110">110</span><span class="chip" data-v="120">120</span></div></div>
       </div>
@@ -252,7 +323,7 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
         <rect id="floor" x="60" y="45" width="180" height="120" fill="none" stroke="#5d6574" stroke-dasharray="5 4" rx="4"/>
         <rect id="pat" x="60" y="45" width="180" height="120" fill="rgba(255,176,32,.16)" stroke="#ffb020" stroke-width="2" rx="6"/>
         <circle cx="150" cy="105" r="4" fill="#ffb020"/>
-        <text x="150" y="200" fill="#5d6574" font-size="10" text-anchor="middle">dashed = dancefloor &middot; amber = patterns</text>
+        <text id="svgl" x="150" y="200" fill="#5d6574" font-size="10" text-anchor="middle">dashed = dancefloor &middot; amber = patterns</text>
       </svg>
     </div>
   </section>
@@ -267,8 +338,8 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
     <div id="rtinst" class="warnbox"></div>
     <div id="rtlegend" class="legend2"></div>
     <div id="rtmap" class="rtmap"></div>
-    <div class="row" style="margin-top:12px"><label class="link"><input id="rtextra" type="checkbox"> Bigger event: 2 extra towers (left and right middle)</label><div class="grow"></div>
-      <label class="link"><input id="rtrig" type="checkbox" checked> Also update Tonight's Rig (heads not on a truss = not hung)</label></div>
+    <div class="row" style="margin-top:12px"><label class="link"><input id="rtextra" type="checkbox"> Bigger event: 2 extra towers (top middle and bottom middle)</label><div class="grow"></div>
+      <label class="link"><input id="rtrig" type="checkbox" checked> Also update Tonight's Rig and Skip Flash (heads not on a truss = not hung)</label></div>
   </section>
  </div>
 
@@ -278,6 +349,28 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
     <p class="sub">One look before the guests arrive: the show, your gear and the laptop. Checking changes nothing.</p>
     <div id="presum" class="summary"></div>
     <div id="prelist"></div>
+  </section>
+ </div>
+
+ <div class="view" id="v-color">
+  <section class="card">
+    <div class="row"><div class="grow"><h2>Tonight's color</h2>
+      <p class="sub" style="margin-bottom:0">The decor colour for tonight. Saving makes two ShowXpress buttons called <b>TONIGHTS COLOR</b>: on the MOVER COLORS page (every mover on the nearest colour of its wheel, colour only &mdash; it goes on top of any movement) and on the UPLIGHTS page (the uplights in exactly this colour).</p></div>
+      <span id="clstate" class="state ok" style="display:none"></span><button id="clrefresh">&#8635; Refresh</button></div>
+    <div id="clerr" class="warnbox"></div>
+    <div class="clwrap">
+      <div>
+        <div class="gh"><h3>QUICK PICKS</h3></div><div id="clpal" class="clpal"></div>
+        <div class="gh" style="margin-top:18px"><h3>ANY COLOUR</h3></div>
+        <div class="row" style="align-items:flex-start;gap:22px"><div id="clwheel" class="wheel"><i id="clknob"></i></div>
+          <div><div class="row"><input id="clpick" type="color" title="Colour picker"><input id="clhex" class="srch" style="width:110px" maxlength="7" placeholder="#RRGGBB"></div>
+            <div class="slider" style="width:230px"><div class="top"><label>Brightness</label></div><input id="clval" type="range" min="10" max="100" step="1"></div>
+            <p class="sub" style="margin:0;max-width:240px">Tap or drag on the wheel. The uplights get exactly this colour; the movers only have their wheel colours.</p></div></div>
+      </div>
+      <div><div id="clbig" class="clbig"></div>
+        <input id="clname" class="srch" style="width:100%" maxlength="30" placeholder="Name (optional), e.g. Blush">
+        <div id="clmap" class="kv" style="grid-template-columns:86px 1fr"></div></div>
+    </div>
   </section>
  </div>
 
@@ -315,7 +408,7 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
  <div class="view" id="v-apc">
   <section class="card">
     <div class="row"><div class="grow"><h2>APC mini pads</h2>
-      <p class="sub" style="margin-bottom:0">The 8&times;8 grid as it sits on the controller (top row first), in each pad's own colours. Tap a pad, then tap where it should go.</p></div>
+      <p class="sub" style="margin-bottom:0">The 8&times;8 grid as it sits on the controller (top row first), in each pad's own colours. Tap a pad, then tap where it should go &mdash; or pick its colours.</p></div>
       <span id="apstate" class="state ok" style="display:none"></span><button id="aprefresh">&#8635; Refresh</button></div>
     <div id="aperr" class="warnbox"></div>
     <div class="apcwrap"><div id="apgrid" class="apc"></div><div id="apside" class="apside"></div></div>
@@ -348,8 +441,10 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
   <section id="result" class="card result"><h2 id="rtitle"></h2><div id="rbody"></div><details><summary>Full details</summary><pre id="rlog"></pre></details></section>
   <div class="foot" id="foot"></div>
 </main>
-<div class="bar"><div class="in" data-for="rt"><button id="rtsave" class="primary">Save to 2D view</button><button id="rtclear">New event (clear spots)</button><button id="rtundo">Undo changes</button><div class="hint grow" id="rthint"></div></div>
-  <div class="in" data-for="pre"><button id="prerun" class="primary">Check again</button><div class="hint grow" id="prehint"></div></div>
+<div class="bar"><div class="in" data-for="home"><div class="hint grow">Pick a tab above to start. Nothing in the show changes until you save in a tab.</div></div>
+  <div class="in" data-for="color"><button id="clsave" class="primary">Save tonight's color</button><button id="clundo">Undo changes</button><div class="hint grow" id="clhint"></div></div>
+  <div class="in" data-for="rt"><button id="rtsave" class="primary">Save to 2D view</button><button id="rtclear">New event (clear spots)</button><button id="rtundo">Undo changes</button><div class="hint grow" id="rthint"></div></div>
+  <div class="in" data-for="pre"><button id="prerun" class="primary">Check again</button><button id="pregd">Sync to Google Drive</button><div class="hint grow" id="prehint"></div></div>
   <div class="in" data-for="aim"><button id="apply" class="primary">Apply to show</button><button id="home">Reset to normal</button><div class="hint grow" id="hint"></div></div>
   <div class="in" data-for="skip"><button id="sksave" class="primary">Save to SKIP FLASH</button><button id="skundo">Undo changes</button><div class="hint grow" id="skhint"></div></div>
   <div class="in" data-for="rig"><button id="rgsave" class="primary">Save tonight's rig</button><button id="rgall">All heads (put back)</button><button id="rgundo">Undo changes</button><div class="hint grow" id="rghint"></div></div>
@@ -363,7 +458,7 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
 <script>
 const T='__TOKEN__';const $=id=>document.getElementById(id);
 let P=null,sxOpen=false,linked=true;
-async function api(p,body){const r=await fetch(p+'?t='+T,body?{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)}:{});return r.json();}
+async function api(p,body){const r=await fetch(p+(p.includes('?')?'&':'?')+'t='+T,body?{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)}:{});return r.json();}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function sign(v){return (v>0?'+':'')+v;}
 function tile(h){const moved=h.op||h.ot,cls=['tile',moved?'moved':'',h.sized?'sized':'',h.warn?'warn':''].join(' ');
@@ -373,14 +468,20 @@ function tile(h){const moved=h.op||h.ot,cls=['tile',moved?'moved':'',h.sized?'si
 function render(){if(!P)return;
  if(!P.ok){$('summary').innerHTML='<span style="color:var(--red)">'+esc(P.error)+'</span>';$('heads').innerHTML='';$('warnbox').style.display='none';updBar();return;}
  const hs=P.heads,a=hs.filter(h=>h.is140),b=hs.filter(h=>!h.is140),moved=hs.filter(h=>h.op||h.ot).length,sized=hs.filter(h=>h.sized).length,w=hs.filter(h=>h.warn);
- $('summary').innerHTML=`<b>${a.length}</b> &times; 140SR &middot; <b>${b.length}</b> &times; 251SR &nbsp;&mdash;&nbsp; <b>${moved}</b> re-aimed &middot; <b>${sized}</b> with a corner set`+(w.length?` &middot; <b style="color:var(--red)">${w.length} look wrong</b>`:'');
- $('heads').innerHTML=`<div class="group"><h3>140SR</h3><div class="tiles">${a.map(tile).join('')}</div></div><div class="group"><h3>251SR</h3><div class="tiles">${b.map(tile).join('')}</div></div>`;
+ $('summary').innerHTML=`<b>${a.length}</b> &times; 140SR${b.length?` &middot; <b>${b.length}</b> &times; 251SR`:''} &nbsp;&mdash;&nbsp; <b>${moved}</b> re-aimed &middot; <b>${sized}</b> with a corner set`+(w.length?` &middot; <b style="color:var(--red)">${w.length} look wrong</b>`:'');
+ $('heads').innerHTML=`<div class="group"><h3>140SR</h3><div class="tiles">${a.map(tile).join('')}</div></div>`+(b.length?`<div class="group"><h3>251SR</h3><div class="tiles">${b.map(tile).join('')}</div></div>`:'');
+ const ins=P.install,ib=$('aiminst');
+ if(aimMode==='room'&&ins&&(!ins.aim||!ins.check)){ib.style.display='block';ib.innerHTML='<b>ROOM AIM (ADJUST)</b> and <b>ROOM CHECK</b> aren&rsquo;t on the SETUP page yet. <button id="aiminstb" class="mini primary" style="margin-left:8px"'+(sxOpen?' disabled':'')+'>Add them to the SETUP page</button>';
+  $('aiminstb').onclick=()=>saveTo('/api/aim/install',{},'Adding the ROOM buttons…',async()=>{LD.room=0;await load();},'roominstall');}else ib.style.display='none';
  const wb=$('warnbox');if(w.length){wb.style.display='block';wb.innerHTML='<b>Check these heads:</b> '+w.map(h=>esc(h.label)+' &ndash; '+esc(h.warn)).join('<br>');}else wb.style.display='none';
  $('foot').textContent='Show: '+P.show;updBar();}
 function updBar(){const bad=!P||!P.ok;$('apply').disabled=sxOpen||bad;$('home').disabled=sxOpen||bad;
- $('hint').innerHTML=sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to apply.</span>':(bad?'':'Writes to all dancefloor movement scenes. Nothing is changed until you press Apply.');}
-async function load(){$('summary').textContent='Loading…';try{P=await api('/api/preview');}catch(e){P={ok:false,error:'Could not read the show.'}}
- if(P.ok&&!load.done){setW(P.lastW);setD(P.lastD);$('lnk').checked=linked=(P.lastW===P.lastD);load.done=1;}render();}
+ $('hint').innerHTML=sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to apply.</span>':(bad?'':(aimMode==='room'?'Writes to '+esc((P.targets||[]).filter(t=>!/CHECK/.test(t)).join(', ')||'AROUND ROOM'):'Writes to all dancefloor movement scenes')+'. Nothing is changed until you press Apply.');}
+let aimMode='floor';const PM={floor:null,room:null},LD={};
+const aimT=()=>(P&&P.aimTitle)||(aimMode==='room'?'ROOM AIM (ADJUST)':'DF AIM (ADJUST)');
+async function load(){const m=aimMode;$('summary').textContent='Loading…';let p;try{p=await api('/api/preview'+(m==='room'?'?mode=room':''));}catch(e){p={ok:false,error:'Could not read the show.'}}
+ PM[m]=p;if(aimMode!==m)return;P=p;
+ if(P.ok&&!LD[m]){setW(P.lastW);setD(P.lastD);$('lnk').checked=linked=(P.lastW===P.lastD);LD[m]=1;}render();}
 function clamp(v){v=Math.round(+v||100);return Math.max(20,Math.min(300,v));}
 function setW(v){v=clamp(v);$('w').value=$('wn').value=v;if(linked){$('d').value=$('dn').value=v;}draw();}
 function setD(v){v=clamp(v);$('d').value=$('dn').value=v;if(linked){$('w').value=$('wn').value=v;}draw();}
@@ -394,37 +495,42 @@ function ask(t,p,yes){return new Promise(res=>{$('mt').textContent=t;$('mp').inn
 function busy(on,t){$('busy').style.display=on?'flex':'none';if(t)$('busyt').textContent=t;}
 function showResult(r,what){const box=$('result');box.className='card result '+(r.ok?'ok':'err');
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(['skip','rig','apc','speed','fix','revert','keep','rt','install'].includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
- else if(['rig','apc','speed','fix','revert','keep','rt','install'].includes(what)){const same=lines.some(l=>/nothing to change/.test(l));
-  const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept'}[what]);
-  $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(what==='keep'?'':'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(what==='rig'||what==='apc'||what==='speed'||what==='rt'||what==='install'?'use':'check')+' it.</p>');}
+ const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','prefix','roominstall','sx','update'];
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
+  const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened'}[what]);
+  const use=['rig','apc','speed','rt','install','color','roominstall'].includes(what),chk=['fix','revert'].includes(what);
+  $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(use||chk?'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(use?'use':'check')+' it.</p>':'');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
   $('rbody').innerHTML='<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul><p class="sub" style="margin:8px 0 0">Open ShowXpress and press <b>SKIP FLASH</b> to check it.</p>';}
  else{const tot=lines.find(l=>/movement scenes checked/.test(l))||'';const ch=lines.filter(l=>/\s[1-9]\d* values changed/.test(l)).map(l=>l.trim().replace(/\s{2,}/g,' — '));
   const wr=lines.filter(l=>/WARNING/.test(l)).map(l=>l.replace(/^\s*WARNING:\s*/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(what==='home'?'Everything is back to normal':'Applied to the show');
-  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+esc(tot.replace(/^\s*->\s*/,''))+'. '+(what==='home'?'':'Open ShowXpress and check <b>DF CHECK 140</b> / <b>DF CHECK 251</b> &mdash; the beams should trace the floor corners.')+'</p>'+
+  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+esc(tot.replace(/^\s*->\s*/,''))+'. '+(what==='home'?'':aimMode==='room'?'Open ShowXpress and check <b>ROOM CHECK</b> &mdash; the beams should trace the edge you aimed.':'Open ShowXpress and check <b>DF CHECK 140</b> / <b>DF CHECK 251</b> &mdash; the beams should trace the floor corners.')+'</p>'+
    (ch.length?'<ul>'+ch.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul>':'')+(wr.length?'<div class="warnbox" style="display:block">'+wr.map(esc).join('<br>')+'</div>':'');}
  box.scrollIntoView({behavior:'smooth'});}
 $('apply').onclick=async()=>{let force=false;const w=P.heads.filter(h=>h.warn);
- if(w.length){if(!await ask(w.length+' head(s) look wrong','Their aims in DF AIM (ADJUST) look far off the floor &mdash; usually step 1 / step 2 not aimed yet.<br><br>Apply anyway?','Apply anyway'))return;force=true;}
- busy(true,'Applying to the show…');try{const r=await api('/api/apply',{w:+$('w').value,d:+$('d').value,force});showResult(r,'apply');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load();};
-$('home').onclick=async()=>{if(!await ask('Reset to normal?','All heads go back to the normal center, size 100%, and the DF AIM (ADJUST) scene is reset. Your shapes are kept.','Reset'))return;
- busy(true,'Resetting…');try{const r=await api('/api/home',{});showResult(r,'home');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load.done=0;load();};
+ if(w.length){if(!await ask(w.length+' head(s) look wrong','Their aims in '+esc(aimT())+' look far off the floor &mdash; usually step 1 / step 2 not aimed yet.<br><br>Apply anyway?','Apply anyway'))return;force=true;}
+ busy(true,'Applying to the show…');try{const r=await api('/api/apply',{w:+$('w').value,d:+$('d').value,force,mode:aimMode});showResult(r,'apply');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load();};
+$('home').onclick=async()=>{if(!await ask('Reset to normal?','All heads go back to the normal center, size 100%, and the '+esc(aimT())+' scene is reset. Your shapes are kept.','Reset'))return;
+ busy(true,'Resetting…');try{const r=await api('/api/home',{mode:aimMode});showResult(r,'home');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);LD[aimMode]=0;load();};
 async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
- p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();
- if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();}}catch(e){$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+ p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
+ updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();const ib=$('aiminstb');if(ib)ib.disabled=sxOpen;
+ if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
+ catch(e){if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['rt','rig','aim','skip','apc','speed','health','pre'];
-function setTab(t){if(!TABS.includes(t))t='rt';try{localStorage.setItem('tab',t)}catch(e){}
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre'];
+function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();}
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='home')loadGd();}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+$('logo').onclick=$('ttl').onclick=()=>setTab('home');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
 // ---------------- Skip Flash heads
 let S=null,sel=new Set();
@@ -504,11 +610,14 @@ $('rgsave').onclick=()=>saveTo('/api/rig/apply',{heads:[...rsel]},'Saving tonigh
 
 // ---------------- APC mini (pad colours = APC mini mk2 velocity palette)
 const PAL='000000 1E1E1E 7F7F7F FFFFFF FF4C4C FF0000 590000 190000 FFBD6C FF5400 591D00 271B00 FFFF4C FFFF00 595900 191900 88FF4C 54FF00 1D5900 142B00 4CFF4C 00FF00 005900 001900 4CFF5E 00FF19 00590D 001902 4CFF88 00FF55 00591D 001F12 4CFFB7 00FF99 005935 001912 4CC3FF 00A9FF 004152 001019 4C88FF 0055FF 001D59 000819 4C4CFF 0000FF 000059 000019 874CFF 5400FF 190064 0F0030 FF4CFF FF00FF 590059 190019 FF4C87 FF0054 59001D 220013 FF1500 993500 795100 436400 033900 005735 00547F 0000FF 00454F 2500CC 7F7F7F 202020 FF0000 BDFF2D AFED06 64FF09 108B00 00FF87 00A9FF 002AFF 3F00FF 7A00FF B21A7D 402100 FF4A00 88E106 72FF15 00FF00 3BFF26 59FF71 38FFCC 5B8AFF 3151C6 877FE9 D31DFF FF005D FF7F00 B9B000 90FF00 835D07 392B00 144C10 0D5038 15152A 16205A 693C1C A8000A DE513D D86A1C FFE126 9EE12F 67B50F 1E1E30 DCFF6B 80FFBD 9A99FF 8E66FF 404040 757575 E0FFFF A00000 350000 1AD000 074200 B9B000 3F3100 B35F00 4B1502'.split(' ');
-let A=null,apN={},apSel=null,apMsg='';
+let A=null,apN={},apC={},apSel=null,apMsg='';
+const apOn=p=>(apC[p.sec]||p).on,apOff=p=>(apC[p.sec]||p).off,colChg=p=>!!apC[p.sec]&&(apC[p.sec].on!==p.on||apC[p.sec].off!==p.off);
+const SWB=[5,9,13,17,21,29,33,37,41,45,49,53,57,3],SWD=[6,10,14,18,22,30,34,38,42,46,50,54,58,1];
+function swRow(k,cur){return [...SWB,...SWD,0].map(v=>`<i class="psw${v===cur?' cur':''}" data-sw="${k}" data-v="${v}" style="background:#${PAL[v]}" title="${v?'colour '+v:'off'}"></i>`).join('');}
 const rc=n=>'row '+(8-Math.floor(n/8))+', column '+(n%8+1);
 const onGrid=p=>p.type===0&&apN[p.sec]>=0&&apN[p.sec]<=63;
-function apDirty(){return !!(A&&A.ok&&A.pads.some(p=>apN[p.sec]!==p.note));}
-async function loadApc(){A=await getJ('/api/apc');apN={};apSel=null;apMsg='';if(A.ok)A.pads.forEach(p=>apN[p.sec]=p.note);renderApc();}
+function apDirty(){return !!(A&&A.ok&&A.pads.some(p=>apN[p.sec]!==p.note||colChg(p)));}
+async function loadApc(){A=await getJ('/api/apc');apN={};apC={};apSel=null;apMsg='';if(A.ok)A.pads.forEach(p=>apN[p.sec]=p.note);renderApc();}
 function padsAt(n){return A.pads.filter(p=>onGrid(p)&&apN[p.sec]===n);}
 function padClick(n){const here=padsAt(n);
  if(apSel){const sp=A.pads.find(p=>p.sec===apSel),from=apN[apSel];
@@ -522,16 +631,18 @@ function renderApc(){if(!A)return;
  let h='',used=0;const free=[];
  for(let r=1;r<=8;r++)for(let c=1;c<=8;c++){const n=(8-r)*8+(c-1),ps=padsAt(n),p=ps.find(x=>x.sec===apSel)||ps[0];
   if(!p){free.push('row '+r+' col '+c);h+=`<div class="pad empty${apSel?' tgt':''}" data-n="${n}" title="${rc(n)} - free"><div class="t">free</div></div>`;continue;}
-  used++;const mv=ps.some(x=>apN[x.sec]!==x.note),bg=PAL[p.off]||'151820',on=PAL[p.on]||'444444';
+  used++;const mv=ps.some(x=>apN[x.sec]!==x.note||colChg(x)),bg=PAL[apOff(p)]||'151820',on=PAL[apOn(p)]||'444444';
   h+=`<div class="pad${ps.some(x=>x.sec===apSel)?' sel':''}${apSel?' tgt':''}${mv?' mv':''}${ps.length>1?' dup':''}${p.sceneOk?'':' miss'}" data-n="${n}" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${bg}" title="${esc(ps.map(x=>x.title+' ('+x.pageName+')').join(' + '))} - ${rc(n)}">`+
    `<div class="on" style="background:#${on}"></div>${ps.length>1?`<span class="badge">${ps.length}</span>`:''}<div class="t">${esc(p.title)}</div><div class="p">${esc(p.pageName)}</div></div>`;}
  $('apgrid').innerHTML=h;document.querySelectorAll('.pad').forEach(e=>e.onclick=()=>padClick(+e.dataset.n));
  const sp=apSel&&A.pads.find(p=>p.sec===apSel);
  if(sp){const n=apN[sp.sec],where=n<0?'none &mdash; will be taken off':onGrid(sp)?rc(n):'note '+n+' (not a pad)';
   $('apside').innerHTML=`<h3>${esc(sp.title)}</h3><div class="kv"><span>Page</span><b>${esc(sp.pageName)}</b><span>Scene</span><b>${sp.sceneOk?esc(sp.scene):'<span style="color:var(--red)">'+esc(sp.scene)+' &mdash; missing!</span>'}</b>`+
-   `<span>Pad</span><b>${where}${n!==sp.note?' <span class="tag blue">moved</span>':''}</b><span>Light</span><b><span class="sw" style="background:#${PAL[sp.on]||'000000'}"></span>on &nbsp; <span class="sw" style="background:#${PAL[sp.off]||'000000'}"></span>off</b>${sp.key?`<span>Key</span><b>${esc(sp.key)}</b>`:''}</div>`+
-   `<p class="sub" style="margin:0 0 10px">${apMsg||'Now tap the pad it should go to. Tapping a used pad swaps the two.'}</p><div class="row"><button id="apdel">Take off the pads</button><button id="apcancel">Done</button></div>`;
-  $('apdel').onclick=()=>{apN[sp.sec]=-1;apSel=null;apMsg='';renderApc();};$('apcancel').onclick=()=>{apSel=null;apMsg='';renderApc();};}
+   `<span>Pad</span><b>${where}${n!==sp.note?' <span class="tag blue">moved</span>':''}</b><span>Light</span><b><span class="sw" style="background:#${PAL[apOn(sp)]||'000000'}"></span>playing &nbsp; <span class="sw" style="background:#${PAL[apOff(sp)]||'000000'}"></span>idle${colChg(sp)?' <span class="tag blue">changed</span>':''}</b>${sp.key?`<span>Key</span><b>${esc(sp.key)}</b>`:''}</div>`+
+   (onGrid(sp)&&apN[sp.sec]>=0?`<div class="pcl"><span>Colour while playing</span><div class="pals">${swRow('on',apOn(sp))}</div><span>Colour when idle</span><div class="pals">${swRow('off',apOff(sp))}</div></div>`:'')+
+   `<p class="sub" style="margin:0 0 10px">${apMsg||'Tap a colour to change it, or tap the pad it should go to. Tapping a used pad swaps the two.'}</p><div class="row"><button id="apdel">Take off the pads</button><button id="apcancel">Done</button></div>`;
+  $('apdel').onclick=()=>{apN[sp.sec]=-1;apSel=null;apMsg='';renderApc();};
+  document.querySelectorAll('[data-sw]').forEach(e=>e.onclick=()=>{const c=apC[sp.sec]||{on:sp.on??21,off:sp.off??0};c[e.dataset.sw]=+e.dataset.v;apC[sp.sec]=c;renderApc();});$('apcancel').onclick=()=>{apSel=null;apMsg='';renderApc();};}
  else $('apside').innerHTML=`<h3>Move a pad</h3><p class="sub" style="margin:0 0 8px">Tap a pad to see what it plays, then tap where it should go. A blue dot = moved, not saved yet.</p>${apMsg?'<p class="sub" style="color:var(--amber)">'+apMsg+'</p>':''}<div class="kv"><span>Pads used</span><b>${used} of 64</b><span>Free</span><b>${free.join(', ')||'none'}</b></div>`;
  $('apfaders').innerHTML=(A.faders||[]).map(f=>`<div class="fd"><b>Fader ${f.n}</b><span>CC ${f.cc} &rarr; </span>${esc(f.caption||'?')} speed</div>`).join('');
  const iss=[];
@@ -545,9 +656,9 @@ function renderApc(){if(!A)return;
  document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{apSel=b.dataset.pick;apMsg='Tap a free pad to put it there.';renderApc();window.scrollTo({top:0,behavior:'smooth'});});
  stateTag('apstate',apDirty());$('foot').textContent='Show: '+A.show;updApc();}
 function updApc(){const ok=!!(A&&A.ok),d=apDirty();$('apsave').disabled=sxOpen||!ok||!d;$('apundo').disabled=!ok||!d;
- $('aphint').innerHTML=!ok?'':sxHint('save')??(d?A.pads.filter(p=>apN[p.sec]!==p.note).length+' button(s) changed. Only the pad notes in live.ini change &mdash; the pad colours move with them.':'Pads match the show.');}
-$('aprefresh').onclick=loadApc;$('apundo').onclick=()=>{A.pads.forEach(p=>apN[p.sec]=p.note);apSel=null;apMsg='';renderApc();};
-$('apsave').onclick=()=>saveTo('/api/apc/apply',{changes:A.pads.filter(p=>apN[p.sec]!==p.note).map(p=>({sec:p.sec,title:p.title,note:apN[p.sec]}))},'Saving pads…',async()=>{await loadApc();SP=null;H=null;},'apc');
+ $('aphint').innerHTML=!ok?'':sxHint('save')??(d?A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).length+' button(s) changed. Only the pad notes and pad colours in live.ini change.':'Pads match the show.');}
+$('aprefresh').onclick=loadApc;$('apundo').onclick=()=>{A.pads.forEach(p=>apN[p.sec]=p.note);apC={};apSel=null;apMsg='';renderApc();};
+$('apsave').onclick=()=>saveTo('/api/apc/apply',{changes:A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).map(p=>{const c={sec:p.sec,title:p.title,note:apN[p.sec]};if(colChg(p)&&apN[p.sec]>=0){c.on=apC[p.sec].on;c.off=apC[p.sec].off;}return c;})},'Saving pads…',async()=>{await loadApc();SP=null;H=null;},'apc');
 
 // ---------------- Speed faders
 let SP=null,spF={},spOnly=-1;
@@ -621,10 +732,10 @@ function renderRt(){if(!RT)return;
  $('rtextra').checked=rtX;
  const a0=RT.assign||{},placed=new Set(Object.entries(rtA).filter(([k,v])=>v&&rtUsed(k)).map(([k,v])=>v));
  const tower=t=>{const ss=RT.slots.filter(s=>s.tower===t),ex=ss[0].extra;
-  return `<div class="tw${ex&&!rtX?' off':''}" style="grid-column:${t.endsWith('l')?1:3};grid-row:${t[0]==='t'?1:t[0]==='m'?2:3}"><h4>${esc(ss[0].towerName)} tower</h4><div class="pr">`+ss.map(s=>{const id=rtA[s.key],h=id&&rtHead(id),chg=(a0[s.key]||'')!==(id||'');
+  return `<div class="tw${ex&&!rtX?' off':''}" style="grid-column:${t[1]==='l'?1:t[1]==='m'?2:3};grid-row:${t[0]==='t'?1:3}"><h4>${esc(ss[0].towerName)} tower</h4><div class="pr">`+ss.map(s=>{const id=rtA[s.key],h=id&&rtHead(id),chg=(a0[s.key]||'')!==(id||'');
    return `<div class="slot${h?' set':''}${chg?' chg':''}" data-slot="${s.key}"><span class="sd">${s.side} mover</span>${h?`${lookHtml(h)}<b>#${h.num}</b><br><small>${esc(h.look)}${h.flash?' flashing':''}</small>`:'<small>tap to set</small>'}</div>`;}).join('')+'</div></div>';};
  const spare=RT.heads.filter(h=>!placed.has(h.id));
- $('rtmap').innerHTML=['tl','tr','ml','mr','bl','br'].map(tower).join('')+
+ $('rtmap').innerHTML=['tl','tm','tr','bl','bm','br'].map(tower).join('')+
   `<div class="mid">${spare.length?`<div>Not on a truss &mdash; grouped in the middle of the 2D page</div><div class="sp2">${spare.map(h=>`<span>#${h.num}</span>`).join('')}</div>`:'Every 140 is on a truss'}</div><div class="dj">&#9650; DJ BOOTH (you) &#9650;</div>`;
  document.querySelectorAll('[data-slot]').forEach(e=>e.onclick=()=>rtOpen(e.dataset.slot));
  stateTag('rtstate',rtDirty());$('foot').textContent='Show: '+RT.show+(RT.saved?' · Rig Test last saved '+RT.saved.replace('T',' '):'');updRt();}
@@ -640,7 +751,7 @@ $('rtextra').onchange=e=>{rtX=e.target.checked;renderRt();};
 function rtCount(){return Object.entries(rtA).filter(([k,v])=>v&&rtUsed(k)).length;}
 function updRt(){const ok=!!(RT&&RT.ok),d=rtDirty(),n=ok?rtCount():0;$('rtsave').disabled=sxOpen||!ok||!n;$('rtundo').disabled=!ok||!d;$('rtclear').disabled=!ok||!Object.keys(rtA).length;
  const ib=$('rtinstb');if(ib)ib.disabled=sxOpen;
- $('rthint').innerHTML=!ok?'':sxHint('save (it rewrites the 2D view when it closes)')??(!n?'<span style="color:var(--amber)">Put at least one mover on a truss.</span>':n+' mover(s) on trusses. Only the 140 positions in the 2D view change'+($('rtrig').checked?', plus Tonight\'s Rig.':'.'));}
+ $('rthint').innerHTML=!ok?'':sxHint('save (it rewrites the 2D view when it closes)')??(!n?'<span style="color:var(--amber)">Put at least one mover on a truss.</span>':n+' mover(s) on trusses. Only the 140 positions in the 2D view change'+($('rtrig').checked?', plus Tonight\'s Rig and SKIP FLASH.':'.'));}
 $('rtrig').onchange=updRt;$('rtrefresh').onclick=loadRt;
 $('rtundo').onclick=()=>{rtA=Object.assign({},RT.assign||{});rtX=!!RT.extra;renderRt();};
 $('rtclear').onclick=()=>{rtA={};renderRt();};
@@ -648,21 +759,102 @@ $('rtsave').onclick=()=>{const a={};for(const [k,v] of Object.entries(rtA))if(v&
  saveTo('/api/rt/apply',{assign:a,extra:rtX,rig:$('rtrig').checked},'Saving the 2D view…',async()=>{await loadRt();R=null;S=null;H=null;},'rt');};
 
 // ---------------- Pre-show check (preshow.ps1 + the health check)
-async function loadPre(){$('presum').innerHTML='Checking&hellip;';$('prelist').innerHTML='';const [p,h]=await Promise.all([getJ('/api/pre'),H?Promise.resolve(H):getJ('/api/health')]);
- if(h&&h.ok)H=h;if(!p.ok){$('presum').innerHTML='<span style="color:var(--red)">'+esc(p.error)+'</span>';return;}
+let PRE=[];
+async function loadPre(){$('presum').innerHTML='Checking&hellip;';$('prelist').innerHTML='';const [p,h,gd]=await Promise.all([getJ('/api/pre'),H?Promise.resolve(H):getJ('/api/health'),getJ('/api/gdrive')]);
+ if(h&&h.ok)H=h;if(gd&&gd.ok){G=gd;updGd();}if(!p.ok){$('presum').innerHTML='<span style="color:var(--red)">'+esc(p.error)+'</span>';return;}
  const it=[...p.items];
- if(h&&h.ok){const e=(h.issues||[]).filter(i=>i.level==='error').length,w=(h.issues||[]).filter(i=>i.level==='warn').length;
-  it.splice(2,0,e?{group:'Show',level:'error',title:'Health Check: '+e+' problem(s) in the show',detail:w?w+' warning(s) too.':'',advice:'Open the Health Check tab and look at the red ones.'}:
-   w?{group:'Show',level:'warn',title:'Health Check: '+w+' warning(s)',detail:'No real problems.',advice:'Have a look in the Health Check tab if you have time.'}:{group:'Show',level:'ok',title:'Health Check: no problems in the show',detail:'',advice:''});}
+ if(h&&h.ok){const e=(h.issues||[]).filter(i=>i.level==='error').length,w=(h.issues||[]).filter(i=>i.level==='warn').length,fx={key:'tab:health',label:'Open Health Check'};
+  it.splice(2,0,e?{group:'Show',level:'error',title:'Health Check: '+e+' problem(s) in the show',detail:w?w+' warning(s) too.':'',advice:'Open the Health Check tab and look at the red ones.',fix:fx}:
+   w?{group:'Show',level:'warn',title:'Health Check: '+w+' warning(s)',detail:'No real problems.',advice:'Have a look in the Health Check tab if you have time.',fix:fx}:{group:'Show',level:'ok',title:'Health Check: no problems in the show',detail:'',advice:''});}
+ if(gd&&gd.ok){const today=gd.last&&new Date(gd.last).toDateString()===new Date().toDateString();
+  it.push(!gd.found?{group:'Show',level:'info',title:'Google Drive not found on this laptop',detail:'The show can&rsquo;t be backed up to Google Drive > AWAAZ > Lighting.',advice:'Install Google Drive for desktop and sign in.'}:
+   today?{group:'Show',level:'ok',title:'Backed up to Google Drive '+fmtT(gd.last),detail:'',advice:''}:
+   {group:'Show',level:'warn',title:gd.last?'Last backed up to Google Drive '+fmtT(gd.last):'Show not backed up to Google Drive yet',detail:'A copy in Google Drive > AWAAZ > Lighting saves the night if this laptop dies.',advice:'Close ShowXpress (save first), sync, then open it again.',fix:{key:'gsync',label:'Sync now'}});}
+ PRE=it;
  const c=l=>it.filter(i=>i.level===l).length;
  $('presum').innerHTML=c('error')?`<b style="color:var(--red)">${c('error')} thing(s) to fix</b> before the show &middot; ${c('warn')} to check`:c('warn')?`<b style="color:var(--amber)">${c('warn')} thing(s) to check</b> &mdash; nothing broken`:'<b style="color:var(--green)">&#10003; All good &mdash; ready for the show</b>';
  const groups=[...new Set(it.map(i=>i.group))];
- $('prelist').innerHTML=groups.map(g=>`<div class="pgrp"><h3>${esc(g.toUpperCase())}</h3>`+it.filter(i=>i.group===g).map(i=>`<div class="iss ${i.level}"><div class="ic">${i.level==='ok'?'&#10003;':i.level==='error'?'!':i.level==='warn'?'?':'i'}</div><div class="grow"><b>${esc(i.title)}</b>${i.detail?`<div class="d">${esc(i.detail)}</div>`:''}${i.advice&&i.level!=='ok'?`<div class="fx"><b>Fix:</b> ${esc(i.advice)}</div>`:''}</div></div>`).join('')+'</div>').join('');
- $('prehint').textContent='Checked at '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. Checking changes nothing.';$('foot').textContent='Show: '+p.show;}
-$('prerun').onclick=()=>{H=null;loadPre();};
+ $('prelist').innerHTML=groups.map(g=>`<div class="pgrp"><h3>${esc(g.toUpperCase())}</h3>`+it.filter(i=>i.group===g).map(i=>`<div class="iss ${i.level}"><div class="ic">${i.level==='ok'?'&#10003;':i.level==='error'?'!':i.level==='warn'?'?':'i'}</div><div class="grow"><b>${esc(i.title)}</b>${i.detail?`<div class="d">${esc(i.detail)}</div>`:''}${i.advice&&i.level!=='ok'?`<div class="fx"><b>Fix:</b> ${esc(i.advice)}</div>`:''}</div>${i.fix&&i.level!=='ok'?`<div class="act"><button class="mini primary pfix" data-k="${esc(i.fix.key)}">${esc(i.fix.label)}</button></div>`:''}</div>`).join('')+'</div>').join('');
+ document.querySelectorAll('.pfix').forEach(b=>b.onclick=()=>preFix(b.dataset.k));updPre();
+ $('prehint').textContent='Checked at '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. Checking changes nothing; a fix button changes only what it says.';$('foot').textContent='Show: '+p.show;}
+function updPre(){document.querySelectorAll('.pfix').forEach(b=>{const k=b.dataset.k;b.disabled=sxOpen&&(k==='gsync'||k==='launch');b.title=b.disabled&&k==='gsync'?'Close ShowXpress first (save first)':'';});
+ $('pregd').disabled=sxOpen||!(G&&G.ok&&G.found);}
+async function preFix(k){const i=PRE.find(x=>x.fix&&x.fix.key===k);if(!i)return;
+ if(k.startsWith('tab:'))return setTab(k.slice(4));if(k==='launch')return sxLaunch();if(k==='gsync')return gdSync();
+ const msg={sleep:'Sets <b>When plugged in, PC goes to sleep after</b> to <b>Never</b>.',usb:'Turns <b>USB selective suspend</b> off when plugged in, so Windows never powers down the APC mini or the DMX interface.',restart:'<b>Windows restarts in 1 minute</b> to finish its updates. Save and close ShowXpress first. (Changed your mind? Run <b>shutdown /a</b>.)'}[k];
+ if(!await ask(i.title,msg||'',i.fix.label))return;
+ await saveTo('/api/pre/fix',{key:k},'Applying the fix…',loadPre,'prefix');}
+$('prerun').onclick=()=>{H=null;loadPre();};$('pregd').onclick=()=>gdSync();
 
-let t0='rt';try{t0=location.hash.slice(1)||localStorage.getItem('tab')||'rt'}catch(e){}
-setTab(t0);draw();load();poll();
+// ---------------- Aim Movers: Dance Floor / Room
+const AIMTXT={floor:{t:'Dance floor &mdash; tonight\'s aims',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight\'s dancefloor.','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.'],
+  depth:'Depth',size:'100% = patterns reach the corners you aimed. Lower keeps them a bit inside the floor.',svg:'dashed = dancefloor · amber = patterns'},
+ room:{t:'Room &mdash; AROUND ROOM for tonight',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the middle of where AROUND ROOM should sweep (the walls around the room).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the front-left edge of that sweep (from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below, Apply, and check with <b>ROOM CHECK</b>.'],
+  depth:'Height',size:'100% = AROUND ROOM reaches the edge you aimed. Width = across the room, Height = up and down the walls.',svg:'dashed = what you aimed · amber = AROUND ROOM'}};
+function aimTxt(){const x=AIMTXT[aimMode];$('aimttl').innerHTML=x.t;$('aimhow').innerHTML=x.how.map(h=>'<div>'+h+'</div>').join('');$('dlab').textContent=x.depth;$('sizesub').textContent=x.size;$('svgl').textContent=x.svg;$('aimsc').textContent=aimMode==='room'?'ROOM AIM (ADJUST)':'DF AIM (ADJUST)';}
+document.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{if(aimMode===b.dataset.am)return;aimMode=b.dataset.am;document.querySelectorAll('[data-am]').forEach(x=>x.classList.toggle('on',x===b));
+ aimTxt();$('aiminst').style.display='none';$('heads').innerHTML='';$('warnbox').style.display='none';$('result').className='card result';P=PM[aimMode];LD[aimMode]=0;render();load();});
+
+// ---------------- Tonight's Color (color.ps1)
+const CPRE=[['Red','ff0000'],['Wine','8b0a2a'],['Rose','ff2a6d'],['Blush','f4a6b8'],['Hot pink','ff3fa4'],['Magenta','ff00ff'],['Purple','8a2be2'],['Lavender','b48cff'],['Royal blue','1f3fff'],['Navy','0a1a6e'],['Sky blue','6ec8ff'],
+ ['Teal','00a8a8'],['Mint','7dffc4'],['Emerald','00b050'],['Lime','9aff00'],['Gold','ffb000'],['Yellow','ffee00'],['Peach','ffb38a'],['Orange','ff6a00'],['Warm white','ffd9a8'],['Cold white','e6f2ff']];
+let CL=null,clHex='',clV=100,clDrag=false;
+function hsv2hex(h,s,v){const f=n=>{const k=(n+h/60)%6;return v-v*s*Math.max(0,Math.min(k,4-k,1));};return [f(5),f(3),f(1)].map(x=>Math.round(x*255).toString(16).padStart(2,'0')).join('');}
+function hex2hsv(hx){const r=parseInt(hx.slice(0,2),16)/255,g=parseInt(hx.slice(2,4),16)/255,b=parseInt(hx.slice(4,6),16)/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
+ if(d){h=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4;h=(h*60+360)%360;}return [h,mx?d/mx:0,mx];}
+function nearest(w,hx){let c=[0,2,4].map(i=>parseInt(hx.substr(i,2),16));const mx=Math.max(1,...c);c=c.map(x=>x*255/mx);let best=null,bd=1e12;  // same rule as color.ps1
+ for(const e of w||[]){const r=[0,2,4].map(i=>parseInt(e.hex.substr(i,2),16)),d=.3*(c[0]-r[0])**2+.59*(c[1]-r[1])**2+.11*(c[2]-r[2])**2;if(d<bd){bd=d;best=e;}}return best;}
+function clDirty(){return !!(CL&&CL.ok&&clHex&&(clHex!==CL.hex||$('clname').value.trim()!==(CL.name||'')));}
+async function loadColor(){CL=await getJ('/api/color');if(CL.ok){clHex=CL.hex||'';$('clname').value=CL.name||'';clV=clHex?Math.max(10,Math.round(hex2hsv(clHex)[2]*100)):100;}renderColor();}
+function setColor(hx,name){clHex=hx.toLowerCase();if(name!==undefined)$('clname').value=name;clV=Math.max(10,Math.round(hex2hsv(clHex)[2]*100));renderColor();}
+function renderColor(){if(!CL)return;if(showErr('clerr',CL)){$('clstate').style.display='none';updColor();return;}
+ $('clpal').innerHTML=CPRE.map(([n,h])=>`<div class="cp${h===clHex?' cur':''}" data-ch="${h}" data-cn="${esc(n)}"><i style="background:#${h}"></i>${esc(n)}</div>`).join('');
+ document.querySelectorAll('[data-ch]').forEach(e=>e.onclick=()=>setColor(e.dataset.ch,e.dataset.cn));
+ const k=$('clknob');if(clHex){const [h,s]=hex2hsv(clHex),a=h*Math.PI/180;k.style.display='block';k.style.left=(100+Math.sin(a)*s*100)+'px';k.style.top=(100-Math.cos(a)*s*100)+'px';k.style.background='#'+clHex;}else k.style.display='none';
+ $('clval').value=clV;$('clwheel').style.filter='brightness('+Math.max(.25,clV/100)+')';
+ if(document.activeElement!==$('clhex'))$('clhex').value=clHex?'#'+clHex:'';$('clpick').value='#'+(clHex||'ffffff');
+ const big=$('clbig');big.style.background=clHex?'#'+clHex:'repeating-linear-gradient(45deg,#1d212a 0 10px,#171a21 10px 20px)';big.innerHTML='<span>'+(clHex?'#'+clHex:'pick a colour')+'</span>';
+ const n1=clHex&&nearest(CL.wheel140,clHex),n2=clHex&&nearest(CL.wheel251,clHex),sw=e=>e?`<span class="sw" style="background:#${e.hex}"></span>${esc(e.name)}`:'&mdash;',wa=CL.washes||[];
+ $('clmap').innerHTML=`<span>140 movers</span><b>${sw(n1)}</b><span>251 movers</span><b>${sw(n2)}</b><span>Uplights</span><b>${clHex?'<span class="sw" style="background:#'+clHex+'"></span>exact colour':'&mdash;'}${wa.length?'<br><small style="color:var(--dim)">'+esc(wa.join(', '))+'</small>':' &middot; <span style="color:var(--amber)">none found</span>'}</b>`+
+  (CL.hex?`<span>Saved</span><b><span class="sw" style="background:#${CL.hex}"></span>#${CL.hex}${CL.name?' '+esc(CL.name):''}${CL.saved?' &middot; '+fmtT(CL.saved):''}</b>`:'');
+ stateTag('clstate',clDirty());if(!CL.hex&&!clHex)$('clstate').style.display='none';$('foot').textContent='Show: '+CL.show;updColor();}
+function updColor(){const ok=!!(CL&&CL.ok),d=clDirty();$('clsave').disabled=sxOpen||!ok||!d;$('clundo').disabled=!ok||!d;
+ const miss=ok?(CL.buttons||[]).filter(b=>!b.there).map(b=>b.page):[];
+ $('clhint').innerHTML=!ok?'':sxHint('save')??(!clHex?'Pick a colour.':d?'Writes the two TONIGHTS COLOR scenes'+(miss.length?' and adds the button to the '+esc(miss.join(' and '))+' page'+(miss.length>1?'s':''):'')+'.':'This is tonight\'s colour already.');}
+function wheelAt(e){const r=$('clwheel').getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,s=Math.min(1,Math.hypot(x,y)/(r.width/2)),h=(Math.atan2(x,-y)*180/Math.PI+360)%360;
+ clHex=hsv2hex(h,s,clV/100);$('clname').value='';renderColor();}
+$('clwheel').onpointerdown=e=>{if(!CL||!CL.ok)return;clDrag=true;$('clwheel').setPointerCapture(e.pointerId);wheelAt(e);};
+$('clwheel').onpointermove=e=>{if(clDrag)wheelAt(e);};$('clwheel').onpointerup=()=>{clDrag=false;};
+$('clval').oninput=e=>{clV=+e.target.value;if(clHex){const [h,s]=hex2hsv(clHex);clHex=hsv2hex(h,s,clV/100);}renderColor();};
+$('clpick').oninput=e=>setColor(e.target.value.slice(1),'');
+$('clhex').onchange=e=>{const v=e.target.value.trim().replace(/^#/,'');if(/^[0-9a-f]{6}$/i.test(v))setColor(v,'');else renderColor();};
+$('clname').oninput=()=>{stateTag('clstate',clDirty());updColor();};
+$('clrefresh').onclick=loadColor;$('clundo').onclick=()=>{clHex=CL.hex||'';$('clname').value=CL.name||'';renderColor();};
+$('clsave').onclick=()=>saveTo('/api/color/apply',{hex:clHex,name:$('clname').value.trim()},'Saving tonight\'s color…',async()=>{await loadColor();H=null;},'color');
+
+// ---------------- Home: Google Drive, ShowXpress launch / close, updates, brand
+let G=null,UPD=0;
+function fmtT(s){const d=new Date(s);if(isNaN(d))return esc(s);const t=d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+ return d.toDateString()===new Date().toDateString()?'today at '+t:d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'})+' '+t;}
+async function loadGd(){G=await getJ('/api/gdrive');updGd();}
+function updGd(){if(!G)return;
+ $('gdsub').innerHTML=!G.ok?'<span style="color:var(--red)">'+esc(G.error)+'</span>':!G.found?'Google Drive isn&rsquo;t on this computer &mdash; install <b>Google Drive for desktop</b> and sign in.':
+  'Copies the show to <b>'+esc(G.target)+'</b> &mdash; only new and changed files, nothing is deleted. '+(G.last?'Last sync: <b>'+fmtT(G.last)+'</b>.':'Not synced yet.');
+ $('gdsync').disabled=sxOpen||!G.ok||!G.found;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?sxHint('sync, so the newest show is copied'):'';}
+async function gdSync(){await saveTo('/api/gdrive/sync',{},'Copying the show to Google Drive…',async()=>{await loadGd();if($('v-pre').classList.contains('on'))loadPre();},'gsync');}
+$('gdsync').onclick=()=>gdSync();
+async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
+async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
+ let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok)showResult(r,'sx');}
+$('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
+async function chkUpd(){const u=await getJ('/api/update');$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
+ if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
+async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Mac installer opens &mdash; follow it.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
+ busy(true,'Downloading the update…');let r;try{r=await api('/api/update/install',{});}catch(e){r={ok:false,error:'Lost connection.'}}
+ if(r.ok&&r.restarting){UPD=1;busy(true,'Installing the update — the Helper opens again by itself…');return;}busy(false);showResult(r,'update');}
+{const bi=new Image();bi.onload=()=>{const b=$('brand');b.innerHTML='';bi.alt='XSV Productions';b.appendChild(bi);};bi.src='/brand.png?t='+T;}
+
+setTab(location.hash.slice(1)||'home');draw();load();poll();loadGd();chkUpd();
 </script></body></html>
 '@
 
@@ -684,20 +876,74 @@ try {
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
       switch ($path) {
         '/'            { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token)) }
-        '/icon.png'    { $ip = Join-Path $here 'aim_movers_1024.png'; if (Test-Path $ip) { $ib = [IO.File]::ReadAllBytes($ip); $ctx.Response.ContentType = 'image/png'; $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close() } else { Send-Text $ctx 404 'text/plain' 'no icon' } }
+        '/brand.png'   {
+          $bp = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ShowXpress Helper/brand.png'), (Join-Path $HOME 'AwaazTools/brand.png'), (Join-Path $here 'brand.png')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if ($bp) { Send-Png $ctx $bp } else { Send-Text $ctx 404 'text/plain' 'no brand image' }
+        }
+        '/icon.png'    { $ip = Join-Path $here 'aim_movers_1024.png'; if (-not (Test-Path $ip)) { $ip = Join-Path $here '../assets/aim_movers_1024.png' } if (Test-Path $ip) { $ib = [IO.File]::ReadAllBytes($ip); $ctx.Response.ContentType = 'image/png'; $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close() } else { Send-Text $ctx 404 'text/plain' 'no icon' } }
         '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen) } }
+        '/api/sx/launch' {
+          if (Test-SxOpen) { Send-Json $ctx @{ ok = $true; out = '  ShowXpress is already open'; error = '' }; break }
+          if ($onMac) {
+            $a = @(Get-ChildItem -LiteralPath '/Applications' -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' }) | Select-Object -First 1
+            if (-not $a) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress was not found in Applications.'; out = '' }; break }
+            & open $a.FullName
+          } else {
+            $x = Get-SxExe
+            if (-not $x) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress was not found in Program Files\ShowXpress.'; out = '' }; break }
+            Start-Process -FilePath $x -WorkingDirectory (Split-Path $x)
+          }
+          Send-Json $ctx @{ ok = $true; out = '  ShowXpress is starting'; error = '' }
+        }
+        '/api/sx/close' {
+          $ps = @(Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' })
+          if ($onMac) { foreach ($p in $ps) { & osascript -e "quit app `"$($p.ProcessName)`"" 2>$null } } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
+          Send-Json $ctx @{ ok = $true; out = '  ShowXpress was asked to close'; error = '' }
+        }
+        '/api/update'  { Send-Json $ctx (Get-Update) }
+        '/api/update/install' {
+          $u = Get-Update
+          if (-not $u.ok -or -not $u.newer -or $u.asset -notmatch '^https://github\.com/') { Send-Json $ctx @{ ok = $false; error = 'No newer version found on GitHub.'; out = '' }; break }
+          $dl = Join-Path ([IO.Path]::GetTempPath()) ($u.name -replace '[^\w\.-]', '_')
+          try { Invoke-WebRequest -Uri $u.asset -OutFile $dl -UseBasicParsing -Headers @{ 'User-Agent' = 'ShowXpress-Helper' } -TimeoutSec 300 }
+          catch { Send-Json $ctx @{ ok = $false; error = "Download failed: $($_.Exception.Message)"; out = '' }; break }
+          if ($onMac) { & open $dl; Send-Json $ctx @{ ok = $true; out = "  The installer for version $($u.latest) is open - follow it, then open ShowXpress Helper again."; error = '' }; break }
+          # the installer closes this window server itself; a small script waits for it and opens the new version
+          $us = Join-Path ([IO.Path]::GetTempPath()) 'sxh_update.ps1'
+          $vbs = Join-Path $here 'showxpress_helper.vbs'
+          [IO.File]::WriteAllText($us, "Start-Sleep 2`r`nStart-Process -Wait -FilePath '$dl' -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART'`r`nStart-Process -FilePath `"`$env:SystemRoot\System32\wscript.exe`" -ArgumentList '`"$vbs`"'`r`n")
+          Start-Process -FilePath 'powershell.exe' -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$us`"" -WindowStyle Hidden
+          Send-Json $ctx @{ ok = $true; restarting = $true; out = ''; error = '' }
+          $l.Stop()
+        }
         '/api/preview' {
-          $r = Invoke-Engine '-Action Preview'
-          if ($r.ok) { $j = (($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1); Send-Text $ctx 200 'application/json; charset=utf-8' $j }
-          else { Send-Json $ctx @{ ok = $false; error = $r.error } }
+          $mo = if ($req.QueryString['mode'] -eq 'room') { ' -Mode Room' } else { '' }
+          Send-EngineJson $ctx (Invoke-Engine "-Action Preview$mo")
+        }
+        '/api/aim/install' { Send-Json $ctx (Invoke-Engine '-Action Install -Mode Room') }
+        '/api/color'   { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $colorEngine) }
+        '/api/color/apply' {
+          $hx = "$($body.hex)".Trim().TrimStart('#')
+          if ($hx -notmatch '^[0-9a-fA-F]{6}$') { Send-Json $ctx @{ ok = $false; error = 'Pick a colour first.'; out = '' }; break }
+          $nm = ("$($body.name)" -replace '[^A-Za-z0-9 \-]', '').Trim(); if ($nm.Length -gt 30) { $nm = $nm.Substring(0, 30) }
+          $na = if ($nm) { " -Name `"$nm`"" } else { '' }
+          Send-Json $ctx (Invoke-Engine "-Action Apply -Color $hx$na" $colorEngine)
+        }
+        '/api/gdrive'  { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $gdEngine) }
+        '/api/gdrive/sync' { Send-Json $ctx (Invoke-Engine '-Action Sync' $gdEngine) }
+        '/api/pre/fix' {
+          $k = "$($body.key)"
+          if ($k -notmatch '^(sleep|usb|restart)$') { Send-Json $ctx @{ ok = $false; error = 'Unknown fix.'; out = '' }; break }
+          Send-Json $ctx (Invoke-Engine "-Action Fix -FixId $k" $preEngine)
         }
         '/api/apply' {
           $w = [int]$body.w; $d = [int]$body.d
           if ($w -lt 20 -or $w -gt 300 -or $d -lt 20 -or $d -gt 300) { Send-Json $ctx @{ ok = $false; error = 'Size must be 20-300%.'; out = '' }; break }
           $f = if ($body.force) { ' -Force' } else { '' }
-          Send-Json $ctx (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f")
+          $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
+          Send-Json $ctx (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f$mo")
         }
-        '/api/home'    { Send-Json $ctx (Invoke-Engine '-Action Home -NoPrompt') }
+        '/api/home'    { $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }; Send-Json $ctx (Invoke-Engine "-Action Home -NoPrompt$mo") }
         '/api/skip'    {
           $r = Invoke-Engine '-Action Preview' $skipEngine
           if ($r.ok) { $j = (($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1); Send-Text $ctx 200 'application/json; charset=utf-8' $j }
@@ -712,12 +958,15 @@ try {
         '/api/rig/apply' {
           $ids = @($body.heads | ForEach-Object { "$_" })
           if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 1) { Send-Json $ctx @{ ok = $false; error = 'Tick at least one head.'; out = '' }; break }
-          Send-Json $ctx (Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $rigEngine)
+          $r = Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $rigEngine
+          if ($r.ok) { $r.out += Update-SkipFlash $ids }
+          Send-Json $ctx $r
         }
         '/api/apc'     { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $apcEngine) }
         '/api/apc/apply' {
-          $items = @(foreach ($c in @($body.changes)) { if ($c) { [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; note = $c.note } } })
-          if (-not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.note)" -notmatch '^-?\d+$' -or [int]$_.note -lt -1 -or [int]$_.note -gt 63 }).Count) {
+          $items = @(foreach ($c in @($body.changes)) { if ($c) { $o = [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; note = $c.note }; if ($null -ne $c.on) { $o.on = $c.on; $o.off = $c.off }; $o } })
+          $badC = @($items | Where-Object { $_.Contains('on') -and (("$($_.on)" -notmatch '^\d+$') -or ("$($_.off)" -notmatch '^\d+$') -or [int]$_.on -gt 127 -or [int]$_.off -gt 127) }).Count
+          if ($badC -or -not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.note)" -notmatch '^-?\d+$' -or [int]$_.note -lt -1 -or [int]$_.note -gt 63 }).Count) {
             Send-Json $ctx @{ ok = $false; error = 'Nothing valid to save.'; out = '' }; break }
           Send-Json $ctx (Invoke-WithChanges $apcEngine $items)
         }
@@ -750,7 +999,7 @@ try {
         '/api/rt/install' { Send-Json $ctx (Invoke-Engine '-Action Install' $rtEngine) }
         '/api/rt/apply' {
           $as = [ordered]@{}
-          if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|ml|mr|bl|br)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
+          if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|tm|bl|br|bm)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
           if (-not $as.Count) { Send-Json $ctx @{ ok = $false; error = 'Put at least one mover on a truss.'; out = '' }; break }
           $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
           [IO.File]::WriteAllText($cf, (@{ assign = $as; extra = [bool]$body.extra } | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding($false)))
@@ -759,6 +1008,8 @@ try {
             $hl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^RIGHEADS: [\d,]+$' } | Select-Object -Last 1
             if ($hl) { $r2 = Invoke-Engine "-Action Apply -Heads `"$($hl.Substring(10))`"" $rigEngine
               if ($r2.ok) { $r.out += "`n  Tonight's Rig:`n" + $r2.out } else { $r.out += "`n  Tonight's Rig NOT updated: $($r2.error)" } }
+            $sl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^SKIPHEADS: [\d,]+$' } | Select-Object -Last 1
+            if ($sl) { $r.out += Update-SkipFlash ($sl.Substring(11) -split ',') }
           }
           Send-Json $ctx $r
         }

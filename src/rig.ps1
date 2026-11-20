@@ -38,8 +38,11 @@ if (Test-Path -LiteralPath $statePath) {
 # ---- chase scenes: every .scex on a live button whose lit steps don't all light the same movers (+ any still trimmed)
 $info = Get-LiveInfo $root
 $byFile = [ordered]@{}
+# SKIP FLASH is rebuilt with just the hung heads by skip_flash.ps1 (the Helper runs it together with this) - not trimmed here
+$skipFile = @($info.Buttons | Where-Object { $_.Title -eq 'SKIP FLASH' -and $_.Name -like '*.scex' } | ForEach-Object Name)
+foreach ($f in $skipFile) { $state.scenes.Remove($f) }
 foreach ($b in $info.Buttons) {
-  if ($b.Name -notlike '*.scex') { continue }
+  if ($b.Name -notlike '*.scex' -or $skipFile -contains $b.Name) { continue }
   if (-not $byFile.Contains($b.Name)) { $byFile[$b.Name] = New-Object Collections.Generic.List[string] }
   $t = if ($b.Title) { $b.Title } else { $b.Name -replace '\.scex$', '' }
   if (-not $byFile[$b.Name].Contains($t)) { $byFile[$b.Name].Add($t) }

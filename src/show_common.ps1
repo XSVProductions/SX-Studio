@@ -4,7 +4,7 @@ $onMac = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $m140  = 'Intimidator Hybrid 140SR (19ch)'
 $m251  = 'IntimidatorHybrid251Sr(19ch)'
 
-# Show folder: 1) path in show_path.txt  (Mac: ~/AwaazTools/show_path.txt, written by "SYNC FROM WINDOWS";
+# Show folder: 1) path in show_path.txt  (Mac: ~/AwaazTools/show_path.txt;
 #              Windows: %APPDATA%\ShowXpress Helper\show_path.txt - optional; the old AIM MOVERS folder still works)
 #              2) ~/TheLightingController/LightShows/Awaaz Lightshow   3) the only show there that has a CENTER SPOT scene
 function Find-Show {
@@ -23,7 +23,7 @@ function Find-Show {
     $c = @(Get-ChildItem -LiteralPath $ls -Directory | Where-Object { (Test-Path -LiteralPath (Join-Path $_.FullName 'Live/live.ini')) -and (Test-Path -LiteralPath (Join-Path $_.FullName 'scenes/CENTER SPOT.scex')) })
     if ($c.Count -eq 1) { return $c[0].FullName }
   }
-  if ($onMac) { throw "Mac show folder not known yet - run SYNC FROM WINDOWS once first. NOTHING was changed." }
+  if ($onMac) { throw "Mac show folder not found. Copy the show from Google Drive > AWAAZ > Lighting into ~/TheLightingController/LightShows, or write its folder path into ~/AwaazTools/show_path.txt. NOTHING was changed." }
   throw "Can't find the show. Write its folder path into $($pfs[0]) and try again. NOTHING was changed."
 }
 
@@ -202,6 +202,20 @@ function Get-SceneSteps($root, [string]$path, $modelOf) {
 function Get-TextSha([string]$s) {
   $h = [Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))
   ([BitConverter]::ToString($h) -replace '-', '').ToLower()
+}
+function Add-LiveButton($ini, $info, $pg, [string]$scene, [string]$title, [int[]]$cols = @(1..10), [switch]$Down) {
+  # new button on live page $pg in the first free cell (lines 1-8, columns in $cols order; -Down = fill a column first) -> @(line, column)
+  $mine = @($info.Buttons | Where-Object { $_.Page -eq $pg })
+  $used = @{}; foreach ($b in $mine) { $used["$($b.Keys['line'])/$($b.Keys['column'])"] = 1 }
+  $cell = $null
+  if ($Down) { foreach ($co in $cols) { foreach ($ln in 1..8) { if (-not $cell -and -not $used.ContainsKey("$ln/$co")) { $cell = @($ln, $co) } } } }
+  else { foreach ($ln in 1..8) { foreach ($co in $cols) { if (-not $cell -and -not $used.ContainsKey("$ln/$co")) { $cell = @($ln, $co) } } } }
+  if (-not $cell) { throw "The page $($info.Pages[$pg]) is full. NOTHING was changed." }
+  $n = 1; while (Find-IniSection $ini "page${pg}_button$n") { $n++ }
+  $last = if ($mine.Count) { Find-IniSection $ini (($mine | Sort-Object Btn | Select-Object -Last 1).Sec) } else { Find-IniSection $ini "page$pg" }
+  $ini.Lines.InsertRange($last[1], [string[]]@("[page${pg}_button$n]", "line = $($cell[0])", "column = $($cell[1])", "name = $scene", "title = $title", 'masterspeedfader = 0'))
+  Set-IniKey $ini "page$pg" 'nb_buttons' "$($mine.Count + 1)" @('name')
+  ,$cell
 }
 function Read-ChangesFile([string]$p) {
   if (-not $p -or -not (Test-Path -LiteralPath $p)) { throw "No changes were sent. NOTHING was changed." }

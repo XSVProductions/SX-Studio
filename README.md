@@ -28,7 +28,9 @@ The installers aren't code-signed, which is why Windows and macOS ask the first 
 
 **What gets installed**
 - **Windows:** "ShowXpress Helper" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
-- **Mac:** *ShowXpress Helper* in Applications, plus *ShowXpress Helper* and *SYNC FROM WINDOWS* on the Desktop.
+- **Mac:** *ShowXpress Helper* in Applications, plus a *ShowXpress Helper* shortcut on the Desktop.
+
+The Helper always opens on its **Home** page: the tabs, a Google Drive backup button, **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to the Helper's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
 
 ## Weekly use
 
@@ -49,6 +51,17 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
 
 **Reset to normal** puts every head back to its default center and size.
 
+**Aim Movers - Room** (the *Room* switch at the top of the tab) does the same for **AROUND ROOM** and **AROUND ROOM SLOW**, using the scene **ROOM AIM (ADJUST)** and checking with **ROOM CHECK** (both on the SETUP page; the tab adds them if they're missing). Width = across the room, Height = up and down the walls.
+
+**Tonight's Color**
+Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save tonight's color**. It writes two scenes, each on a **TONIGHTS COLOR** button: on MOVER COLORS (every mover on the nearest colour of its wheel - colour only, so it goes on top of any movement) and on UPLIGHTS (the uplights and the Ovation in exactly that colour).
+
+**APC mini** - tap a pad to move it, or pick its colour while playing and when idle.
+
+**Rig Test** - press **RIG ID** on the SETUP page, tap each truss spot in the tab and pick the look you see, then **Save to 2D view**. It moves the 140s in the 2D view (blinder top center, uplight bottom center) and, ticked by default, also saves Tonight's Rig and SKIP FLASH. *Bigger event* adds a top-middle and a bottom-middle tower.
+
+**Pre-show Check** - one list of what to look at before the guests arrive. Where the Helper can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
+
 **Skip Flash**
 1. Close ShowXpress, open **ShowXpress Helper** and go to the **Skip Flash** tab.
 2. Tap the heads you have tonight (amber = in use). **All** / **None** work per model.
@@ -67,16 +80,18 @@ The backups are kept in `health_fixes.json` in the show folder. If you change th
 
 ShowXpress Helper never writes anything while ShowXpress is open.
 
-## Mac + Boot Camp
+## Google Drive
 
-**SYNC FROM WINDOWS** copies the show from the Windows (Boot Camp) drive to the Mac, one way only. The first time, it asks which folder is the Mac show. Before every sync, the previous Mac show is kept in `~/AwaazTools/previous Mac show`.
+**Sync to Google Drive** (Home page, and Pre-show Check when it's due) copies the show into **Google Drive > AWAAZ > Lighting > *show folder name*** through the Google Drive for desktop app, which uploads it. One way only: new and changed files are copied, nothing is deleted, and a file that is newer on Google Drive is left alone. Close ShowXpress first so the saved show is copied.
+
+On the Mac, copy the show from Google Drive into `~/TheLightingController/LightShows` (or write its folder into `~/AwaazTools/show_path.txt`). SYNC FROM WINDOWS is gone; installing this version removes its Desktop shortcut.
 
 ## Show folder
 
 ShowXpress Helper looks for the show in this order:
 1. The folder written in `show_path.txt`:
    - **Windows:** `%APPDATA%\ShowXpress Helper\show_path.txt` (optional; the old `%APPDATA%\AIM MOVERS\show_path.txt` still works)
-   - **Mac:** `~/AwaazTools/show_path.txt`, written by SYNC FROM WINDOWS
+   - **Mac:** `~/AwaazTools/show_path.txt` (optional)
 2. `~/TheLightingController/LightShows/Awaaz Lightshow`
 3. The only show in `LightShows` that has a `CENTER SPOT` scene
 

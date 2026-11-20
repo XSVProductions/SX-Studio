@@ -18,8 +18,14 @@
 #   each head traces the 4 corners of the floor it was given -> quick visual check.
 #
 #   -Action Apply [-Size "100" | "120 90"]   -Action Home (all corrections off, size 100)
+#
+#   -Mode Room = the same thing for the AROUND ROOM movements (walls / ceiling): scene "ROOM AIM (ADJUST)" (step 1 = center
+#   of the area to cover, step 2 = the same corner of it), check "ROOM CHECK" (Generator), state room_aim_state.json.
+#   "Normal" for the room = the middle and size of the original AROUND ROOM shape.  -Action Install = ROOM AIM (ADJUST) +
+#   ROOM CHECK made and put on the SETUP page (under DF AIM / DF CHECK).
 param(
-  [ValidateSet('Apply','Home','Menu','Preview')][string]$Action = 'Menu',   # Preview = JSON for the GUI, writes nothing
+  [ValidateSet('Apply','Home','Menu','Preview','Install')][string]$Action = 'Menu',   # Preview = JSON for the GUI, writes nothing
+  [ValidateSet('Floor','Room')][string]$Mode = 'Floor',
   [string]$Size = '',
   [switch]$NoPrompt,
   [switch]$Force,          # apply even if some aims look wrong (GUI "apply anyway")
@@ -52,6 +58,30 @@ $autoSym  = $true
 $moveOnly = @('*GALAXY SPIRAL*')   # not mirror-symmetrical by design -> only moved back to its center
 $symTol   = 0.5                       # a side may be off by up to 50% of the half-size and still be "meant symmetrical"
 $kMin = 0.3; $kMax = 3.0
+$aimTitle = 'DF AIM (ADJUST)'; $checkTitle = 'DF CHECK 140 / DF CHECK 251'
+if ($Mode -eq 'Room') {
+  $aimTitle = 'ROOM AIM (ADJUST)'; $checkTitle = 'ROOM CHECK'
+  $scene  = "$root/scenes/ROOM AIM (ADJUST).scex"
+  $stateF = "$root/room_aim_state.json"
+  $roomFiles = @(Get-ChildItem -LiteralPath $gdir -Filter '*.gpj' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AROUND ROOM*' } | Sort-Object Name | ForEach-Object Name)
+  if (-not $roomFiles.Count) { throw "No AROUND ROOM movement found in Generator. NOTHING was changed." }
+  $roomMain = if ($roomFiles -contains 'AROUND ROOM.gpj') { 'AROUND ROOM.gpj' } else { $roomFiles[0] }
+  # normal = middle + half-size of the ORIGINAL AROUND ROOM shape (from the state if it was already resized)
+  $rt = [IO.File]::ReadAllText("$gdir/$roomMain"); $ptsS = ''
+  if (Test-Path -LiteralPath $stateF) { $sj = [IO.File]::ReadAllText($stateF) | ConvertFrom-Json; if ($sj.files.$roomMain) { $ptsS = "$($sj.files.$roomMain.base)" } }
+  if (-not $ptsS) {
+    $ptSec = (($rt -split '\[Pan/Tilt/uPan/uTilt\]')[1] -split '\r?\n\[')[0]
+    $ptsS = (@([regex]::Matches($ptSec, 'Point_\d+ = (-?\d+),(-?\d+)') | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" }) -join ';')
+  }
+  $rp = @($ptsS -split ';' | ForEach-Object { $xy = $_ -split ','; ,@([double]$xy[0], [double]$xy[1]) })
+  $mx = $rp | ForEach-Object { $_[0] } | Measure-Object -Minimum -Maximum; $my = $rp | ForEach-Object { $_[1] } | Measure-Object -Minimum -Maximum
+  $rh = @([int](($mx.Minimum + $mx.Maximum) / 2), [int](($my.Minimum + $my.Maximum) / 2))
+  $rr = @([int][math]::Max(500, ($mx.Maximum - $mx.Minimum) / 2), [int][math]::Max(500, ($my.Maximum - $my.Minimum) / 2))
+  $homePos = @{ $m140 = $rh; $m251 = $rh }; $refHalf = @{ $m140 = $rr; $m251 = $rr }
+  $roomIds = @([regex]::Matches($rt, '(?m)^ID = (\d+)') | ForEach-Object { $_.Groups[1].Value })
+  $checks = @{ 'ROOM CHECK.gpj' = $m140 }
+  $noScale = @('ROOM CHECK*'); $autoSym = $false
+}
 
 function Test-SxClosed {
   if ($TestRoot) { return }
@@ -62,7 +92,7 @@ function Test-SxClosed {
 
 function Test-Like($name, $patterns) { [bool]($patterns | Where-Object { $name -like $_ }) }
 
-function Get-Movers { Get-ShowMovers $root }
+function Get-Movers { if ($Mode -eq 'Room') { Get-ShowMovers $root | Where-Object { $roomIds -contains $_.Id } } else { Get-ShowMovers $root } }
 
 function Get-DefaultCorner($m) { $h = $homePos[$m.Model]; $r = $refHalf[$m.Model]; @(($h[0] - $r[0]), ($h[1] + $r[1])) }
 
@@ -147,6 +177,7 @@ function Get-HeadFix($movers, $center, $corner, [switch]$Reset) {
 }
 
 function Get-TargetGpjs {
+  if ($Mode -eq 'Room') { return @($roomFiles + @($checks.Keys) | Select-Object -Unique) }
   $lt = Get-Content "$root/Live/live.ini" -Encoding UTF8
   $files = @(); $on = $false
   $rx = '^\[(' + ($pages -join '|') + ')_button\d+\]$'
@@ -388,6 +419,23 @@ function Get-HomeAims($movers) {
   @{ center = $c; corner = $k }
 }
 
+# ---- Room: ROOM AIM (ADJUST) + ROOM CHECK buttons on the SETUP page (aims in column 1, checks in column 2, like DF)
+function Get-RoomSetup {
+  $info = Get-LiveInfo $root
+  [pscustomobject]@{ aim = [bool]@($info.Buttons | Where-Object { $_.Name -eq 'ROOM AIM (ADJUST).scex' }).Count; check = [bool]@($info.Buttons | Where-Object { $_.Name -eq 'ROOM CHECK.gpj' }).Count }
+}
+function Install-RoomButtons {
+  $ini = Read-LiveIni $root; $info = Get-LiveInfo $root $ini
+  $pg = $null; foreach ($k in $info.Pages.Keys) { if ("$($info.Pages[$k])".Trim() -eq 'SETUP') { $pg = $k } }
+  if ($null -eq $pg) { throw "No live page called SETUP found. NOTHING was changed." }
+  foreach ($b in @(@('ROOM AIM (ADJUST).scex', 'ROOM AIM (ADJUST)', 1), @('ROOM CHECK.gpj', 'ROOM CHECK', 2))) {
+    if (@($info.Buttons | Where-Object { $_.Name -eq $b[0] }).Count) { continue }
+    $cell = Add-LiveButton $ini $info $pg $b[0] $b[1] (@($b[2]) + @(4..10)) -Down; $info = Get-LiveInfo $root $ini
+    "  CHANGED  added $($b[1]) to the SETUP page (line $($cell[0]), column $($cell[1]))"
+  }
+  [void](Save-LiveIni $ini)
+}
+
 # ---------------------------------------------------------------- main
 $movers = @(Get-Movers)
 if ($movers.Count -eq 0) { throw "No 140SR/251SR fixtures found." }
@@ -401,7 +449,8 @@ if ($Action -eq 'Preview') {
     [pscustomobject]@{ label = (Get-Label $m); is140 = $m.Is140; op = $o.op; ot = $o.ot; sized = $o.sized
       kp = [math]::Round($o.kp * 100); kt = [math]::Round($o.kt * 100); zp = $o.zp; zt = $o.zt; warn = $o.warn } })
   [pscustomobject]@{ ok = $true; show = $root; lastW = [math]::Round($st.sx * 100); lastD = [math]::Round($st.sy * 100)
-    sceneExists = [bool](Test-Path -LiteralPath $scene); heads = $heads } | ConvertTo-Json -Depth 4 -Compress
+    sceneExists = [bool](Test-Path -LiteralPath $scene); heads = $heads; mode = $Mode; aimTitle = $aimTitle; checkTitle = $checkTitle
+    install = $(if ($Mode -eq 'Room') { Get-RoomSetup } else { $null }); targets = @(Get-TargetGpjs | ForEach-Object { $_ -replace '\.gpj$', '' }) } | ConvertTo-Json -Depth 4 -Compress
   return
 }
 
@@ -421,12 +470,14 @@ Test-SxClosed
 # aim scene: create, or upgrade an old 1-step scene to center + corner (keeps your center aims)
 if (-not (Test-Path $scene)) {
   $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner
-  "  created aim scene DF AIM (ADJUST): step 1 = CENTER, step 2 = CORNER"
+  "  CHANGED  created aim scene ${aimTitle}: step 1 = CENTER, step 2 = CORNER"
 } else {
   $a = Read-AimScene $movers
-  if ($a.steps -lt 2) { Write-AimScene $movers $a.center $a.corner; "  DF AIM (ADJUST) upgraded: step 2 = CORNER added (your center aims kept)" }
+  if ($a.steps -lt 2) { Write-AimScene $movers $a.center $a.corner; "  $aimTitle upgraded: step 2 = CORNER added (your center aims kept)" }
 }
 foreach ($k in $checks.Keys) { New-CheckGpj $k $checks[$k] $movers }
+if ($Mode -eq 'Room') { Install-RoomButtons }
+if ($Action -eq 'Install') { "  DONE - ROOM AIM (ADJUST) and ROOM CHECK are on the SETUP page."; return }
 
 if ($Action -eq 'Home') {
   $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner
@@ -440,7 +491,7 @@ if ($Action -eq 'Home') {
   $nWarn = @($movers | Where-Object { $fix[$_.Id].warn }).Count
   if ($nWarn -and -not $Force) {
     Write-Host "  !! $nWarn head(s) have an aim that looks wrong (see the right-hand column)." -ForegroundColor Yellow
-    Write-Host "     Usually: step 1 / step 2 of DF AIM (ADJUST) not aimed at tonight's floor yet, or the wrong step edited." -ForegroundColor Yellow
+    Write-Host "     Usually: step 1 / step 2 of $aimTitle not aimed for tonight yet, or the wrong step edited." -ForegroundColor Yellow
     if ($NoPrompt) { throw "Aims look wrong for $nWarn head(s). NOTHING was changed." }
     $ok = Read-Host "  Type y to apply anyway, or just Enter to stop and fix the aims"
     if ($ok -notmatch '^[yY]') { "  stopped. NOTHING was changed."; return }
@@ -453,4 +504,4 @@ Update-Gpjs $fix $sz[0] $sz[1] $st
 $st.sx = $sz[0]; $st.sy = $sz[1]
 Save-State $st
 if ($Action -eq 'Home') { "  DONE - all movement scenes back to normal." }
-else { "  DONE - open ShowXpress. Check: Generator -> DF CHECK 140 / DF CHECK 251 (beams trace the floor corners)." }
+else { "  DONE - open ShowXpress. Check: $checkTitle (beams trace the corners)." }

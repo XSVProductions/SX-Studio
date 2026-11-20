@@ -5,7 +5,8 @@
 #   to its spot in the Editor 2D view (Editor/2DView/fixtures.ini); heads that aren't hung go in a neat block in the middle.
 #
 #   2D page = the room seen from the DJ booth (bottom of the page). The 4 corners are the 4 towers, 2 heads per T-bar:
-#   the left head on the page is that truss's left mover. Bigger events: 2 extra towers, left and right middle.
+#   the left head on the page is that truss's left mover. Bigger events: 2 extra towers, top middle and bottom middle -
+#   their 2 heads sit either side of the blinder (top) / uplight (bottom), which are put in the middle of the page.
 #
 #   -Action Preview                     -> JSON for the Helper window (writes nothing)
 #   -Action Apply -ChangesFile <json>   -> {"assign":{"tl-l":"<fixture id>",...},"extra":false}; writes the 2D view
@@ -36,12 +37,15 @@ $flashShutter = 40   # 140SR shutter 16-131 = strobe slow -> fast
 # ---- 2D view spots (top-left corner of the fixture icon, pixels). Pairs are [left head, right head].
 $spots = @(
   @{ key = 'tl'; name = 'Top left';     x = 0;   y = 0;   extra = $false }, @{ key = 'tr'; name = 'Top right';    x = 786; y = 0;   extra = $false },
-  @{ key = 'ml'; name = 'Left middle';  x = 0;   y = 296; extra = $true  }, @{ key = 'mr'; name = 'Right middle'; x = 786; y = 296; extra = $true  },
-  @{ key = 'bl'; name = 'Bottom left';  x = 0;   y = 592; extra = $false }, @{ key = 'br'; name = 'Bottom right'; x = 786; y = 592; extra = $false })
+  @{ key = 'tm'; name = 'Top middle';    x = 329; y = 0;   extra = $true;  gap = 266 },
+  @{ key = 'bl'; name = 'Bottom left';  x = 0;   y = 592; extra = $false }, @{ key = 'br'; name = 'Bottom right'; x = 786; y = 592; extra = $false },
+  @{ key = 'bm'; name = 'Bottom middle'; x = 329; y = 592; extra = $true;  gap = 266 })
 $pairGap = 110
+# blinder top center, uplight bottom center (their 2D pictures are 128 px wide; page center = 503)
+$centerX = 439; $centerFix = @(@{ rx = 'blinder'; y = 0 }, @{ rx = 'uplight'; y = 640 })
 $slots = foreach ($s in $spots) { foreach ($side in 'l', 'r') {
   [pscustomobject]@{ key = "$($s.key)-$side"; tower = $s.key; towerName = $s.name; side = $(if ($side -eq 'l') { 'left' } else { 'right' })
-                     x = $s.x + $(if ($side -eq 'r') { $pairGap } else { 0 }); y = $s.y; extra = $s.extra } } }
+                     x = $s.x + $(if ($side -eq 'r') { $(if ($s.gap) { $s.gap } else { $pairGap }) } else { 0 }); y = $s.y; extra = $s.extra } } }
 
 $heads = @(Get-ShowMovers $root | Where-Object { $_.Is140 } | Sort-Object Num)
 if (-not $heads.Count) { throw "No 140SR fixtures found in the show. NOTHING was changed." }
@@ -167,6 +171,17 @@ foreach ($h in $heads) {
   else { $ix = $ini2.Lines.Count; while ($ix -gt 0 -and -not $ini2.Lines[$ix - 1].Trim()) { $ix-- }; $ini2.Lines.InsertRange($ix, [string[]]@("[$($h.Name)]", "Position = $xy")) }
   if ($slotOf.ContainsKey($h.Id)) { $s = $slotOf[$h.Id]; $lines += "  $(Get-Label $h): $($s.towerName) tower, $($s.side) mover" }
 }
+# blinder / uplight -> top / bottom center of the page (their own sections, found by name)
+foreach ($cf in $centerFix) {
+  foreach ($ln in @($ini2.Lines)) {
+    if ($ln -notmatch '^\[(.+)\]\s*$') { continue }
+    $nm = $matches[1]
+    if ($nm -match $cf.rx) {
+      $old = Get-Pos $ini2 $nm; $xy = "$centerX,$($cf.y)"
+      if (-not $old -or "$($old[0]),$($old[1])" -ne $xy) { Set-IniKey $ini2 $nm 'Position' $xy; $lines += "  ${nm}: moved to the $(if ($cf.y) { 'bottom' } else { 'top' }) center" }
+    }
+  }
+}
 if ($spare.Count) { $lines += "  not hung (middle of the page): $(($spare | ForEach-Object { '#' + $_.Num }) -join ', ')" }
 $newText = $ini2.Lines -join $ini2.Nl
 if ($newText -ne $ini2.Text) { [IO.File]::WriteAllText($twoD, $newText, (New-Object Text.UTF8Encoding($ini2.Bom))); "  2D view saved" } else { "  nothing to change in the 2D view" }
@@ -179,3 +194,6 @@ $all251 = @(Get-ShowMovers $root | Where-Object { -not $_.Is140 } | ForEach-Obje
 $h251 = $all251
 if (Test-Path -LiteralPath $r) { $rj = [IO.File]::ReadAllText($r) | ConvertFrom-Json; if ($rj.hung) { $h251 = @($all251 | Where-Object { @($rj.hung) -contains $_ }) } }
 "RIGHEADS: $((@($slotOf.Keys) + $h251) -join ',')"
+# SKIP FLASH: these 140s + only the 251s ticked as hung in Tonight's Rig (none if nothing saved there)
+$s251 = @(); if ($rj -and $rj.hung) { $s251 = $h251 }
+"SKIPHEADS: $((@($slotOf.Keys) + $s251) -join ',')"

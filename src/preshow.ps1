@@ -2,17 +2,34 @@
 #   Show:    ShowXpress open, DMX output on, Rig Test saved today, Tonight's Rig matches it, movers aimed today
 #   Gear:    APC mini plugged in, DMX interface plugged in, VirtualDJ beat link (OS2L) connected
 #   Laptop:  on charger, never sleeps on charger, USB power saving off, no Windows restart waiting
-#   -Action Check -> one line of JSON: { ok, show, items: [ { group, level (ok|warn|error|info), title, detail, advice } ] }
+#   -Action Check -> one line of JSON: { ok, show, items: [ { group, level (ok|warn|error|info), title, detail, advice, fix } ] }
+#                    fix = { key, label }: key 'sleep' / 'usb' / 'restart' = -Action Fix here; 'launch' / 'tab:<tab>' = done by the window
+#   -Action Fix -FixId sleep|usb|restart   (the only things it ever changes, and only when asked)
 param(
-  [ValidateSet('Check')][string]$Action = 'Check',
+  [ValidateSet('Check','Fix')][string]$Action = 'Check',
+  [string]$FixId = '',
   [string]$TestRoot = ''
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'show_common.ps1')
 
+if ($Action -eq 'Fix') {
+  if ($onMac) { throw "Only on Windows. NOTHING was changed." }
+  function Invoke-Pc([string[]]$a) { $o = & powercfg @a 2>&1 | Out-String; if ($LASTEXITCODE) { throw "Windows said: $($o.Trim()) - NOTHING was changed." } }
+  switch ($FixId) {
+    'sleep'   { Invoke-Pc @('/change', 'standby-timeout-ac', '0'); "  CHANGED  the laptop never goes to sleep on the charger now" }
+    'usb'     { Invoke-Pc @('/setacvalueindex', 'SCHEME_CURRENT', '2a737441-1930-4402-8d77-b2bebba308a3', '48e6b7a6-50f5-4782-a5d4-53bb8f07e226', '0'); Invoke-Pc @('/setactive', 'SCHEME_CURRENT')
+                "  CHANGED  USB power saving (selective suspend) is off on the charger" }
+    'restart' { & shutdown.exe /r /t 60 /c "ShowXpress Helper: restarting for Windows updates in 1 minute. Save your work." | Out-Null; "  CHANGED  Windows restarts in 1 minute (cancel: run 'shutdown /a')" }
+    default   { throw "Unknown fix '$FixId'. NOTHING was changed." }
+  }
+  return
+}
+
 $root = if ($TestRoot) { $TestRoot } else { Find-Show }
 $items = New-Object Collections.Generic.List[object]
-function Add-Item($group, $level, $title, $detail = '', $advice = '') { $items.Add([pscustomobject]@{ group = $group; level = $level; title = $title; detail = $detail; advice = $advice }) }
+function Add-Item($group, $level, $title, $detail = '', $advice = '', $fix = $null, $fixLabel = '') {
+  $items.Add([pscustomobject]@{ group = $group; level = $level; title = $title; detail = $detail; advice = $advice; fix = $(if ($fix -and $level -ne 'ok') { @{ key = $fix; label = $fixLabel } } else { $null }) }) }
 function Get-Ago([datetime]$t) {
   $d = ((Get-Date).Date - $t.Date).Days
   if ($d -le 0) { "today at $($t.ToString('h:mm tt'))" } elseif ($d -eq 1) { "yesterday" } else { "$d days ago ($($t.ToString('MMM d')))" }
@@ -22,7 +39,7 @@ $today = (Get-Date).Date
 # ---------------------------------------------------------------- Show
 $sxOpen = Test-SxRunning
 if ($sxOpen) { Add-Item 'Show' 'ok' 'ShowXpress is open' }
-else { Add-Item 'Show' 'warn' 'ShowXpress is not open yet' 'Some checks below use the last saved show.' 'Open ShowXpress and load the Awaaz show.' }
+else { Add-Item 'Show' 'warn' 'ShowXpress is not open yet' 'Some checks below use the last saved show.' 'Open ShowXpress and load the Awaaz show.' 'launch' 'Launch ShowXpress' }
 
 $lv = Get-IniKeys (Read-LiveIni $root) 'live'
 if ("$($lv['dmx_on'])" -eq 'no') { Add-Item 'Show' 'error' 'DMX output is switched OFF in Live' 'No light will react to anything.' 'In ShowXpress Live, switch DMX output back on.' }
@@ -32,8 +49,8 @@ $rt = "$root/rig_test.json"; $rtHung = $null
 if (Test-Path -LiteralPath $rt) {
   $j = [IO.File]::ReadAllText($rt) | ConvertFrom-Json; $t = [datetime]"$($j.saved)"; $rtHung = @($j.hung | ForEach-Object { "$_" })
   if ($t.Date -eq $today) { Add-Item 'Show' 'ok' "Rig Test saved $(Get-Ago $t)" "$($rtHung.Count) movers placed on the trusses." }
-  else { Add-Item 'Show' 'warn' "Rig Test last saved $(Get-Ago $t)" 'The 2D view may not match where the heads hang tonight.' 'Press RIG ID on the SETUP page and do the Rig Test tab.' }
-} else { Add-Item 'Show' 'warn' 'Rig Test not done yet' '' 'Press RIG ID on the SETUP page and do the Rig Test tab.' }
+  else { Add-Item 'Show' 'warn' "Rig Test last saved $(Get-Ago $t)" 'The 2D view may not match where the heads hang tonight.' 'Press RIG ID on the SETUP page and do the Rig Test tab.' 'tab:rt' 'Open Rig Test' }
+} else { Add-Item 'Show' 'warn' 'Rig Test not done yet' '' 'Press RIG ID on the SETUP page and do the Rig Test tab.' 'tab:rt' 'Open Rig Test' }
 
 $rs = "$root/rig_state.json"; $rigHung = $null
 if (Test-Path -LiteralPath $rs) { $j = [IO.File]::ReadAllText($rs) | ConvertFrom-Json; if ($j.hung) { $rigHung = @($j.hung | ForEach-Object { "$_" }) } }
@@ -41,7 +58,7 @@ if ($rtHung) {
   $m140 = @(Get-ShowMovers $root | Where-Object { $_.Is140 })
   $rig140 = if ($rigHung) { @($m140 | Where-Object { $rigHung -contains $_.Id }) } else { $m140 }
   $diff = @($m140 | Where-Object { ($rtHung -contains $_.Id) -ne ($rig140.Id -contains $_.Id) })
-  if ($diff.Count) { Add-Item 'Show' 'warn' "Tonight's Rig doesn't match the Rig Test" "Different: $(($diff | ForEach-Object { '140 #' + $_.Num }) -join ', ')." "Save the Rig Test again with 'Also update Tonight's Rig' ticked, or fix it in the Tonight's Rig tab." }
+  if ($diff.Count) { Add-Item 'Show' 'warn' "Tonight's Rig doesn't match the Rig Test" "Different: $(($diff | ForEach-Object { '140 #' + $_.Num }) -join ', ')." "Save the Rig Test again with 'Also update Tonight's Rig' ticked, or fix it in the Tonight's Rig tab." 'tab:rig' "Open Tonight's Rig" }
   else { Add-Item 'Show' 'ok' "Tonight's Rig matches the Rig Test" "$($rig140.Count) of $($m140.Count) 140s hung." }
 }
 
@@ -49,8 +66,8 @@ $aim = "$root/df_aim_state.json"
 if (Test-Path -LiteralPath $aim) {
   $t = (Get-Item -LiteralPath $aim).LastWriteTime
   if ($t.Date -eq $today) { Add-Item 'Show' 'ok' "Movers aimed $(Get-Ago $t)" }
-  else { Add-Item 'Show' 'warn' "Movers last aimed $(Get-Ago $t)" 'Every venue is different - the movements may miss tonight''s dancefloor.' 'Aim DF AIM (ADJUST) at tonight''s floor, then Apply in the Aim Movers tab.' }
-} else { Add-Item 'Show' 'warn' 'Movers not aimed yet' '' 'Aim DF AIM (ADJUST) at tonight''s floor, then Apply in the Aim Movers tab.' }
+  else { Add-Item 'Show' 'warn' "Movers last aimed $(Get-Ago $t)" 'Every venue is different - the movements may miss tonight''s dancefloor.' 'Aim DF AIM (ADJUST) at tonight''s floor, then Apply in the Aim Movers tab.' 'tab:aim' 'Open Aim Movers' }
+} else { Add-Item 'Show' 'warn' 'Movers not aimed yet' '' 'Aim DF AIM (ADJUST) at tonight''s floor, then Apply in the Aim Movers tab.' 'tab:aim' 'Open Aim Movers' }
 
 # ---------------------------------------------------------------- Gear + Laptop (Windows only)
 if ($onMac) {
@@ -88,14 +105,14 @@ if ($onMac) {
   $sleep = Get-AcIndex 'SUB_SLEEP' 'STANDBYIDLE'
   if ($null -ne $sleep) {
     if ($sleep -eq 0) { Add-Item 'Laptop' 'ok' 'Never sleeps on the charger' }
-    else { Add-Item 'Laptop' 'warn' "Goes to sleep after $([int]($sleep / 60)) min on the charger" 'If nobody touches it (dinner, speeches) the lights freeze.' 'Settings > System > Power & sleep > "When plugged in, PC goes to sleep after" = Never.' }
+    else { Add-Item 'Laptop' 'warn' "Goes to sleep after $([int]($sleep / 60)) min on the charger" 'If nobody touches it (dinner, speeches) the lights freeze.' 'Settings > System > Power & sleep > "When plugged in, PC goes to sleep after" = Never.' 'sleep' 'Never sleep on charger' }
   }
   $usb = Get-AcIndex '2a737441-1930-4402-8d77-b2bebba308a3' '48e6b7a6-50f5-4782-a5d4-53bb8f07e226'
-  if ($usb -eq 1) { Add-Item 'Laptop' 'warn' 'USB power saving is on' 'Windows can switch off an idle USB port - the DMX interface or APC can drop out.' 'Control Panel > Power Options > Change plan settings > Change advanced power settings > USB settings > USB selective suspend > Plugged in: Disabled.' }
+  if ($usb -eq 1) { Add-Item 'Laptop' 'warn' 'USB power saving is on' 'Windows can switch off an idle USB port - the DMX interface or APC can drop out.' 'Control Panel > Power Options > Change plan settings > Change advanced power settings > USB settings > USB selective suspend > Plugged in: Disabled.' 'usb' 'Turn USB power saving off' }
   elseif ($usb -eq 0) { Add-Item 'Laptop' 'ok' 'USB power saving is off' }
 
   $rb = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
-  if ($rb) { Add-Item 'Laptop' 'warn' 'Windows wants to restart for updates' 'It could restart by itself during the event.' 'Restart the laptop now, before the show.' }
+  if ($rb) { Add-Item 'Laptop' 'warn' 'Windows wants to restart for updates' 'It could restart by itself during the event.' 'Restart the laptop now, before the show.' 'restart' 'Restart now' }
   else { Add-Item 'Laptop' 'ok' 'No Windows restart waiting' }
 }
 

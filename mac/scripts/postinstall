@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs as root after ShowXpress Helper.app is installed in /Applications.
-# Puts ShowXpress Helper + SYNC FROM WINDOWS on the logged-in user's Desktop. Never fails the install.
+# Puts ShowXpress Helper on the logged-in user's Desktop. Never fails the install.
 # (Removes the old AIM MOVERS app + launchers - same program, renamed.)
 rm -rf "/Applications/AIM MOVERS.app" 2>/dev/null
 U="$(stat -f%Su /dev/console 2>/dev/null)"
@@ -20,11 +20,6 @@ for f in df_aim.ps1 df_aim_gui.ps1 aim_movers_1024.png sync_from_windows.sh; do 
 
 ln -sfn "$APP" "$D/ShowXpress Helper" 2>/dev/null && chown -h "$U" "$D/ShowXpress Helper" 2>/dev/null
 
-cat > "$D/SYNC FROM WINDOWS.command" <<'EOF' 2>/dev/null
-#!/bin/bash
-bash "/Applications/ShowXpress Helper.app/Contents/Resources/sync_from_windows.sh"
-read -r -p "  Press Enter to close " _
-EOF
-chmod 755 "$D/SYNC FROM WINDOWS.command" 2>/dev/null
-chown "$U" "$D/SYNC FROM WINDOWS.command" 2>/dev/null
+# SYNC FROM WINDOWS is gone (the show now syncs through Google Drive) - remove its old launcher
+rm -f "$D/SYNC FROM WINDOWS.command" 2>/dev/null
 exit 0

@@ -1,7 +1,8 @@
 # APC MINI - shows which live button each APC mini mk2 pad plays, and moves / swaps / clears pad mappings.
 #
 #   -Action Preview                     -> JSON for the ShowXpress Helper window (writes nothing)
-#   -Action Apply -ChangesFile <json>   -> [{ sec: "page3_button1", title: "...", note: 0-63 | -1 (take it off the pads) }]
+#   -Action Apply -ChangesFile <json>   -> [{ sec: "page3_button1", title: "...", note: 0-63 | -1 (take it off the pads),
+#                                             on: 0-127, off: 0-127 (optional: pad colour while playing / idle, mk2 palette) }]
 #
 #   Pads: bottom row = notes 0-7 ... top row = 56-63 (row 1 = top). A move changes the button's trigger note and its
 #   light (midiout) note together, so the pad colours move with it. Only live.ini is changed; ShowXpress must be closed.
@@ -40,7 +41,7 @@ if (-not $TestRoot -and (Test-SxRunning)) { throw "ShowXpress is OPEN - NOTHING 
 $changes = Read-ChangesFile $ChangesFile
 if (-not $changes.Count) { throw "No changes were sent. NOTHING was changed." }
 $bySec = @{}; foreach ($b in $info.Buttons) { $bySec[$b.Sec] = $b }
-$touched = @{}
+$touched = @{}; $colors = @{}
 foreach ($c in $changes) {
   $b = $bySec["$($c.sec)"]
   if (-not $b -or $b.Title -ne "$($c.title)") { throw "The show changed since this page was loaded ($($c.title)). Press Refresh and try again. NOTHING was changed." }
@@ -49,6 +50,13 @@ foreach ($c in $changes) {
   if ($n -ne -1 -and ($n -lt 0 -or $n -gt 63)) { throw "Pad note $n is not on the 8x8 grid. NOTHING was changed." }
   if ($n -ne -1 -and (Get-Int $b.Keys['trigger_midi_type'] 0) -ne 0) { throw "$($b.Title) is mapped to a MIDI controller, not a note - it can only be removed. NOTHING was changed." }
   $touched[$b.Sec] = $n
+  foreach ($w in 'on', 'off') {
+    $v = $c.$w
+    if ($null -ne $v -and "$v" -ne '') {
+      if ("$v" -notmatch '^\d+$' -or [int]$v -gt 127) { throw "Pad colour $v is not 0-127. NOTHING was changed." }
+      if (-not $colors.ContainsKey($b.Sec)) { $colors[$b.Sec] = @{} }; $colors[$b.Sec][$w] = [int]$v
+    }
+  }
 }
 # no two buttons may end up on the same pad
 $final = @{}
@@ -72,6 +80,18 @@ foreach ($sec in $touched.Keys) {
     if ($b.Keys.ContainsKey('trigger_midiout_note')) { Set-IniKey $info.Ini $sec 'trigger_midiout_note' "$n" }
     $r = 8 - [math]::Floor($n / 8); $col = ($n % 8) + 1
     $out += "  moved: $($b.Title) ($($b.PageName)) -> row $r, column $col  (note $old -> $n)"
+  }
+  if ($n -ne -1 -and $colors.ContainsKey($sec)) {
+    $cl = $colors[$sec]
+    if (-not $b.Keys.ContainsKey('trigger_midiout_note')) {
+      # pad light not set up yet: APC mini mk2 = device of the trigger, channel 7 (full brightness), note = its pad
+      foreach ($kv in @(@('trigger_midiout_device', "$(Get-Int $b.Keys['trigger_midi_device'] 0)"), @('trigger_midiout_channel', '7'), @('trigger_midiout_type', '0'), @('trigger_midiout_note', "$n"))) {
+        Set-IniKey $info.Ini $sec $kv[0] $kv[1] @('trigger_midi_note', 'trigger_midiout_device', 'trigger_midiout_channel', 'trigger_midiout_type') }
+    }
+    $msg = @()
+    if ($cl.ContainsKey('on'))  { Set-IniKey $info.Ini $sec 'trigger_midiout_data' "$($cl.on)" @('trigger_midiout_note'); $msg += "playing $($cl.on)" }
+    if ($cl.ContainsKey('off')) { Set-IniKey $info.Ini $sec 'trigger_midiout_data_off' "$($cl.off)" @('trigger_midiout_data', 'trigger_midiout_note'); $msg += "idle $($cl.off)" }
+    $out += "  pad colour: $($b.Title) ($($b.PageName)) -> $($msg -join ', ')"
   }
 }
 if (Save-LiveIni $info.Ini) { "  live.ini saved - $($out.Count) pad change(s)"; $out } else { "  nothing to change." }

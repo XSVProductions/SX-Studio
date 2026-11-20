@@ -13,7 +13,7 @@
 #                  (kept in df_aim_state.json) so it never stacks. 100 = patterns fill to the corners.
 #   AUTO-SYMMETRY: a shape changed in Generator since the last run (dragged / points moved / new scene) is
 #                  re-made symmetrical (size averaged from its points) and centered on home - see $autoSym.
-#   Targets: page5 MOVEMENTS + page1 251 DANCE/FAST/SLOW + DF CHECK 140/251.
+#   Targets: every live page named "...MOVEMENT..." (MOVEMENTS + 251s movement) + DF CHECK 140/251.
 #   Never touched: 251 Ceiling, Around Room* (room coverage).  DF CHECK* = aim + zoom, never resized:
 #   each head traces the 4 corners of the floor it was given -> quick visual check.
 #
@@ -45,7 +45,7 @@ $homePos = @{ $m140 = @(22600, 49700); $m251 = @(34200, 10000) }
 # Reference half-size of the dancefloor at home (16-bit pan,tilt from center to corner) = typical
 # half-extent of the user's dancefloor patterns. A corner aimed exactly this far away = zoom 0.
 $refHalf = @{ $m140 = @(3600, 3400); $m251 = @(4500, 5000) }
-$pages   = @('page5', 'page1')     # MOVEMENTS + 251 movements
+$pageRx  = '(?i)movement'          # live pages found BY NAME (MOVEMENTS + 251s movement) - page numbers move
 $skip    = @('251 Ceiling', 'Around Room')  # never touch: not dancefloor looks (Around Room = room
                                            # coverage from the physically crossed pairs; user 2026-11-18)
 $noScale = @('DF CHECK*')          # shared shape never resized
@@ -179,6 +179,13 @@ function Get-HeadFix($movers, $center, $corner, [switch]$Reset) {
 function Get-TargetGpjs {
   if ($Mode -eq 'Room') { return @($roomFiles + @($checks.Keys) | Select-Object -Unique) }
   $lt = Get-Content "$root/Live/live.ini" -Encoding UTF8
+  $pages = @(); $pg = $null
+  foreach ($l in $lt) {
+    if ($l -match '^\[(page\d+)\]$') { $pg = $matches[1]; continue }
+    if ($l -match '^\[') { $pg = $null; continue }
+    if ($pg -and $l -match '^name = (.*)$' -and $matches[1] -match $pageRx) { $pages += $pg; $pg = $null }
+  }
+  if (-not $pages.Count) { throw "No MOVEMENTS page found in live.ini. NOTHING was changed." }
   $files = @(); $on = $false
   $rx = '^\[(' + ($pages -join '|') + ')_button\d+\]$'
   foreach ($l in $lt) {

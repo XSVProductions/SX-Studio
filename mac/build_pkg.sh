@@ -10,7 +10,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$B/scripts"
 
 cp "$ROOT/mac/run" "$APP/Contents/MacOS/run"
 sed "s/__VERSION__/$VER/g" "$ROOT/mac/Info.plist" > "$APP/Contents/Info.plist"
-cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/sync_from_windows.sh" "$ROOT/assets/aim_movers_1024.png" "$APP/Contents/Resources/"
+cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/sync_from_windows.sh" "$ROOT/assets/aim_movers_1024.png" "$APP/Contents/Resources/"
 chmod 755 "$APP/Contents/MacOS/run" "$APP/Contents/Resources/sync_from_windows.sh"
 
 IS="$B/AppIcon.iconset"; mkdir -p "$IS"

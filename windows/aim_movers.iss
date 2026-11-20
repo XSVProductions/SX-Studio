@@ -37,6 +37,10 @@ Name: "desktopicon"; Description: "Put ShowXpress Helper on the Desktop"
 Source: "..\src\df_aim.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\df_aim_gui.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\skip_flash.ps1";   DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\rig.ps1";          DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\apc.ps1";          DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\speed.ps1";        DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\health.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\show_common.ps1";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\showxpress_helper.vbs";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\aim_movers.ico";      DestDir: "{app}"; Flags: ignoreversion
@@ -49,8 +53,8 @@ Type: files; Name: "{autoprograms}\AIM MOVERS.lnk"
 Type: filesandordirs; Name: "{localappdata}\Programs\AIM MOVERS"
 
 [Icons]
-Name: "{autoprograms}\ShowXpress Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers + pick the SKIP FLASH heads for ShowXpress"
-Name: "{autodesktop}\ShowXpress Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers + pick the SKIP FLASH heads for ShowXpress"; Tasks: desktopicon
+Name: "{autoprograms}\ShowXpress Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers, tonight's rig, APC pads and speed faders for ShowXpress"
+Name: "{autodesktop}\ShowXpress Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers, tonight's rig, APC pads and speed faders for ShowXpress"; Tasks: desktopicon
 
 [Run]
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open ShowXpress Helper now"; Flags: postinstall nowait skipifsilent

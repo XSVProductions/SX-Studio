@@ -3,6 +3,7 @@
 # (Edge/Chrome "app" mode, else the normal browser). Each tab is backed by a script that does the work:
 #   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
 #   APC mini -> apc.ps1        Speed Faders -> speed.ps1      Health Check -> health.ps1 (check, fix, revert)
+#   Rig Test -> rig_test.ps1   Pre-show Check -> preshow.ps1
 # Quits by itself a few minutes after its window is closed.
 param([string]$TestRoot = '', [int]$Port = 47321, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
@@ -13,6 +14,8 @@ $rigEngine    = Join-Path $here 'rig.ps1'
 $apcEngine    = Join-Path $here 'apc.ps1'
 $speedEngine  = Join-Path $here 'speed.ps1'
 $healthEngine = Join-Path $here 'health.ps1'
+$rtEngine     = Join-Path $here 'rig_test.ps1'
+$preEngine    = Join-Path $here 'preshow.ps1'
 $onMac  = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $psExe  = (Get-Process -Id $PID).Path
 $infoF  = Join-Path ([IO.Path]::GetTempPath()) 'showxpress_helper_gui.json'
@@ -196,11 +199,28 @@ header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .sp:nth-child(odd){background:#12151b}.sp.chg{border-color:rgba(90,169,255,.45);background:rgba(90,169,255,.06)}
 .sp .i{color:var(--dim);font-size:12px}.sp .i.no{color:#5d6574}
 select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;width:100%}
+.iss.ok .ic{background:rgba(61,220,132,.14);color:var(--green)}
+.rtmap{display:grid;grid-template-columns:1fr minmax(200px,1.3fr) 1fr;gap:12px;background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}
+.tw{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:8px 10px 10px}.tw h4{margin:0 0 6px;font-size:11.5px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
+.tw .pr{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.slot{background:#0f1217;border:1px dashed #3a4150;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;min-height:66px;user-select:none}
+.slot:hover{border-color:var(--amber)}.slot.set{border-style:solid;border-color:#3a4150}.slot.chg{box-shadow:inset 0 0 0 1px var(--blue)}
+.slot .sd{font-size:10.5px;color:#5d6574;display:block}.slot b{font-size:15px}.slot small{color:var(--dim);font-size:11px}
+.dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);vertical-align:-4px;margin-right:5px}
+.dot.fl{animation:bl .5s steps(1) infinite}@keyframes bl{50%{opacity:.12}}
+.mid{grid-row:2;grid-column:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed #262b36;border-radius:12px;padding:10px}
+.mid .sp2{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}.mid .sp2 span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:var(--txt)}
+.dj{grid-row:3;grid-column:2;align-self:end;text-align:center;color:var(--amber);font-size:12px;font-weight:600;letter-spacing:1px;border-top:2px solid rgba(255,176,32,.5);padding-top:6px}
+.tw.off{visibility:hidden}
+.pick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 12px}.pick div{background:#12151b;border:1px solid var(--line);border-radius:9px;padding:7px 6px;cursor:pointer;font-size:12px;text-align:center}
+.pick div:hover{border-color:var(--amber)}.pick div small{display:block;color:#5d6574;font-size:10.5px}.pick div.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
+.legend2{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:12px}.legend2 div{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;font-size:11.5px}.legend2 div b{display:block;font-size:13px}
+.pgrp h3{font-size:12px;letter-spacing:1px;color:var(--dim);margin:14px 0 4px;font-weight:600}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
 </style></head><body>
 <header><img class="logo" src="/icon.png?t=__TOKEN__" alt=""><h1>ShowXpress Helper</h1>
-  <nav class="tabs"><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button></nav>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button></nav>
   <div id="sx" class="pill ok">Checking ShowXpress&hellip;</div></header>
 <main>
  <div class="view" id="v-aim">
@@ -235,6 +255,29 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
         <text x="150" y="200" fill="#5d6574" font-size="10" text-anchor="middle">dashed = dancefloor &middot; amber = patterns</text>
       </svg>
     </div>
+  </section>
+ </div>
+
+ <div class="view" id="v-rt">
+  <section class="card">
+    <div class="row"><div class="grow"><h2>Rig test &mdash; which mover is where</h2>
+      <p class="sub" style="margin-bottom:0"><b>1.</b> In ShowXpress press <b>RIG ID</b> on the SETUP page &mdash; every 140 lights in its own look (key below). <b>2.</b> Tap each truss spot and pick the look you see on that head. <b>3.</b> Close ShowXpress (save first) and press <b>Save to 2D view</b>.</p></div>
+      <span id="rtstate" class="state ok" style="display:none"></span><button id="rtrefresh">&#8635; Refresh</button></div>
+    <div id="rterr" class="warnbox"></div>
+    <div id="rtinst" class="warnbox"></div>
+    <div id="rtlegend" class="legend2"></div>
+    <div id="rtmap" class="rtmap"></div>
+    <div class="row" style="margin-top:12px"><label class="link"><input id="rtextra" type="checkbox"> Bigger event: 2 extra towers (left and right middle)</label><div class="grow"></div>
+      <label class="link"><input id="rtrig" type="checkbox" checked> Also update Tonight's Rig (heads not on a truss = not hung)</label></div>
+  </section>
+ </div>
+
+ <div class="view" id="v-pre">
+  <section class="card">
+    <h2>Pre-show check</h2>
+    <p class="sub">One look before the guests arrive: the show, your gear and the laptop. Checking changes nothing.</p>
+    <div id="presum" class="summary"></div>
+    <div id="prelist"></div>
   </section>
  </div>
 
@@ -305,12 +348,15 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
   <section id="result" class="card result"><h2 id="rtitle"></h2><div id="rbody"></div><details><summary>Full details</summary><pre id="rlog"></pre></details></section>
   <div class="foot" id="foot"></div>
 </main>
-<div class="bar"><div class="in" data-for="aim"><button id="apply" class="primary">Apply to show</button><button id="home">Reset to normal</button><div class="hint grow" id="hint"></div></div>
+<div class="bar"><div class="in" data-for="rt"><button id="rtsave" class="primary">Save to 2D view</button><button id="rtclear">New event (clear spots)</button><button id="rtundo">Undo changes</button><div class="hint grow" id="rthint"></div></div>
+  <div class="in" data-for="pre"><button id="prerun" class="primary">Check again</button><div class="hint grow" id="prehint"></div></div>
+  <div class="in" data-for="aim"><button id="apply" class="primary">Apply to show</button><button id="home">Reset to normal</button><div class="hint grow" id="hint"></div></div>
   <div class="in" data-for="skip"><button id="sksave" class="primary">Save to SKIP FLASH</button><button id="skundo">Undo changes</button><div class="hint grow" id="skhint"></div></div>
   <div class="in" data-for="rig"><button id="rgsave" class="primary">Save tonight's rig</button><button id="rgall">All heads (put back)</button><button id="rgundo">Undo changes</button><div class="hint grow" id="rghint"></div></div>
   <div class="in" data-for="apc"><button id="apsave" class="primary">Save pads</button><button id="apundo">Undo changes</button><div class="hint grow" id="aphint"></div></div>
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
   <div class="in" data-for="health"><button id="hlrun" class="primary">Check again</button><div class="hint grow" id="hlhint"></div></div></div>
+<div class="modal" id="rtpick"><div class="box" style="max-width:540px"><h2 id="rtpt"></h2><p class="sub" style="margin:0 0 4px">Pick the look you see on this head.</p><div id="rtpb"></div><div class="row" style="justify-content:flex-end"><button id="rtpnone">Nothing hung here</button><button id="rtpcancel">Cancel</button></div></div></div>
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
 <div class="gone" id="gone"><h2 style="color:var(--txt)">ShowXpress Helper has closed</h2><p>Open it again from its icon.</p></div>
@@ -348,11 +394,11 @@ function ask(t,p,yes){return new Promise(res=>{$('mt').textContent=t;$('mp').inn
 function busy(on,t){$('busy').style.display=on?'flex':'none';if(t)$('busyt').textContent=t;}
 function showResult(r,what){const box=$('result');box.className='card result '+(r.ok?'ok':'err');
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(['skip','rig','apc','speed','fix','revert','keep'].includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
- else if(['rig','apc','speed','fix','revert','keep'].includes(what)){const same=lines.some(l=>/nothing to change/.test(l));
-  const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept'}[what]);
-  $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(what==='keep'?'':'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(what==='rig'||what==='apc'||what==='speed'?'use':'check')+' it.</p>');}
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(['skip','rig','apc','speed','fix','revert','keep','rt','install'].includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ else if(['rig','apc','speed','fix','revert','keep','rt','install'].includes(what)){const same=lines.some(l=>/nothing to change/.test(l));
+  const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept'}[what]);
+  $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(what==='keep'?'':'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(what==='rig'||what==='apc'||what==='speed'||what==='rt'||what==='install'?'use':'check')+' it.</p>');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
   $('rbody').innerHTML='<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul><p class="sub" style="margin:8px 0 0">Open ShowXpress and press <b>SKIP FLASH</b> to check it.</p>';}
@@ -368,16 +414,16 @@ $('apply').onclick=async()=>{let force=false;const w=P.heads.filter(h=>h.warn);
 $('home').onclick=async()=>{if(!await ask('Reset to normal?','All heads go back to the normal center, size 100%, and the DF AIM (ADJUST) scene is reset. Your shapes are kept.','Reset'))return;
  busy(true,'Resetting…');try{const r=await api('/api/home',{});showResult(r,'home');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load.done=0;load();};
 async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
- p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';updBar();updSkip();updRig();updApc();updSpeed();updHealth();
- if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();}}catch(e){$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+ p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();
+ if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();}}catch(e){$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['rig','aim','skip','apc','speed','health'];
-function setTab(t){if(!TABS.includes(t))t='rig';try{localStorage.setItem('tab',t)}catch(e){}
+const TABS=['rt','rig','aim','skip','apc','speed','health','pre'];
+function setTab(t){if(!TABS.includes(t))t='rt';try{localStorage.setItem('tab',t)}catch(e){}
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();}
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 
 // ---------------- Skip Flash heads
@@ -559,7 +605,63 @@ async function hlKeep(id){const a=(H.applied||[]).find(x=>x.id===id);if(!a)retur
  await saveTo('/api/health/keep',{id},'Saving…',loadHealth,'keep');}
 $('hlrun').onclick=loadHealth;
 
-let t0='rig';try{t0=location.hash.slice(1)||localStorage.getItem('tab')||'rig'}catch(e){}
+// ---------------- Rig Test (rig_test.ps1)
+let RT=null,rtA={},rtX=false,rtSlot=null;
+const rtHead=id=>RT.heads.find(h=>h.id===id);
+const rtUsed=k=>rtX||!RT.slots.find(s=>s.key===k).extra;
+function rtDirty(){if(!RT||!RT.ok)return false;const a=RT.assign||{},ks=new Set([...Object.keys(a),...Object.keys(rtA)]);return rtX!==!!RT.extra||[...ks].some(k=>(a[k]||'')!==(rtA[k]||''));}
+async function loadRt(){RT=await getJ('/api/rt');rtA={};rtX=false;if(RT.ok){Object.assign(rtA,RT.assign||{});rtX=!!RT.extra;}renderRt();}
+function lookHtml(h){return `<span class="dot${h.flash?' fl':''}" style="background:#${h.hex}"></span>`;}
+function renderRt(){if(!RT)return;
+ if(showErr('rterr',RT)){['rtmap','rtlegend'].forEach(i=>$(i).innerHTML='');$('rtinst').style.display='none';$('rtstate').style.display='none';updRt();return;}
+ const ins=RT.install||{},ib=$('rtinst');
+ if(!ins.scene||!ins.button){ib.style.display='block';ib.innerHTML='The <b>RIG ID</b> button isn&rsquo;t in the show yet. <button id="rtinstb" class="mini primary" style="margin-left:8px">Add RIG ID to the SETUP page</button>';
+  $('rtinstb').onclick=()=>saveTo('/api/rt/install',{},'Adding RIG ID…',loadRt,'install');}else ib.style.display='none';
+ $('rtlegend').innerHTML=RT.heads.map(h=>`<div>${lookHtml(h)}<b>#${h.num}</b>${esc(h.look)}${h.flash?' flashing':''}</div>`).join('');
+ $('rtextra').checked=rtX;
+ const a0=RT.assign||{},placed=new Set(Object.entries(rtA).filter(([k,v])=>v&&rtUsed(k)).map(([k,v])=>v));
+ const tower=t=>{const ss=RT.slots.filter(s=>s.tower===t),ex=ss[0].extra;
+  return `<div class="tw${ex&&!rtX?' off':''}" style="grid-column:${t.endsWith('l')?1:3};grid-row:${t[0]==='t'?1:t[0]==='m'?2:3}"><h4>${esc(ss[0].towerName)} tower</h4><div class="pr">`+ss.map(s=>{const id=rtA[s.key],h=id&&rtHead(id),chg=(a0[s.key]||'')!==(id||'');
+   return `<div class="slot${h?' set':''}${chg?' chg':''}" data-slot="${s.key}"><span class="sd">${s.side} mover</span>${h?`${lookHtml(h)}<b>#${h.num}</b><br><small>${esc(h.look)}${h.flash?' flashing':''}</small>`:'<small>tap to set</small>'}</div>`;}).join('')+'</div></div>';};
+ const spare=RT.heads.filter(h=>!placed.has(h.id));
+ $('rtmap').innerHTML=['tl','tr','ml','mr','bl','br'].map(tower).join('')+
+  `<div class="mid">${spare.length?`<div>Not on a truss &mdash; grouped in the middle of the 2D page</div><div class="sp2">${spare.map(h=>`<span>#${h.num}</span>`).join('')}</div>`:'Every 140 is on a truss'}</div><div class="dj">&#9650; DJ BOOTH (you) &#9650;</div>`;
+ document.querySelectorAll('[data-slot]').forEach(e=>e.onclick=()=>rtOpen(e.dataset.slot));
+ stateTag('rtstate',rtDirty());$('foot').textContent='Show: '+RT.show+(RT.saved?' · Rig Test last saved '+RT.saved.replace('T',' '):'');updRt();}
+function rtOpen(k){rtSlot=k;const s=RT.slots.find(x=>x.key===k),cur=rtA[k];$('rtpt').textContent=s.towerName+' tower — '+s.side+' mover';
+ const where=id=>{const e=Object.entries(rtA).find(([kk,v])=>v===id&&kk!==k&&rtUsed(kk));if(!e)return'';const o=RT.slots.find(x=>x.key===e[0]);return 'now '+o.towerName.toLowerCase()+' '+o.side;};
+ const grid=fl=>`<div class="pick">${RT.heads.filter(h=>h.flash===fl).map(h=>`<div data-pk="${h.id}" class="${h.id===cur?'cur':''}">${lookHtml(h)}#${h.num}<small>${esc(h.look)}</small><small>${esc(where(h.id))||'&nbsp;'}</small></div>`).join('')}</div>`;
+ $('rtpb').innerHTML='<div class="gh"><h3>SOLID</h3></div>'+grid(false)+'<div class="gh"><h3>FLASHING</h3></div>'+grid(true);
+ document.querySelectorAll('[data-pk]').forEach(e=>e.onclick=()=>{const id=e.dataset.pk;for(const kk of Object.keys(rtA))if(rtA[kk]===id)delete rtA[kk];rtA[k]=id;$('rtpick').style.display='none';renderRt();});
+ $('rtpick').style.display='flex';}
+$('rtpnone').onclick=()=>{delete rtA[rtSlot];$('rtpick').style.display='none';renderRt();};
+$('rtpcancel').onclick=()=>{$('rtpick').style.display='none';};
+$('rtextra').onchange=e=>{rtX=e.target.checked;renderRt();};
+function rtCount(){return Object.entries(rtA).filter(([k,v])=>v&&rtUsed(k)).length;}
+function updRt(){const ok=!!(RT&&RT.ok),d=rtDirty(),n=ok?rtCount():0;$('rtsave').disabled=sxOpen||!ok||!n;$('rtundo').disabled=!ok||!d;$('rtclear').disabled=!ok||!Object.keys(rtA).length;
+ const ib=$('rtinstb');if(ib)ib.disabled=sxOpen;
+ $('rthint').innerHTML=!ok?'':sxHint('save (it rewrites the 2D view when it closes)')??(!n?'<span style="color:var(--amber)">Put at least one mover on a truss.</span>':n+' mover(s) on trusses. Only the 140 positions in the 2D view change'+($('rtrig').checked?', plus Tonight\'s Rig.':'.'));}
+$('rtrig').onchange=updRt;$('rtrefresh').onclick=loadRt;
+$('rtundo').onclick=()=>{rtA=Object.assign({},RT.assign||{});rtX=!!RT.extra;renderRt();};
+$('rtclear').onclick=()=>{rtA={};renderRt();};
+$('rtsave').onclick=()=>{const a={};for(const [k,v] of Object.entries(rtA))if(v&&rtUsed(k))a[k]=v;
+ saveTo('/api/rt/apply',{assign:a,extra:rtX,rig:$('rtrig').checked},'Saving the 2D view…',async()=>{await loadRt();R=null;S=null;H=null;},'rt');};
+
+// ---------------- Pre-show check (preshow.ps1 + the health check)
+async function loadPre(){$('presum').innerHTML='Checking&hellip;';$('prelist').innerHTML='';const [p,h]=await Promise.all([getJ('/api/pre'),H?Promise.resolve(H):getJ('/api/health')]);
+ if(h&&h.ok)H=h;if(!p.ok){$('presum').innerHTML='<span style="color:var(--red)">'+esc(p.error)+'</span>';return;}
+ const it=[...p.items];
+ if(h&&h.ok){const e=(h.issues||[]).filter(i=>i.level==='error').length,w=(h.issues||[]).filter(i=>i.level==='warn').length;
+  it.splice(2,0,e?{group:'Show',level:'error',title:'Health Check: '+e+' problem(s) in the show',detail:w?w+' warning(s) too.':'',advice:'Open the Health Check tab and look at the red ones.'}:
+   w?{group:'Show',level:'warn',title:'Health Check: '+w+' warning(s)',detail:'No real problems.',advice:'Have a look in the Health Check tab if you have time.'}:{group:'Show',level:'ok',title:'Health Check: no problems in the show',detail:'',advice:''});}
+ const c=l=>it.filter(i=>i.level===l).length;
+ $('presum').innerHTML=c('error')?`<b style="color:var(--red)">${c('error')} thing(s) to fix</b> before the show &middot; ${c('warn')} to check`:c('warn')?`<b style="color:var(--amber)">${c('warn')} thing(s) to check</b> &mdash; nothing broken`:'<b style="color:var(--green)">&#10003; All good &mdash; ready for the show</b>';
+ const groups=[...new Set(it.map(i=>i.group))];
+ $('prelist').innerHTML=groups.map(g=>`<div class="pgrp"><h3>${esc(g.toUpperCase())}</h3>`+it.filter(i=>i.group===g).map(i=>`<div class="iss ${i.level}"><div class="ic">${i.level==='ok'?'&#10003;':i.level==='error'?'!':i.level==='warn'?'?':'i'}</div><div class="grow"><b>${esc(i.title)}</b>${i.detail?`<div class="d">${esc(i.detail)}</div>`:''}${i.advice&&i.level!=='ok'?`<div class="fx"><b>Fix:</b> ${esc(i.advice)}</div>`:''}</div></div>`).join('')+'</div>').join('');
+ $('prehint').textContent='Checked at '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. Checking changes nothing.';$('foot').textContent='Show: '+p.show;}
+$('prerun').onclick=()=>{H=null;loadPre();};
+
+let t0='rt';try{t0=location.hash.slice(1)||localStorage.getItem('tab')||'rt'}catch(e){}
 setTab(t0);draw();load();poll();
 </script></body></html>
 '@
@@ -644,6 +746,23 @@ try {
           if ($i -notmatch '^[0-9a-f]{8}$') { Send-Json $ctx @{ ok = $false; error = 'Unknown fix.'; out = '' }; break }
           Send-Json $ctx (Invoke-Engine "-Action Keep -FixId $i" $healthEngine)
         }
+        '/api/rt'      { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $rtEngine) }
+        '/api/rt/install' { Send-Json $ctx (Invoke-Engine '-Action Install' $rtEngine) }
+        '/api/rt/apply' {
+          $as = [ordered]@{}
+          if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|ml|mr|bl|br)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
+          if (-not $as.Count) { Send-Json $ctx @{ ok = $false; error = 'Put at least one mover on a truss.'; out = '' }; break }
+          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+          [IO.File]::WriteAllText($cf, (@{ assign = $as; extra = [bool]$body.extra } | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding($false)))
+          try { $r = Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $rtEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+          if ($r.ok -and $body.rig) {
+            $hl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^RIGHEADS: [\d,]+$' } | Select-Object -Last 1
+            if ($hl) { $r2 = Invoke-Engine "-Action Apply -Heads `"$($hl.Substring(10))`"" $rigEngine
+              if ($r2.ok) { $r.out += "`n  Tonight's Rig:`n" + $r2.out } else { $r.out += "`n  Tonight's Rig NOT updated: $($r2.error)" } }
+          }
+          Send-Json $ctx $r
+        }
+        '/api/pre'     { Send-EngineJson $ctx (Invoke-Engine '-Action Check' $preEngine) }
         default        { Send-Text $ctx 404 'text/plain' 'not found' }
       }
     } catch {

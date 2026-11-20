@@ -41,6 +41,8 @@ Source: "..\src\rig.ps1";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\apc.ps1";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\speed.ps1";        DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\health.ps1";       DestDir: "{app}"; Flags: ignoreversion
+Source: "..srcig_test.ps1";     DestDir: "{app}"; Flags: ignoreversion
+Source: "..srcpreshow.ps1";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\show_common.ps1";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\showxpress_helper.vbs";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\aim_movers.ico";      DestDir: "{app}"; Flags: ignoreversion

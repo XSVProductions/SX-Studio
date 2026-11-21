@@ -459,7 +459,7 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
 .slot:hover{border-color:var(--amber)}.slot.set{border-style:solid;border-color:#3a4150}.slot.chg{box-shadow:inset 0 0 0 1px var(--blue)}
 .slot .sd{font-size:10.5px;color:#5d6574;display:block}.slot b{font-size:15px}.slot small{color:var(--dim);font-size:11px}
 .dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);vertical-align:-4px;margin-right:5px}
-.dot.fl{animation:bl .8s steps(1) infinite}@keyframes bl{50%{opacity:.12}}
+.dot.fl{animation:bl .7s linear infinite}@keyframes bl{0%{opacity:1}100%{opacity:.1}}
 .mid{grid-row:2;grid-column:1/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed #262b36;border-radius:12px;padding:10px}
 .mid .sp2{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}.mid .sp2 span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:var(--txt)}
 .dj{grid-row:4;grid-column:1/4;align-self:end;text-align:center;color:var(--amber);font-size:12px;font-weight:600;letter-spacing:1px;border-top:2px solid rgba(255,176,32,.5);padding-top:6px}
@@ -1022,7 +1022,7 @@ function renderRt(){if(!RT)return;
  const ins=RT.install||{},ib=$('rtinst');
  if(!ins.scene||!ins.button){ib.style.display='block';ib.innerHTML='The <b>RIG ID</b> button isn&rsquo;t in the show yet. <button id="rtinstb" class="mini primary" style="margin-left:8px">Add RIG ID to the SETUP page</button>';
   $('rtinstb').onclick=()=>saveTo('/api/rt/install',{},'Adding RIG ID…',loadRt,'install');}
- else if(ins.old){ib.style.display='block';ib.innerHTML='The <b>RIG ID</b> scene in the show is the old one (colours that didn&rsquo;t match, no visible flash). <button id="rtinstb" class="mini primary" style="margin-left:8px">Update RIG ID</button>';
+ else if(ins.old){ib.style.display='block';ib.innerHTML='The <b>RIG ID</b> scene in the show is the old one (amber instead of light green, no visible flash). <button id="rtinstb" class="mini primary" style="margin-left:8px">Update RIG ID</button>';
   $('rtinstb').onclick=()=>saveTo('/api/rt/install',{},'Updating RIG ID…',loadRt,'install');}else ib.style.display='none';
  $('rtlegend').innerHTML=RT.heads.map(h=>`<div>${lookHtml(h)}<b>#${h.num}</b>${esc(h.look)}${h.flash?' flashing':''}</div>`).join('');
  $('rtextra').checked=rtX;

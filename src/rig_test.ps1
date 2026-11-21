@@ -28,15 +28,17 @@ $sceneName = 'RIG ID.scex'
 $idTilt = @(242, 48)
 $scenePath = "$root/scenes/$sceneName"
 
-# ---- the looks: 140 #1-#8 solid, #9-#16 the same colours blinking (on/off with the dimmer - the shutter strobe at 40
-# didn't visibly strobe, user 2026-11-21). Names + swatches = how each 140SR wheel filter really looks (red is a deep
-# red, dark_yellow is amber, magenta reads purple-pink, blue is a deep royal blue).
+# ---- the looks: 140 #1-#8 solid, #9-#16 the same colours pulsing. Names + swatches = how each 140SR wheel filter
+# really looks (red is a deep red, magenta reads purple, blue is a deep royal blue; user 2026-11-21).
+#   amber (dark_yellow 26) looked like yellow -> light green 41 (user's pick).
+#   flash: shutter strobe 40 didn't show; a 2-step dimmer blink didn't run either (the button follows the MOVEMENTS
+#   speed fader) -> the light's own pulse, shutter 195 = what SLOW STROBE uses on this rig. One step, no fader needed.
 $looks = @(
-  @{ n = 'White';  v = 1;  hex = 'ffffff' }, @{ n = 'Deep red';  v = 5;  hex = 'c80000' },
-  @{ n = 'Amber';  v = 26; hex = 'ff9a00' }, @{ n = 'Yellow';    v = 9;  hex = 'ffee00' },
-  @{ n = 'Green';  v = 13; hex = '00c83c' }, @{ n = 'Sky blue';  v = 17; hex = '8fdcff' },
-  @{ n = 'Blue';   v = 31; hex = '1e3cff' }, @{ n = 'Purple';    v = 36; hex = 'b030ff' })
-$blinkLen = 40   # step length in 1/100 s: 0.4 s on, 0.4 s off (the Helper's swatches blink the same)
+  @{ n = 'White';  v = 1;  hex = 'ffffff' }, @{ n = 'Deep red';    v = 5;  hex = 'c80000' },
+  @{ n = 'Light green'; v = 41; hex = 'b4ff8c' }, @{ n = 'Yellow';  v = 9;  hex = 'ffee00' },
+  @{ n = 'Green';  v = 13; hex = '00c83c' }, @{ n = 'Sky blue';    v = 17; hex = '8fdcff' },
+  @{ n = 'Blue';   v = 31; hex = '1e3cff' }, @{ n = 'Purple';      v = 36; hex = 'b030ff' })
+$flashShutter = 195
 
 # ---- 2D view spots (top-left corner of the fixture icon, pixels). Pairs are [left head, right head].
 # (the table lives in show_common.ps1 - Aim Movers uses it too, to find each head's T-bar partner)
@@ -79,20 +81,24 @@ function Get-InstallState {
   [pscustomobject]@{ scene = (Test-Path -LiteralPath $scenePath); old = (Test-OldScene); button = [bool]$btn.Count; setupPage = $pg
                      where = $(if ($btn.Count) { "$($btn[0].PageName), line $($btn[0].Keys['line']), column $($btn[0].Keys['column'])" } else { '' }) }
 }
-# a RIG ID from before v1.4.9 = 1 step (shutter strobe that didn't show, old colours) -> Install rewrites it
-function Test-OldScene { (Test-Path -LiteralPath $scenePath) -and ([regex]::Matches([IO.File]::ReadAllText($scenePath), '<Step ').Count -lt 2) }
+# a RIG ID from before v1.4.10 (amber, strobe 40 / dimmer blink that didn't show) -> Install rewrites it
+function Test-OldScene {
+  if (-not (Test-Path -LiteralPath $scenePath)) { return $false }
+  $t = [IO.File]::ReadAllText($scenePath)
+  -not ($t -match "name=`"color`" value=`"41`"" -and $t -match "name=`"shutter`" value=`"$flashShutter`"")
+}
 function New-IdSceneText {
   $nl = "`n"; $sb = New-Object Text.StringBuilder
   [void]$sb.Append("<?xml version=`"1.0`" encoding=`"UTF-8`"?>$nl$nl<Scene>$nl  <Fixtures>$nl")
   foreach ($h in $heads) { [void]$sb.Append("    <Fixture id=`"$($h.Id)`" name=`"$($h.Name)`" model=`"$($h.Model)`"/>$nl") }
   [void]$sb.Append("  </Fixtures>$nl  <Steps>$nl")
-  foreach ($on in $true, $false) {   # step 1 all on; step 2 the blinking heads off
-    [void]$sb.Append("    <Step length=`"$blinkLen`">$nl")
+  foreach ($on in @($true)) {
+    [void]$sb.Append("    <Step length=`"300`">$nl")
     foreach ($h in $heads) {
       $lk = Get-Look $h
       $ch = @(@(0,'pan',88,1), @(1,'upan',72,1), @(2,'tilt',$idTilt[0],1), @(3,'utilt',$idTilt[1],1), @(4,'pantilt_speed',0,0), @(5,'color',$lk.look.v,0),
               @(6,'gobo',0,0), @(7,'gobo#2',0,0), @(8,'gobo_rotate',0,0), @(9,'8 facet prism',0,0), @(10,'linear prism',0,0),
-              @(13,'zoom',243,0), @(14,'frost',0,0), @(15,'dimmer',$(if ($lk.flash -and -not $on) { 0 } else { 255 }),0), @(16,'shutter',255,0))
+              @(13,'zoom',243,0), @(14,'frost',0,0), @(15,'dimmer',255,0), @(16,'shutter',$(if ($lk.flash) { $flashShutter } else { 255 }),0))
       [void]$sb.Append("      <Fixture id=`"$($h.Id)`">$nl")
       foreach ($c in $ch) { [void]$sb.Append("        <Channel index=`"$($c[0])`" name=`"$($c[1])`" value=`"$($c[2])`"$(if ($c[3]) { ' fade="1"' })/>$nl") }
       [void]$sb.Append("      </Fixture>$nl")
@@ -108,7 +114,7 @@ if ($Action -eq 'Install') {
   $wasOld = Test-OldScene
   if ($wasOld -or -not (Test-Path -LiteralPath $scenePath)) {
     [IO.File]::WriteAllText($scenePath, (New-IdSceneText), (New-Object Text.UTF8Encoding($false)))
-    $out += "  CHANGED  $(if ($wasOld) { 'updated' } else { 'made' }) the scene RIG ID (140 #1-#8 solid, #9-#16 the same colours blinking)"
+    $out += "  CHANGED  $(if ($wasOld) { 'updated' } else { 'made' }) the scene RIG ID (140 #1-#8 solid, #9-#16 the same colours pulsing)"
   }
   $ini = Read-LiveIni $root; $info = Get-LiveInfo $root $ini
   if (-not @($info.Buttons | Where-Object { $_.Name -eq $sceneName }).Count) {

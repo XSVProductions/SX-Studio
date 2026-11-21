@@ -43,13 +43,19 @@ function Get-Nearest($model, [string]$hex) {
   [pscustomobject]@{ name = $best[0]; value = $best[1]; hex = $best[2] }
 }
 
-# all fixtures in the show (from every scene's fixture list) -> uplights / Ovation
+# all fixtures in the show (from every scene's fixture list) -> uplights / Ovation.
+# Only fixtures still patched (id in fixtures.ini) - old scenes can still list deleted fixtures (e.g. "UPLIGHT #2"),
+# and putting those in a scene makes ShowXpress say "No compatible fixture found" (user 2026-11-21).
 function Get-ShowFixtures {
-  $seen = @{}
+  $seen = @{}; $patched = @{}
+  if (Test-Path -LiteralPath "$root/fixtures.ini") {
+    foreach ($l in [IO.File]::ReadAllLines("$root/fixtures.ini")) { if ($l -match '^id = (\d+)') { $patched[$matches[1]] = $true } }
+  }
   foreach ($f in Get-ChildItem -LiteralPath "$root/scenes" -Filter *.scex) {
     $t = [IO.File]::ReadAllText($f.FullName)
     foreach ($m in [regex]::Matches($t, '<Fixture id="(\d+)" name="([^"]*)" model="([^"]*)"')) {
-      $id = $m.Groups[1].Value; if (-not $seen.ContainsKey($id)) { $seen[$id] = [pscustomobject]@{ Id = $id; Name = [Net.WebUtility]::HtmlDecode($m.Groups[2].Value); Model = [Net.WebUtility]::HtmlDecode($m.Groups[3].Value) } }
+      $id = $m.Groups[1].Value; if ($patched.Count -and -not $patched.ContainsKey($id)) { continue }
+      if (-not $seen.ContainsKey($id)) { $seen[$id] = [pscustomobject]@{ Id = $id; Name = [Net.WebUtility]::HtmlDecode($m.Groups[2].Value); Model = [Net.WebUtility]::HtmlDecode($m.Groups[3].Value) } }
     }
   }
   @($seen.Values | Sort-Object Name)

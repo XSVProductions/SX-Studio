@@ -37,12 +37,9 @@ $looks = @(
 $flashShutter = 40   # 140SR shutter 16-131 = strobe slow -> fast
 
 # ---- 2D view spots (top-left corner of the fixture icon, pixels). Pairs are [left head, right head].
-$spots = @(
-  @{ key = 'tl'; name = 'Top left';     x = 0;   y = 0;   extra = $false }, @{ key = 'tr'; name = 'Top right';    x = 786; y = 0;   extra = $false },
-  @{ key = 'tm'; name = 'Top middle';    x = 329; y = 0;   extra = $true;  gap = 266 },
-  @{ key = 'bl'; name = 'Bottom left';  x = 0;   y = 592; extra = $false }, @{ key = 'br'; name = 'Bottom right'; x = 786; y = 592; extra = $false },
-  @{ key = 'bm'; name = 'Bottom middle'; x = 329; y = 592; extra = $true;  gap = 266 })
-$pairGap = 110
+# (the table lives in show_common.ps1 - Aim Movers uses it too, to find each head's T-bar partner)
+$spots = $trussSpots
+$pairGap = $trussPairGap
 # blinder top center, uplight bottom center (their 2D pictures are 128 px wide; page center = 503)
 $centerX = 439; $centerFix = @(@{ rx = 'blinder'; y = 0 }, @{ rx = 'uplight'; y = 640 })
 $slots = foreach ($s in $spots) { foreach ($side in 'l', 'r') {

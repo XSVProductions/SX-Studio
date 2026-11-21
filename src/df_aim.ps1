@@ -20,14 +20,25 @@
 #   CENTER SPOT: Apply (Floor or Room) also copies each head's step-1 CENTER aim into the CENTER SPOT scene
 #                (pan/tilt only; heads still on home are left alone). Home doesn't touch CENTER SPOT.
 #
+#   T-BAR PARTNERS (Floor only): aim ONE head per T-bar in step 1 (+ step 2 if you use it). On Apply its partner on the
+#                same T-bar (from the 2D view Rig Test writes) gets the same aim, IF the partner is untouched = still on home,
+#                or still exactly on the copy the Helper gave it last time. A head you aimed yourself always keeps its own
+#                aim. The copies are written into the aim scene too, so you can still nudge them; a nudged copy is then yours.
+#                Not for Room mode (the pairs are physically crossed for the AROUND ROOM looks).
+#
 #   -Action Apply [-Size "100" | "120 90"]   -Action Home (all corrections off, size 100)
+#
+#   LIVE AIM (Helper, Windows): the Helper drives the DMX interface itself while ShowXpress is closed (dmx_out.ps1) and
+#   the user aims the real heads with the mouse. -Action LiveInfo = heads + DMX addresses + current aims (JSON);
+#   -Action LiveSave -ChangesFile = the new step 1 / step 2 aims written into the aim scene (then Apply as usual).
 #
 #   -Mode Room = the same thing for the AROUND ROOM movements (walls / ceiling): scene "ROOM AIM (ADJUST)" (step 1 = center
 #   of the area to cover, step 2 = the same corner of it), check "ROOM CHECK" (Generator), state room_aim_state.json.
 #   "Normal" for the room = the middle and size of the original AROUND ROOM shape.  -Action Install = ROOM AIM (ADJUST) +
 #   ROOM CHECK made and put on the SETUP page (under DF AIM / DF CHECK).
 param(
-  [ValidateSet('Apply','Home','Menu','Preview','Install')][string]$Action = 'Menu',   # Preview = JSON for the GUI, writes nothing
+  [ValidateSet('Apply','Home','Menu','Preview','Install','LiveInfo','LiveSave')][string]$Action = 'Menu',   # Preview / LiveInfo = JSON for the GUI, writes nothing
+  [string]$ChangesFile = '',   # LiveSave: {"aims":{"<id>":{"c":[pan,tilt],"k":[pan,tilt] or null}}} from the Helper's live aim screen
   [ValidateSet('Floor','Room')][string]$Mode = 'Floor',
   [string]$Size = '',
   [switch]$NoPrompt,
@@ -99,6 +110,22 @@ function Get-Movers { if ($Mode -eq 'Room') { Get-ShowMovers $root | Where-Objec
 
 function Get-DefaultCorner($m) { $h = $homePos[$m.Model]; $r = $refHalf[$m.Model]; @(($h[0] - $r[0]), ($h[1] + $r[1])) }
 
+function Get-AimChannels($m, [int]$p, [int]$t) {
+  # the aim look (tight white beam): @(channel index, name, value, fade). Index = DMX channel offset from the head's address.
+  $ch = @(
+    @(0,'pan',[math]::Floor($p/256),1), @(1,'upan',($p%256),1), @(2,'tilt',[math]::Floor($t/256),1), @(3,'utilt',($t%256),1),
+    @(4,'pantilt_speed',0,0), @(5,'color',0,0))
+  if ($m.Is140) {
+    $ch += ,@(6,'gobo',0,0); $ch += ,@(7,'gobo#2',0,0); $ch += ,@(8,'gobo_rotate',0,0)
+    $ch += ,@(9,'8 facet prism',0,0); $ch += ,@(10,'linear prism',0,0); $ch += ,@(13,'zoom',243,0); $ch += ,@(14,'frost',0,0)
+  } else {
+    $ch += ,@(6,'gobo',0,0); $ch += ,@(7,'gobo2',0,0); $ch += ,@(8,'gobo_rotate',0,0)
+    $ch += ,@(9,'prism',0,0); $ch += ,@(10,'prism2',0,0); $ch += ,@(11,'focus',38,0); $ch += ,@(13,'zoom',255,0); $ch += ,@(14,'frost',0,0)
+  }
+  $ch += ,@(15,'dimmer',255,0); $ch += ,@(16,'shutter',255,0)
+  ,$ch
+}
+
 function Write-AimScene($movers, $center, $corner) {
   # $center / $corner: hashtable id -> @(pan16, tilt16).  Step 1 = center, step 2 = corner.
   $L = New-Object Collections.Generic.List[string]
@@ -108,18 +135,7 @@ function Write-AimScene($movers, $center, $corner) {
   foreach ($pos in @($center, $corner)) {
     $L.Add('    <Step length="300">')
     foreach ($m in $movers) {
-      $p = [int]$pos[$m.Id][0]; $t = [int]$pos[$m.Id][1]
-      $ch = @(
-        @(0,'pan',[math]::Floor($p/256),1), @(1,'upan',($p%256),1), @(2,'tilt',[math]::Floor($t/256),1), @(3,'utilt',($t%256),1),
-        @(4,'pantilt_speed',0,0), @(5,'color',0,0))
-      if ($m.Is140) {
-        $ch += ,@(6,'gobo',0,0); $ch += ,@(7,'gobo#2',0,0); $ch += ,@(8,'gobo_rotate',0,0)
-        $ch += ,@(9,'8 facet prism',0,0); $ch += ,@(10,'linear prism',0,0); $ch += ,@(13,'zoom',243,0); $ch += ,@(14,'frost',0,0)
-      } else {
-        $ch += ,@(6,'gobo',0,0); $ch += ,@(7,'gobo2',0,0); $ch += ,@(8,'gobo_rotate',0,0)
-        $ch += ,@(9,'prism',0,0); $ch += ,@(10,'prism2',0,0); $ch += ,@(11,'focus',38,0); $ch += ,@(13,'zoom',255,0); $ch += ,@(14,'frost',0,0)
-      }
-      $ch += ,@(15,'dimmer',255,0); $ch += ,@(16,'shutter',255,0)
+      $ch = Get-AimChannels $m ([int]$pos[$m.Id][0]) ([int]$pos[$m.Id][1])
       $L.Add("      <Fixture id=`"$($m.Id)`">")
       foreach ($c in $ch) {
         $fade = if ($c[3]) { ' fade="1"' } else { '' }
@@ -247,10 +263,12 @@ function New-CheckGpj($name, $model, $movers) {
 }
 
 function Load-State {
-  $st = @{ sx = 1.0; sy = 1.0; files = @{} }
+  $st = @{ sx = 1.0; sy = 1.0; files = @{}; copied = @{} }
   if (Test-Path $stateF) {
     $j = [IO.File]::ReadAllText($stateF) | ConvertFrom-Json
     $st.sx = [double]$j.sx; $st.sy = [double]$j.sy
+    $toXY = { param($v) if ("$v" -match '^(-?\d+),(-?\d+)$') { @([int]$matches[1], [int]$matches[2]) } else { $null } }
+    if ($j.copied) { foreach ($p in $j.copied.PSObject.Properties) { $st.copied[$p.Name] = @{ c = (& $toXY $p.Value.c); k = (& $toXY $p.Value.k); from = "$($p.Value.from)" } } }
     foreach ($p in $j.files.PSObject.Properties) {
       $st.files[$p.Name] = @{ base = [string]$p.Value.base; written = [string]$p.Value.written; sx = [double]$p.Value.sx; sy = [double]$p.Value.sy }
     }
@@ -261,7 +279,9 @@ function Load-State {
 function Save-State($st) {
   $files = [ordered]@{}
   foreach ($k in ($st.files.Keys | Sort-Object)) { $files[$k] = [pscustomobject]$st.files[$k] }
-  $o = [pscustomobject]@{ sx = $st.sx; sy = $st.sy; files = [pscustomobject]$files }
+  $cp = [ordered]@{}
+  foreach ($k in ($st.copied.Keys | Sort-Object)) { $v = $st.copied[$k]; $cp[$k] = [pscustomobject]@{ c = ($v.c -join ','); k = $(if ($v.k) { $v.k -join ',' } else { '' }); from = $v.from } }
+  $o = [pscustomobject]@{ sx = $st.sx; sy = $st.sy; files = [pscustomobject]$files; copied = [pscustomobject]$cp }
   [IO.File]::WriteAllText($stateF, ($o | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
 }
 
@@ -479,6 +499,36 @@ function ConvertTo-Size([string]$in) {
   @(($w / 100), ($dd / 100))
 }
 
+function Add-PartnerAims($movers, $a, $st) {
+  # T-bar partner copy (user 2026-11-21) - see the top of this file. Changes $a.center / $a.corner in place.
+  # -> id -> @{ from = partner id; tower; corner = step 2 copied too }
+  $res = @{}; if ($Mode -ne 'Floor') { return $res }
+  $pairs = Get-TrussPartners $root $movers
+  $byId = @{}; foreach ($m in $movers) { $byId[$m.Id] = $m }
+  $same = { param($x, $y) [bool]($x -and $y -and $x[0] -eq $y[0] -and $x[1] -eq $y[1]) }
+  $free = @{}
+  foreach ($m in $movers) { $cp = $st.copied[$m.Id]; $free[$m.Id] = (& $same $a.center[$m.Id] $homePos[$m.Model]) -or ($cp -and (& $same $a.center[$m.Id] $cp.c)) }
+  foreach ($m in $movers) {
+    $id = $m.Id; if (-not $pairs.ContainsKey($id)) { continue }
+    $src = $pairs[$id].partner; if (-not $free[$id] -or $free[$src]) { continue }
+    $cp = $st.copied[$id]
+    $a.center[$id] = @($a.center[$src][0], $a.center[$src][1])
+    # step 2 too, unless this head's own corner was set by hand
+    $kFree = (& $same $a.corner[$id] (Get-DefaultCorner $m)) -or ($cp -and (& $same $a.corner[$id] $cp.k))
+    if ($kFree) { $a.corner[$id] = @($a.corner[$src][0], $a.corner[$src][1]) }
+    $res[$id] = @{ from = $src; tower = $pairs[$id].tower; corner = $kFree; sized = ($kFree -and -not (& $same $a.corner[$src] (Get-DefaultCorner $byId[$src]))) }
+  }
+  # remember the copies (a copy that is still untouched keeps its record, so it can follow its partner next time)
+  $keep = @{}
+  foreach ($m in $movers) {
+    $id = $m.Id
+    if ($res.ContainsKey($id)) { $keep[$id] = @{ c = $a.center[$id]; k = $(if ($res[$id].corner) { $a.corner[$id] } else { $null }); from = $res[$id].from } }
+    elseif ($st.copied[$id] -and (& $same $a.center[$id] $st.copied[$id].c)) { $keep[$id] = $st.copied[$id] }
+  }
+  $st.copied = $keep
+  $res
+}
+
 function Get-HomeAims($movers) {
   $c = @{}; $k = @{}
   foreach ($m in $movers) { $c[$m.Id] = $homePos[$m.Model]; $k[$m.Id] = Get-DefaultCorner $m }
@@ -510,13 +560,53 @@ $st = Load-State
 if ($Action -eq 'Preview') {
   # read-only summary for the GUI
   $a = if (Test-Path -LiteralPath $scene) { Read-AimScene $movers } else { Get-HomeAims $movers }
+  $byId = @{}; foreach ($m in $movers) { $byId[$m.Id] = $m }
+  $copies = Add-PartnerAims $movers $a $st
   $fix = Get-HeadFix $movers $a.center $a.corner
   $heads = @(foreach ($m in $movers) { $o = $fix[$m.Id]
-    [pscustomobject]@{ label = (Get-Label $m); is140 = $m.Is140; op = $o.op; ot = $o.ot; sized = $o.sized
+    $cf = if ($copies.ContainsKey($m.Id)) { Get-Label $byId[$copies[$m.Id].from] } else { '' }
+    [pscustomobject]@{ label = (Get-Label $m); is140 = $m.Is140; op = $o.op; ot = $o.ot; sized = $o.sized; copyFrom = $cf
       kp = [math]::Round($o.kp * 100); kt = [math]::Round($o.kt * 100); zp = $o.zp; zt = $o.zt; warn = $o.warn } })
   [pscustomobject]@{ ok = $true; show = $root; lastW = [math]::Round($st.sx * 100); lastD = [math]::Round($st.sy * 100)
     sceneExists = [bool](Test-Path -LiteralPath $scene); heads = $heads; mode = $Mode; aimTitle = $aimTitle; checkTitle = $checkTitle
     install = $(if ($Mode -eq 'Room') { Get-RoomSetup } else { $null }); targets = @(Get-TargetGpjs | ForEach-Object { $_ -replace '\.gpj$', '' }) } | ConvertTo-Json -Depth 4 -Compress
+  return
+}
+
+if ($Action -eq 'LiveInfo') {
+  # read-only: everything the Helper's live aim screen needs to drive the heads itself
+  $a = if (Test-Path -LiteralPath $scene) { Read-AimScene $movers } else { Get-HomeAims $movers }
+  $addr = @{}; $cur = $null
+  foreach ($l in [IO.File]::ReadAllLines("$root/fixtures.ini")) {
+    if ($l -match '^\[') { $cur = @{}; continue }
+    if ($null -eq $cur) { continue }
+    if ($l -match '^address = (\d+)') { $cur.a = [int]$matches[1] }
+    if ($l -match '^id = (\d+)') { $cur.id = $matches[1] }
+    if ($cur.id -and $cur.a) { $addr[$cur.id] = $cur.a }
+  }
+  $seats = Get-TrussSeats $root $movers
+  $pairs = if ($Mode -eq 'Floor') { Get-TrussPartners $root $movers } else { @{} }
+  $hung = $null; $rtj = "$root/rig_test.json"
+  if (Test-Path -LiteralPath $rtj) { try { $hung = @(([IO.File]::ReadAllText($rtj) | ConvertFrom-Json).hung | ForEach-Object { "$_" }) } catch {} }
+  $deg = @{}
+  foreach ($mo in @($m140, $m251)) {
+    $d = @(540, 270); $fp = "$root/fixtures/$mo.txt"
+    if (Test-Path -LiteralPath $fp) { foreach ($l in [IO.File]::ReadAllLines($fp)) {
+      if ($l -match '^ViewAnglePan = (\d+)') { $d[0] = [int]$matches[1] }; if ($l -match '^ViewAngleTilt = (\d+)') { $d[1] = [int]$matches[1] } } }
+    $deg[$mo] = $d
+  }
+  $same = { param($x, $y) [bool]($x -and $y -and $x[0] -eq $y[0] -and $x[1] -eq $y[1]) }
+  $heads = @(foreach ($m in $movers) {
+    if (-not $addr.ContainsKey($m.Id)) { continue }   # not patched (old scene entry)
+    $c = $a.center[$m.Id]; $k = $a.corner[$m.Id]; $dk = Get-DefaultCorner $m; $hp = $homePos[$m.Model]; $cp = $st.copied[$m.Id]
+    $chs = Get-AimChannels $m 0 0; $look = @(foreach ($x in $chs) { if ($x[0] -gt 3) { ,@($x[0], $x[2]) } })
+    $se = $seats[$m.Id]
+    [pscustomobject]@{ id = $m.Id; label = (Get-Label $m); is140 = $m.Is140; addr = $addr[$m.Id]; look = $look; dimI = 15; shutI = 16
+      c = $c; k = $k; home = $hp; dk = $dk; kSet = -not (& $same $k $dk)
+      free = ((& $same $c $hp) -or ($cp -and (& $same $c $cp.c))); partner = $(if ($pairs.ContainsKey($m.Id)) { $pairs[$m.Id].partner } else { '' })
+      tower = $(if ($se) { $se.tower } else { '' }); side = $(if ($se) { $se.side } else { '' }); order = $(if ($se) { $se.order } else { 99 })
+      hung = $(if ($null -eq $hung) { $true } else { $hung -contains $m.Id }); deg = $deg[$m.Model] } })
+  [pscustomobject]@{ ok = $true; show = $root; mode = $Mode; aimTitle = $aimTitle; heads = $heads } | ConvertTo-Json -Depth 5 -Compress
   return
 }
 
@@ -541,17 +631,43 @@ if (-not (Test-Path $scene)) {
   $a = Read-AimScene $movers
   if ($a.steps -lt 2) { Write-AimScene $movers $a.center $a.corner; "  $aimTitle upgraded: step 2 = CORNER added (your center aims kept)" }
 }
+if ($Action -eq 'LiveSave') {
+  if (-not $ChangesFile -or -not (Test-Path -LiteralPath $ChangesFile)) { throw "No live aims were sent. NOTHING was changed." }
+  $j = [IO.File]::ReadAllText($ChangesFile) | ConvertFrom-Json
+  $a = Read-AimScene $movers; $byId = @{}; foreach ($m in $movers) { $byId[$m.Id] = $m }
+  $ok16 = { param($v) $v -and @($v).Count -eq 2 -and "$($v[0])" -match '^\d+$' -and "$($v[1])" -match '^\d+$' -and [int]$v[0] -le 65535 -and [int]$v[1] -le 65535 }
+  $done = New-Object Collections.Generic.List[string]
+  if ($j.aims) { foreach ($p in $j.aims.PSObject.Properties) {
+    $m = $byId[$p.Name]; if (-not $m) { continue }
+    $what = @()
+    if (& $ok16 $p.Value.c) { $a.center[$m.Id] = @([int]$p.Value.c[0], [int]$p.Value.c[1]); $what += 'center' }
+    if (& $ok16 $p.Value.k) { $a.corner[$m.Id] = @([int]$p.Value.k[0], [int]$p.Value.k[1]); $what += 'corner' }
+    if ($what.Count) { $done.Add("$(Get-Label $m) ($($what -join ' + '))") }
+  } }
+  if (-not $done.Count) { "  nothing to change - no head was aimed"; return }
+  Write-AimScene $movers $a.center $a.corner
+  "  CHANGED  live aims saved into ${aimTitle}: $($done -join ', ')"
+  return
+}
 foreach ($k in $checks.Keys) { New-CheckGpj $k $checks[$k] $movers }
 if ($Mode -eq 'Room') { Install-RoomButtons }
 if ($Action -eq 'Install') { "  DONE - ROOM AIM (ADJUST) and ROOM CHECK are on the SETUP page."; return }
 
 if ($Action -eq 'Home') {
-  $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner
+  $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner; $st.copied = @{}
   "  aim scene reset to home"
   $fix = Get-HeadFix $movers $h.center $h.corner -Reset
   $sz = @(1.0, 1.0)
 } else {
   $a = Read-AimScene $movers
+  $copies = Add-PartnerAims $movers $a $st
+  if ($copies.Count) {
+    $byId = @{}; foreach ($m in $movers) { $byId[$m.Id] = $m }
+    ""
+    "  T-BAR PARTNERS - same aim as the head next to it (written into $aimTitle too, nudge it there if needed):"
+    foreach ($m in $movers) { if ($copies.ContainsKey($m.Id)) { $c = $copies[$m.Id]
+      "    {0,-8} <- {1,-8} ({2} truss{3})" -f (Get-Label $m), (Get-Label $byId[$c.from]), $c.tower, $(if ($c.sized) { ', center + corner' } elseif (-not $c.corner) { ', center only - its own corner kept' } else { '' }) } }
+  }
   $fix = Get-HeadFix $movers $a.center $a.corner
   Show-Table $movers $fix
   $nWarn = @($movers | Where-Object { $fix[$_.Id].warn }).Count
@@ -564,6 +680,7 @@ if ($Action -eq 'Home') {
   }
   if (-not $Size) { if ($NoPrompt) { $Size = '100' } else { $Size = Read-Size $st } }
   $sz = ConvertTo-Size $Size
+  if ($copies.Count) { Write-AimScene $movers $a.center $a.corner }   # after the checks above: a stop still changes NOTHING
   "  OVERALL SIZE: width {0}%  depth {1}%" -f ($sz[0]*100), ($sz[1]*100); ""
 }
 Update-Gpjs $fix $sz[0] $sz[1] $st

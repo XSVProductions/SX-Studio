@@ -46,6 +46,52 @@ function Get-ShowMovers($root) {
 
 function Get-Label($m) { if ($m.Is140) { "140 #$($m.Num)" } else { "251 #$($m.Num)" } }
 
+# ---------------------------------------------------------------- truss T-bars in the 2D view (Rig Test writes them)
+# Spots = top-left corner of the fixture icon (pixels). Each tower = one T-bar: [left head, right head], right = x + gap.
+$trussSpots = @(
+  @{ key = 'tl'; name = 'Top left';     x = 0;   y = 0;   extra = $false }, @{ key = 'tr'; name = 'Top right';    x = 786; y = 0;   extra = $false },
+  @{ key = 'tm'; name = 'Top middle';    x = 329; y = 0;   extra = $true;  gap = 266 },
+  @{ key = 'bl'; name = 'Bottom left';  x = 0;   y = 592; extra = $false }, @{ key = 'br'; name = 'Bottom right'; x = 786; y = 592; extra = $false },
+  @{ key = 'bm'; name = 'Bottom middle'; x = 329; y = 592; extra = $true;  gap = 266 })
+$trussPairGap = 110
+function Get-TrussPartners($root, $movers) {
+  # id -> @{ partner = id; tower = 'Top left' } for every head that shares a T-bar with another head of the same model
+  $r = @{}; $p2 = "$root/Editor/2DView/fixtures.ini"; if (-not (Test-Path -LiteralPath $p2)) { return $r }
+  $pos = @{}; $sec = $null
+  foreach ($l in [IO.File]::ReadAllLines($p2)) {
+    if ($l -match '^\[(.+)\]\s*$') { $sec = $matches[1]; continue }
+    if ($sec -and $l -match '^Position = (-?\d+),(-?\d+)') { $pos[$sec] = @([int]$matches[1], [int]$matches[2]) }
+  }
+  foreach ($s in $trussSpots) {
+    $gap = if ($s.gap) { $s.gap } else { $trussPairGap }
+    $at = { param($x, $y) @($movers | Where-Object { $q = $pos[$_.Name]; $q -and [Math]::Abs($q[0] - $x) -le 40 -and [Math]::Abs($q[1] - $y) -le 40 }) }
+    $hl = @(& $at $s.x $s.y); $hr = @(& $at ($s.x + $gap) $s.y)
+    if ($hl.Count -ne 1 -or $hr.Count -ne 1 -or $hl[0].Model -ne $hr[0].Model) { continue }
+    $r[$hl[0].Id] = @{ partner = $hr[0].Id; tower = $s.name }; $r[$hr[0].Id] = @{ partner = $hl[0].Id; tower = $s.name }
+  }
+  $r
+}
+
+function Get-TrussSeats($root, $movers) {
+  # id -> @{ key = 'tl'; tower = 'Top left'; side = 'L' | 'R'; order = n } for every head sitting on a T-bar spot in the 2D view
+  $r = @{}; $p2 = "$root/Editor/2DView/fixtures.ini"; if (-not (Test-Path -LiteralPath $p2)) { return $r }
+  $pos = @{}; $sec = $null
+  foreach ($l in [IO.File]::ReadAllLines($p2)) {
+    if ($l -match '^\[(.+)\]\s*$') { $sec = $matches[1]; continue }
+    if ($sec -and $l -match '^Position = (-?\d+),(-?\d+)') { $pos[$sec] = @([int]$matches[1], [int]$matches[2]) }
+  }
+  $n = 0
+  foreach ($s in $trussSpots) {
+    $gap = if ($s.gap) { $s.gap } else { $trussPairGap }
+    foreach ($sd in @(@('L', 0), @('R', $gap))) {
+      $n++
+      $hs = @($movers | Where-Object { $q = $pos[$_.Name]; $q -and -not $r.ContainsKey($_.Id) -and [Math]::Abs($q[0] - ($s.x + $sd[1])) -le 40 -and [Math]::Abs($q[1] - $s.y) -le 40 })
+      if ($hs.Count -eq 1) { $r[$hs[0].Id] = @{ key = $s.key; tower = $s.name; side = $sd[0]; order = $n } }
+    }
+  }
+  $r
+}
+
 # ---------------------------------------------------------------- live.ini (UTF-8 BOM, CRLF - kept exactly as found)
 function Read-LiveIni($root) {
   $p = "$root/Live/live.ini"

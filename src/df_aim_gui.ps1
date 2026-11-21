@@ -4,6 +4,7 @@
 #   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
 #   APC mini -> apc.ps1        Speed Faders -> speed.ps1      Health Check -> health.ps1 (check, fix, revert)
 #   Rig Test -> rig_test.ps1   Pre-show Check -> preshow.ps1
+#   LIVE AIM (Aim Movers tab) -> dmx_out.ps1 drives the DMX interface while ShowXpress is closed; df_aim.ps1 LiveInfo / LiveSave
 # Quits by itself a few minutes after its window is closed.
 param([string]$TestRoot = '', [int]$Port = 47321, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
@@ -18,6 +19,7 @@ $rtEngine     = Join-Path $here 'rig_test.ps1'
 $preEngine    = Join-Path $here 'preshow.ps1'
 $colorEngine  = Join-Path $here 'color.ps1'
 $gdEngine     = Join-Path $here 'gdrive.ps1'
+$liveEngine   = Join-Path $here 'dmx_out.ps1'
 $repo   = 'XSVProductions/showxpress-helper'
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -53,7 +55,10 @@ catch {
 $url = "http://localhost:$Port/?t=$token"
 [IO.File]::WriteAllText($infoF, (@{ url = $url; pid = $PID } | ConvertTo-Json))
 
-function Test-SxOpen { [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) }
+function Test-SxOpen {
+  if ($TestRoot) { return (Test-Path -LiteralPath (Join-Path $TestRoot '_sx_open')) }   # testing: marker file = "ShowXpress open"
+  [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' })
+}
 function Get-SxExe {
   foreach ($p in "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
   $null
@@ -134,6 +139,179 @@ function Invoke-WithChanges([string]$script, $items) {
   try { Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $script } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
 }
 
+function Start-Sx {
+  if ($TestRoot) { [IO.File]::WriteAllText((Join-Path $TestRoot '_sx_open'), 'test'); return @{ ok = $true; out = '  (test) ShowXpress would open now'; error = '' } }
+  if (Test-SxOpen) { return @{ ok = $true; out = '  ShowXpress is already open'; error = '' } }
+  if ($onMac) {
+    $a = @(Get-ChildItem -LiteralPath '/Applications' -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' }) | Select-Object -First 1
+    if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications.'; out = '' } }
+    & open $a.FullName
+  } else {
+    $x = Get-SxExe
+    if (-not $x) { return @{ ok = $false; error = 'ShowXpress was not found in Program Files\ShowXpress.'; out = '' } }
+    Start-Process -FilePath $x -WorkingDirectory (Split-Path $x)
+  }
+  @{ ok = $true; out = '  ShowXpress is starting'; error = '' }
+}
+
+# ---- LIVE AIM (user 2026-11-21): the Helper sends DMX itself (dmx_out.ps1 child process) so the real heads follow the
+# mouse. Only one program can use the interface, so ShowXpress must be closed. The child stops by itself (lights out)
+# if the Helper stops talking to it for 30 s.
+$script:liveP = $null; $script:liveHold = [datetime]::MinValue
+function Test-Live { [bool]($script:liveP -and -not $script:liveP.HasExited) }
+function Stop-Live {
+  $p = $script:liveP; $script:liveP = $null
+  if (-not $p) { return }
+  try { if (-not $p.HasExited) { $p.StandardInput.WriteLine('q'); if (-not $p.WaitForExit(4000)) { $p.Kill() } } } catch { try { $p.Kill() } catch {} }
+}
+function Start-Live {
+  Stop-Live
+  if ($onMac) { return @{ ok = $false; error = 'Live aim works on Windows only for now.'; out = '' } }
+  $why = ''
+  foreach ($try in 1..3) {   # right after ShowXpress closes the interface can take a moment to be free
+    $psi = New-Object Diagnostics.ProcessStartInfo
+    $psi.FileName = $psExe
+    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`""
+    if ($TestRoot) { $a += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
+    $psi.Arguments = $a; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+    $p = [Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true
+    $t = $p.StandardOutput.ReadLineAsync()
+    if (-not $t.Wait(20000)) { try { $p.Kill() } catch {}; $why = 'The DMX interface did not answer.'; continue }
+    $line = "$($t.Result)"
+    if ($line -like 'OK *') { $script:liveP = $p; return @{ ok = $true; iface = $line.Substring(3); out = ''; error = '' } }
+    try { if (-not $p.WaitForExit(3000)) { $p.Kill() } } catch {}
+    if ($line -eq 'ERR none') { $why = 'The DMX interface (D512S) was not found. Check its USB cable - unplug it, plug it back in, wait a few seconds - and try again. ShowXpress must stay closed.' }
+    elseif ($line -like 'ERR *') { $why = $line.Substring(4); break }
+    else { $why = "The DMX output didn't start: $(($p.StandardError.ReadToEnd() -split "`r?`n" | Where-Object { $_.Trim() } | Select-Object -First 1))"; break }
+    Start-Sleep -Milliseconds 1500
+  }
+  @{ ok = $false; error = $why; out = '' }
+}
+
+# ---- everything that changes the show. Called straight away, or later from the queue (see below).
+function Invoke-Action([string]$path, $body) {
+  switch ($path) {
+    '/api/aim/install' { return (Invoke-Engine '-Action Install -Mode Room') }
+    '/api/color/apply' {
+      $hx = "$($body.hex)".Trim().TrimStart('#')
+      if ($hx -notmatch '^[0-9a-fA-F]{6}$') { return @{ ok = $false; error = 'Pick a colour first.'; out = '' } }
+      $nm = ("$($body.name)" -replace '[^A-Za-z0-9 \-]', '').Trim(); if ($nm.Length -gt 30) { $nm = $nm.Substring(0, 30) }
+      $na = if ($nm) { " -Name `"$nm`"" } else { '' }
+      return (Invoke-Engine "-Action Apply -Color $hx$na" $colorEngine)
+    }
+    '/api/gdrive/sync' { return (Invoke-Engine '-Action Sync' $gdEngine) }
+    '/api/apply' {
+      $w = [int]$body.w; $d = [int]$body.d
+      if ($w -lt 20 -or $w -gt 300 -or $d -lt 20 -or $d -gt 300) { return @{ ok = $false; error = 'Size must be 20-300%.'; out = '' } }
+      $f = if ($body.force) { ' -Force' } else { '' }
+      $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
+      return (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f$mo")
+    }
+    '/api/home' { $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }; return (Invoke-Engine "-Action Home -NoPrompt$mo") }
+    '/api/skip/apply' {
+      $ids = @($body.heads | ForEach-Object { "$_" })
+      if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 2) { return @{ ok = $false; error = 'Pick at least 2 heads.'; out = '' } }
+      return (Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $skipEngine)
+    }
+    '/api/rig/apply' {
+      $ids = @($body.heads | ForEach-Object { "$_" })
+      if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 1) { return @{ ok = $false; error = 'Tick at least one head.'; out = '' } }
+      $r = Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $rigEngine
+      if ($r.ok) { $r.out += Update-SkipFlash $ids }
+      return $r
+    }
+    '/api/apc/apply' {
+      $items = @(foreach ($c in @($body.changes)) { if ($c) { $o = [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; note = $c.note }; if ($null -ne $c.on) { $o.on = $c.on; $o.off = $c.off }; $o } })
+      $badC = @($items | Where-Object { $_.Contains('on') -and (("$($_.on)" -notmatch '^\d+$') -or ("$($_.off)" -notmatch '^\d+$') -or [int]$_.on -gt 127 -or [int]$_.off -gt 127) }).Count
+      if ($badC -or -not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.note)" -notmatch '^-?\d+$' -or [int]$_.note -lt -1 -or [int]$_.note -gt 63 }).Count) {
+        return @{ ok = $false; error = 'Nothing valid to save.'; out = '' } }
+      return (Invoke-WithChanges $apcEngine $items)
+    }
+    '/api/speed/apply' {
+      $items = @(foreach ($c in @($body.changes)) { if ($c) { [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; fader = $c.fader } } })
+      if (-not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.fader)" -notmatch '^\d+$' -or [int]$_.fader -gt 99 }).Count) {
+        return @{ ok = $false; error = 'Nothing valid to save.'; out = '' } }
+      return (Invoke-WithChanges $speedEngine $items)
+    }
+    '/api/health/fix' {
+      $k = "$($body.key)"
+      if ($k -notmatch '^(speed|midiout|midilight|pad|color|fixtures)\|(page\d+_button\d+|\d+)$') { return @{ ok = $false; error = 'Unknown fix.'; out = '' } }
+      return (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
+    }
+    '/api/rt/install' { return (Invoke-Engine '-Action Install' $rtEngine) }
+    '/api/rt/apply' {
+      $as = [ordered]@{}
+      if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|tm|bl|br|bm)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
+      if (-not $as.Count) { return @{ ok = $false; error = 'Put at least one mover on a truss.'; out = '' } }
+      $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+      [IO.File]::WriteAllText($cf, (@{ assign = $as; extra = [bool]$body.extra } | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding($false)))
+      try { $r = Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $rtEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+      if ($r.ok -and $body.rig) {
+        $hl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^RIGHEADS: [\d,]+$' } | Select-Object -Last 1
+        if ($hl) { $r2 = Invoke-Engine "-Action Apply -Heads `"$($hl.Substring(10))`"" $rigEngine
+          if ($r2.ok) { $r.out += "`n  Tonight's Rig:`n" + $r2.out } else { $r.out += "`n  Tonight's Rig NOT updated: $($r2.error)" } }
+        $sl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^SKIPHEADS: [\d,]+$' } | Select-Object -Last 1
+        if ($sl) { $r.out += Update-SkipFlash ($sl.Substring(11) -split ',') }
+      }
+      return $r
+    }
+  }
+  @{ ok = $false; error = 'Unknown action.'; out = '' }
+}
+
+# ---- QUEUE (user 2026-11-21: close ShowXpress only once a night). While ShowXpress is open, Save/Apply in any tab is
+# queued; as soon as ShowXpress has been closed for a few seconds (it rewrites live.ini as it closes) the queue runs in
+# order (Google Drive sync always last) and ShowXpress is opened again. A later save of the same thing replaces the
+# earlier one. The Helper doesn't quit while something is queued.
+$queueable = @{
+  '/api/apply' = 'Aim Movers'; '/api/home' = 'Aim Movers (reset)'; '/api/aim/install' = 'ROOM buttons on the SETUP page'
+  '/api/color/apply' = "Tonight's Color"; '/api/skip/apply' = 'Skip Flash'; '/api/rig/apply' = "Tonight's Rig"
+  '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
+  '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive' }
+$queue = New-Object Collections.Generic.List[object]
+$qReopen = $true; $qDone = $null; $qClosed = 0
+function Get-QueueKey([string]$path, $body) {
+  if ($path -eq '/api/apply' -or $path -eq '/api/home') { return "aim-$(if ("$($body.mode)" -eq 'room') { 'room' } else { 'floor' })" }
+  if ($path -eq '/api/health/fix') { return "fix-$($body.key)" }
+  $path
+}
+function Add-Queue([string]$path, $body) {
+  $key = Get-QueueKey $path $body
+  $label = $queueable[$path]
+  if ($key -like 'aim-*') { $label = "$label - $(if ($key -eq 'aim-room') { 'Room' } else { 'Dance Floor' })" }
+  if ($path -eq '/api/color/apply') { $label = "$label (#$("$($body.hex)".TrimStart('#').ToLower()))" }
+  $old = @($queue | Where-Object { $_.key -eq $key })
+  foreach ($o in $old) { [void]$queue.Remove($o) }
+  $queue.Add([pscustomobject]@{ key = $key; label = $label; path = $path; body = ($body | ConvertTo-Json -Depth 6 -Compress) })
+  @{ ok = $true; queued = $true; replaced = [bool]$old.Count; label = $label; out = ''; error = '' }
+}
+function Get-QueueInfo {
+  @{ items = @($queue | ForEach-Object { @{ key = $_.key; label = $_.label } }); reopen = $qReopen; done = $qDone }
+}
+function Step-Queue {
+  # called about once a second by the main loop
+  if (-not $queue.Count) { $script:qClosed = 0; return }
+  if (Test-SxOpen) { $script:qClosed = 0; return }
+  # live aim closed ShowXpress / is running: the queue waits for it (it runs when live aim is saved)
+  if ((Test-Live) -or ((Get-Date) - $script:liveHold).TotalSeconds -lt 180) { $script:qClosed = 0; return }
+  $script:qClosed++
+  if ($script:qClosed -lt 4) { return }   # give ShowXpress time to finish writing the show
+  Invoke-QueueItems $qReopen
+}
+function Invoke-QueueItems([bool]$reopen) {
+  $items = @($queue | Where-Object { $_.path -ne '/api/gdrive/sync' }) + @($queue | Where-Object { $_.path -eq '/api/gdrive/sync' })
+  $queue.Clear(); $script:qClosed = 0
+  $res = @(foreach ($it in $items) {
+    $b = $it.body | ConvertFrom-Json
+    $r = try { Invoke-Action $it.path $b } catch { @{ ok = $false; error = $_.Exception.Message; out = '' } }
+    @{ label = $it.label; ok = [bool]$r.ok; error = "$($r.error)"; out = "$($r.out)" }
+  })
+  $reo = $null
+  if ($reopen) { $reo = try { Start-Sx } catch { @{ ok = $false; error = $_.Exception.Message } } }
+  $script:qDone = @{ at = (Get-Date).ToString('s'); results = $res; reopened = [bool]($reo -and $reo.ok); reopenError = $(if ($reo -and -not $reo.ok) { "$($reo.error)" } else { '' }) }
+}
+
 $html = @'
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>ShowXpress Helper</title>
@@ -155,7 +333,7 @@ main{max-width:1080px;margin:0 auto;padding:20px 22px 120px;display:grid;gap:18p
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
 .tile{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}
 .tile .n{font-weight:650;font-size:13px;margin-bottom:3px}.tile .l{color:var(--dim)}.tile .v{color:var(--txt)}
-.tile.moved{border-color:rgba(90,169,255,.45)}.tile.sized .sz{color:var(--amber)}.tile.warn{border-color:var(--red);background:rgba(255,92,92,.07)}.tile.warn .n::after{content:" !";color:var(--red)}
+.tile.moved{border-color:rgba(90,169,255,.45)}.tile.copied{border-style:dashed}.tile .cf{margin-top:3px;font-size:11px;color:var(--blue)}.tile.sized .sz{color:var(--amber)}.tile.warn{border-color:var(--red);background:rgba(255,92,92,.07)}.tile.warn .n::after{content:" !";color:var(--red)}
 .summary{font-size:13px;color:var(--dim)}.summary b{color:var(--txt)}
 .warnbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.35);color:#ffc9c9;font-size:13px;display:none}
 .sizegrid{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:center}
@@ -265,6 +443,32 @@ select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-r
 .wheel i{position:absolute;width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #000,0 2px 6px rgba(0,0,0,.6);transform:translate(-50%,-50%);pointer-events:none;display:none}
 .clbig{height:120px;border-radius:12px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:10px 12px;margin-bottom:10px}.clbig span{background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;font:12px ui-monospace,Consolas,monospace}
 input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:#0f1217;padding:2px;cursor:pointer}
+.qbar{display:none;margin:14px 22px 0;padding:12px 16px;border-radius:12px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.45);font-size:13px}
+.qbar.on{display:block}.qbar.done{background:rgba(61,220,132,.07);border-color:rgba(61,220,132,.4)}.qbar.bad{background:rgba(255,92,92,.07);border-color:rgba(255,92,92,.45)}
+.qbar h3{margin:0 0 6px;font-size:14px}.qbar .qi{display:inline-flex;align-items:center;gap:6px;background:#12151b;border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 11px;margin:0 6px 6px 0}
+.qbar .qi button{border:none;background:transparent;color:var(--dim);padding:0 4px;font-size:13px;cursor:pointer}.qbar .qi button:hover{color:var(--red)}
+.qbar ul{margin:4px 0 6px;padding-left:18px}.qbar li.no{color:#ffb3b3}
+.lvcall{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(90,169,255,.07);border:1px solid rgba(90,169,255,.4);font-size:13px;color:#c7cdd8}.lvcall b{color:var(--txt)}
+.live{position:fixed;inset:0;background:var(--bg);z-index:15;display:none;flex-direction:column}.live.on{display:flex}
+.lvtop{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}.lvt{color:var(--amber);letter-spacing:1px;font-size:15px}
+.lvgone{display:none;margin:10px 18px 0;padding:10px 14px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.45);color:#ffc9c9;font-size:13px}.lvgone.on{display:flex;align-items:center;gap:12px}
+.lvbody{flex:1;display:grid;grid-template-columns:220px minmax(0,1fr) 280px;min-height:0}
+.lvlist{overflow:auto;border-right:1px solid var(--line);padding:4px 10px 20px}
+.lvlist h4{margin:12px 0 5px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
+.lvh{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:13px;font-weight:600;user-select:none}
+.lvh:hover{background:#171a21}.lvh.on{border-color:var(--amber);background:rgba(255,176,32,.1)}.lvh.dim{color:#5d6574}
+.lvh small{margin-left:auto;font-weight:500;font-size:11px;color:#5d6574;white-space:nowrap}.lvh small.a{color:var(--blue)}.lvh small.cp{color:#9aa3b5}.lvh small.b{color:var(--dim)}
+.lvh .sd{font-size:10px;color:#5d6574;width:10px}
+.lvmain{display:flex;flex-direction:column;gap:12px;padding:14px 18px;min-height:0}
+.seg button small{font-size:10.5px;color:#5d6574;font-weight:500}
+.lvpad{flex:1;min-height:220px;border:2px dashed #3a4150;border-radius:16px;background:radial-gradient(circle at 50% 50%,rgba(255,176,32,.07),transparent 60%),#0b0d11;display:flex;align-items:center;justify-content:center;text-align:center;cursor:grab;user-select:none;color:var(--dim);padding:20px}
+.lvpad:hover{border-color:#566070}.lvpad.drag{cursor:none;border-color:var(--amber);border-style:solid}
+.lvbig{font-size:30px;font-weight:700;color:var(--txt);margin-bottom:6px}.lvbig span{color:var(--amber)}
+.lvkeys{color:var(--dim);font-size:12.5px}.lvkeys b{color:var(--txt);font-weight:600}
+.lvside{border-left:1px solid var(--line);padding:14px 16px;overflow:auto}.lvside h3{margin:0;font-size:17px}.lvside .sub{margin:2px 0 6px}
+.lvside .kv{grid-template-columns:40px 1fr;margin:6px 0 8px}.lvside .kv small{color:var(--dim)}
+.lvflip{display:grid;gap:4px;margin:10px 0}
+.lvbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.lvbtns button{padding:8px 10px;font-size:13px}.lvbtns .w2{grid-column:span 2}
 @media (max-width:860px){.clwrap{grid-template-columns:1fr}.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
@@ -272,6 +476,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 <header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>
   <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button></nav>
   <div class="hright"><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button></div></header>
+<div id="qbar" class="qbar"></div>
 <main>
  <div class="view" id="v-home">
   <section class="card">
@@ -298,10 +503,11 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
     <h2 id="aimttl">Dance floor &mdash; tonight's aims</h2>
     <p class="sub">Read from the scene <b id="aimsc">DF AIM (ADJUST)</b> in ShowXpress.</p>
     <div class="how" id="aimhow">
-      <div><b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight's dancefloor.</div>
-      <div><b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size.</div>
+      <div><b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight's dancefloor &mdash; or just <b>one head per T-bar</b>: the head next to it gets the same aim (unless you aim that one too).</div>
+      <div><b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size. A copied head gets this too.</div>
       <div><b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.</div>
     </div>
+    <div class="lvcall" id="lvcall"><div class="grow"><b>&#9678; Aim live</b> &mdash; aim from here instead of ShowXpress: slow, fine mouse control, and the real head follows as you drag. ShowXpress closes while you aim and opens again when you finish.</div><button id="lvgo" class="primary" style="padding:9px 20px;font-size:14px;white-space:nowrap">&#9678; Aim live</button></div>
     <div class="row"><div id="summary" class="summary grow">Loading&hellip;</div><button id="refresh">&#8635; Refresh</button></div>
     <div id="heads"></div>
     <div id="warnbox" class="warnbox"></div>
@@ -451,6 +657,29 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
   <div class="in" data-for="apc"><button id="apsave" class="primary">Save pads</button><button id="apundo">Undo changes</button><div class="hint grow" id="aphint"></div></div>
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
   <div class="in" data-for="health"><button id="hlrun" class="primary">Check again</button><div class="hint grow" id="hlhint"></div></div></div>
+<div class="live" id="live">
+ <div class="lvtop"><b class="lvt">&#9678; LIVE AIM</b><span id="lvmode" class="sub" style="margin:0"></span><span id="lvif" class="tag amber"></span><div class="grow"></div>
+  <label class="link"><input type="checkbox" id="lvreo"> Open ShowXpress again after</label><button id="lvcancel">Cancel</button><button id="lvsave" class="primary" style="padding:9px 20px;font-size:14px">Save &amp; finish</button></div>
+ <div id="lvgone" class="lvgone"></div>
+ <div class="lvbody">
+  <div class="lvlist" id="lvlist"></div>
+  <div class="lvmain">
+   <div class="row"><div class="seg"><button data-st="c" class="on">1 &middot; CENTER</button><button data-st="k">2 &middot; CORNER <small>optional</small></button></div><div class="grow"></div><span class="sub" style="margin:0">Speed</span><div class="seg"><button data-sp="0.4">Fine</button><button data-sp="1">Normal</button><button data-sp="3">Fast</button></div></div>
+   <div class="lvpad" id="lvpad"><div><div class="lvbig" id="lvbig"></div><div id="lvtip"></div></div></div>
+   <div class="lvkeys">Hold the mouse button down in the box and drag &middot; <b>Shift</b> = finer &middot; <b>Ctrl</b> = faster &middot; <b>arrow keys</b> nudge &middot; <b>N</b> / <b>P</b> or <b>Tab</b> = next / previous head &middot; <b>1</b> / <b>2</b> = step</div>
+  </div>
+  <div class="lvside">
+   <h3 id="lvname"></h3><div id="lvst" class="sub"></div>
+   <div class="kv" id="lvread"></div>
+   <svg id="lvmap" viewBox="0 0 240 180"></svg>
+   <div class="sub" style="font-size:11.5px">dashed = normal floor &middot; amber = tonight &middot; ring = where it points now</div>
+   <div class="lvflip"><label class="link"><input type="checkbox" id="lvfx"> Flip left / right for this head</label><label class="link"><input type="checkbox" id="lvfy"> Flip up / down for this head</label></div>
+   <div class="lvbtns"><button id="lvprev">&larr; Previous</button><button id="lvnext" class="primary" style="padding:8px 10px;font-size:13px">Next head &rarr;</button>
+    <button id="lvpart" class="w2"></button><button id="lvundo">Undo this head</button><button id="lvhome">Back to normal</button></div>
+   <label class="link" style="margin-top:12px"><input type="checkbox" id="lvall"> Light all hung heads (not just this one)</label>
+  </div>
+ </div>
+</div>
 <div class="modal" id="rtpick"><div class="box" style="max-width:540px"><h2 id="rtpt"></h2><p class="sub" style="margin:0 0 4px">Pick the look you see on this head.</p><div id="rtpb"></div><div class="row" style="justify-content:flex-end"><button id="rtpnone">Nothing hung here</button><button id="rtpcancel">Cancel</button></div></div></div>
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
@@ -458,25 +687,27 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 <script>
 const T='__TOKEN__';const $=id=>document.getElementById(id);
 let P=null,sxOpen=false,linked=true;
+function wq(b){return sxOpen?Object.assign({},b||{},{queue:true}):b;}
 async function api(p,body){const r=await fetch(p+(p.includes('?')?'&':'?')+'t='+T,body?{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)}:{});return r.json();}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function sign(v){return (v>0?'+':'')+v;}
-function tile(h){const moved=h.op||h.ot,cls=['tile',moved?'moved':'',h.sized?'sized':'',h.warn?'warn':''].join(' ');
- return `<div class="${cls}" title="${esc(h.warn||'')}"><div class="n">${esc(h.label)}</div>
+function tile(h){const moved=h.op||h.ot,cls=['tile',moved?'moved':'',h.sized?'sized':'',h.warn?'warn':'',h.copyFrom?'copied':''].join(' ');
+ return `<div class="${cls}" title="${esc(h.warn||(h.copyFrom?'Not aimed by you - gets the same aim as '+h.copyFrom+' on its T-bar. Aim it yourself and it keeps its own.':''))}"><div class="n">${esc(h.label)}</div>
  <div><span class="l">center </span><span class="v">${moved?sign(h.op)+' / '+sign(h.ot):'normal'}</span></div>
- <div><span class="l">size </span><span class="v sz">${h.sized?h.kp+'% &times; '+h.kt+'%':'normal'}</span></div></div>`;}
+ <div><span class="l">size </span><span class="v sz">${h.sized?h.kp+'% &times; '+h.kt+'%':'normal'}</span></div>`+
+ (h.copyFrom?`<div class="cf">&#8644; same as ${esc(h.copyFrom)}</div>`:'')+`</div>`;}
 function render(){if(!P)return;
  if(!P.ok){$('summary').innerHTML='<span style="color:var(--red)">'+esc(P.error)+'</span>';$('heads').innerHTML='';$('warnbox').style.display='none';updBar();return;}
- const hs=P.heads,a=hs.filter(h=>h.is140),b=hs.filter(h=>!h.is140),moved=hs.filter(h=>h.op||h.ot).length,sized=hs.filter(h=>h.sized).length,w=hs.filter(h=>h.warn);
- $('summary').innerHTML=`<b>${a.length}</b> &times; 140SR${b.length?` &middot; <b>${b.length}</b> &times; 251SR`:''} &nbsp;&mdash;&nbsp; <b>${moved}</b> re-aimed &middot; <b>${sized}</b> with a corner set`+(w.length?` &middot; <b style="color:var(--red)">${w.length} look wrong</b>`:'');
+ const hs=P.heads,a=hs.filter(h=>h.is140),b=hs.filter(h=>!h.is140),moved=hs.filter(h=>h.op||h.ot).length,sized=hs.filter(h=>h.sized).length,w=hs.filter(h=>h.warn),cp=hs.filter(h=>h.copyFrom).length;
+ $('summary').innerHTML=`<b>${a.length}</b> &times; 140SR${b.length?` &middot; <b>${b.length}</b> &times; 251SR`:''} &nbsp;&mdash;&nbsp; <b>${moved}</b> re-aimed${cp?` (<b>${cp}</b> copied from the head next to it on the T-bar)`:''} &middot; <b>${sized}</b> with a corner set`+(w.length?` &middot; <b style="color:var(--red)">${w.length} look wrong</b>`:'');
  $('heads').innerHTML=`<div class="group"><h3>140SR</h3><div class="tiles">${a.map(tile).join('')}</div></div>`+(b.length?`<div class="group"><h3>251SR</h3><div class="tiles">${b.map(tile).join('')}</div></div>`:'');
  const ins=P.install,ib=$('aiminst');
- if(aimMode==='room'&&ins&&(!ins.aim||!ins.check)){ib.style.display='block';ib.innerHTML='<b>ROOM AIM (ADJUST)</b> and <b>ROOM CHECK</b> aren&rsquo;t on the SETUP page yet. <button id="aiminstb" class="mini primary" style="margin-left:8px"'+(sxOpen?' disabled':'')+'>Add them to the SETUP page</button>';
+ if(aimMode==='room'&&ins&&(!ins.aim||!ins.check)){ib.style.display='block';ib.innerHTML='<b>ROOM AIM (ADJUST)</b> and <b>ROOM CHECK</b> aren&rsquo;t on the SETUP page yet. <button id="aiminstb" class="mini primary" style="margin-left:8px"'+'>Add them to the SETUP page</button>';
   $('aiminstb').onclick=()=>saveTo('/api/aim/install',{},'Adding the ROOM buttons…',async()=>{LD.room=0;await load();},'roominstall');}else ib.style.display='none';
  const wb=$('warnbox');if(w.length){wb.style.display='block';wb.innerHTML='<b>Check these heads:</b> '+w.map(h=>esc(h.label)+' &ndash; '+esc(h.warn)).join('<br>');}else wb.style.display='none';
  $('foot').textContent='Show: '+P.show;updBar();}
-function updBar(){const bad=!P||!P.ok;$('apply').disabled=sxOpen||bad;$('home').disabled=sxOpen||bad;
- $('hint').innerHTML=sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to apply.</span>':(bad?'':(aimMode==='room'?'Writes to '+esc((P.targets||[]).filter(t=>!/CHECK/.test(t)).join(', ')||'AROUND ROOM'):'Writes to all dancefloor movement scenes')+' + CENTER SPOT (step 1 aims). Nothing is changed until you press Apply.');}
+function updBar(){const bad=!P||!P.ok;$('apply').disabled=bad;$('home').disabled=bad;
+ $('hint').innerHTML=sxOpen&&!bad?QH:(bad?'':(aimMode==='room'?'Writes to '+esc((P.targets||[]).filter(t=>!/CHECK/.test(t)).join(', ')||'AROUND ROOM'):'Writes to all dancefloor movement scenes')+' + CENTER SPOT (step 1 aims). Nothing is changed until you press Apply.');}
 let aimMode='floor';const PM={floor:null,room:null},LD={};
 const aimT=()=>(P&&P.aimTitle)||(aimMode==='room'?'ROOM AIM (ADJUST)':'DF AIM (ADJUST)');
 async function load(){const m=aimMode;$('summary').textContent='Loading…';let p;try{p=await api('/api/preview'+(m==='room'?'?mode=room':''));}catch(e){p={ok:false,error:'Could not read the show.'}}
@@ -494,9 +725,12 @@ function ask(t,p,yes){return new Promise(res=>{$('mt').textContent=t;$('mp').inn
  $('myes').onclick=()=>{$('modal').style.display='none';res(true)};$('mno').onclick=()=>{$('modal').style.display='none';res(false)};});}
 function busy(on,t){$('busy').style.display=on?'flex':'none';if(t)$('busyt').textContent=t;}
 function showResult(r,what){const box=$('result');box.className='card result '+(r.ok?'ok':'err');
+ if(r.ok&&r.queued){$('rlog').textContent='';$('rtitle').innerHTML='<span style="color:var(--amber)">&#9203;</span> Queued: '+esc(r.label);
+  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; the Helper does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
+  qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
  const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','prefix','roominstall','sx','update'];
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='live'?'Live aim didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened'}[what]);
@@ -513,12 +747,32 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
  box.scrollIntoView({behavior:'smooth'});}
 $('apply').onclick=async()=>{let force=false;const w=P.heads.filter(h=>h.warn);
  if(w.length){if(!await ask(w.length+' head(s) look wrong','Their aims in '+esc(aimT())+' look far off the floor &mdash; usually step 1 / step 2 not aimed yet.<br><br>Apply anyway?','Apply anyway'))return;force=true;}
- busy(true,'Applying to the show…');try{const r=await api('/api/apply',{w:+$('w').value,d:+$('d').value,force,mode:aimMode});showResult(r,'apply');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load();};
+ busy(true,'Applying to the show…');try{const r=await api('/api/apply',wq({w:+$('w').value,d:+$('d').value,force,mode:aimMode}));showResult(r,'apply');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load();};
 $('home').onclick=async()=>{if(!await ask('Reset to normal?','All heads go back to the normal center, size 100%, and the '+esc(aimT())+' scene is reset. Your shapes are kept.','Reset'))return;
- busy(true,'Resetting…');try{const r=await api('/api/home',{mode:aimMode});showResult(r,'home');}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);LD[aimMode]=0;load();};
-async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
- p.textContent=sxOpen?'ShowXpress open — close to apply':'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
- updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();const ib=$('aiminstb');if(ib)ib.disabled=sxOpen;
+ busy(true,'Resetting…');try{const r=await api('/api/home',wq({mode:aimMode}));showResult(r,'home');if(!r.queued)LD[aimMode]=0;}catch(e){showResult({ok:false,error:'Lost connection.'})}busy(false);load();};
+let Q=null,QSEEN='';const NL=String.fromCharCode(10);
+function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q.done;
+ if(d&&d.at!==QSEEN){const bad=d.results.filter(x=>!x.ok);b.className='qbar on '+(bad.length?'bad':'done');
+  b.innerHTML='<h3>'+(bad.length?'&#9888; Done after ShowXpress closed &mdash; '+bad.length+' didn&rsquo;t work':'&#10003; Done after ShowXpress closed')+'</h3><ul>'+
+   d.results.map(x=>'<li class="'+(x.ok?'':'no')+'">'+esc(x.label)+(x.ok?' &mdash; done':' &mdash; NOT done: '+esc(x.error))+'</li>').join('')+'</ul>'+
+   (d.reopened?'<span class="sub">ShowXpress is opening again.</span> ':d.reopenError?'<span style="color:var(--red)">ShowXpress didn&rsquo;t open: '+esc(d.reopenError)+'</span> ':'')+
+   '<details style="display:inline-block;margin-left:8px"><summary class="sub" style="cursor:pointer">Full details</summary><pre>'+esc(d.results.map(x=>'== '+x.label+NL+(x.out||x.error)).join(NL))+'</pre></details> <button class="mini" id="qok">OK</button>';
+  $('qok').onclick=async()=>{QSEEN=d.at;try{await api('/api/queue/seen',{});}catch(e){}renderQ();};return;}
+ if(!Q.items.length){b.className='qbar';return;}
+ b.className='qbar on';b.innerHTML='<h3>&#9203; Waiting for ShowXpress to close &mdash; '+Q.items.length+' thing'+(Q.items.length>1?'s':'')+' to do</h3>'+
+  Q.items.map(x=>'<span class="qi">'+esc(x.label)+'<button data-qk="'+esc(x.key)+'" title="Take it off the list">&#10005;</button></span>').join('')+
+  '<div class="row" style="margin-top:4px"><label class="link"><input type="checkbox" id="qreo"'+(Q.reopen?' checked':'')+'> Open ShowXpress again afterwards</label><div class="grow"></div>'+
+  (sxOpen?'<span class="sub">Save your show, then close ShowXpress.</span><button class="mini primary" id="qclose">Close ShowXpress now</button>':'<span class="sub">ShowXpress is closed &mdash; doing it now&hellip;</span>')+'</div>';
+ b.querySelectorAll('[data-qk]').forEach(x=>x.onclick=async()=>{const r=await api('/api/queue/cancel',{key:x.dataset.qk});Q=r.q;renderQ();});
+ $('qreo').onchange=async e=>{const r=await api('/api/queue/reopen',{on:e.target.checked});Q=r.q;};
+ const qc=$('qclose');if(qc)qc.onclick=sxClose;}
+async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
+function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');loadGd();}
+async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+ if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
+ p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
+ updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
  catch(e){if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
@@ -558,19 +812,20 @@ function renderSkip(){if(!S)return;const er=$('skerr');
  $('sksum').innerHTML=`<b>${o.length}</b> heads &middot; ${S.stepCs/100} s each &middot; one loop <b>${(o.length*S.stepCs/100).toFixed(2)} s</b>`;
  const st=$('skstate');st.style.display='inline-block';const d=dirty();st.className='state '+(d?'chg':'ok');st.textContent=d?'● Not saved yet':'✓ Matches the show';
  $('foot').textContent='Show: '+S.show;updSkip();}
-function updSkip(){const ok=S&&S.ok,d=dirty(),n=sel.size;$('sksave').disabled=sxOpen||!ok||!d||n<2;$('skundo').disabled=!ok||!d;
- $('skhint').innerHTML=!ok?'':sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to save.</span>':
+function updSkip(){const ok=S&&S.ok,d=dirty(),n=sel.size;$('sksave').disabled=!ok||!d||n<2;$('skundo').disabled=!ok||!d;
+ $('skhint').innerHTML=!ok?'':sxOpen?QH:
   n<2?'<span style="color:var(--amber)">Pick at least 2 heads.</span>':d?'Only the SKIP FLASH scene is changed. Heads you turn off are taken out of it.':'SKIP FLASH already uses exactly these heads.';}
 $('skrefresh').onclick=loadSkip;
 $('skundo').onclick=()=>{sel=saved();renderSkip();};
-$('sksave').onclick=async()=>{busy(true,'Saving SKIP FLASH…');let r;try{r=await api('/api/skip/apply',{heads:[...sel]});}catch(e){r={ok:false,error:'Lost connection.'}}
- busy(false);if(r.ok){await loadSkip();R=null;H=null;}showResult(r,'skip');};
+$('sksave').onclick=async()=>{busy(true,'Saving SKIP FLASH…');let r;try{r=await api('/api/skip/apply',wq({heads:[...sel]}));}catch(e){r={ok:false,error:'Lost connection.'}}
+ busy(false);if(r.ok&&!r.queued){await loadSkip();R=null;H=null;}showResult(r,'skip');};
 
 // ---------------- shared bits for the newer tabs
 function stateTag(id,d){const st=$(id);st.style.display='inline-block';st.className='state '+(d?'chg':'ok');st.textContent=d?'● Not saved yet':'✓ Matches the show';}
-function sxHint(what){return sxOpen?'<span style="color:var(--amber)">ShowXpress is open &mdash; close it (save first) to '+what+'.</span>':null;}
+const QH='<span style="color:var(--amber)">ShowXpress is open &mdash; this is <b>queued</b> and done as soon as you save and close ShowXpress.</span>';
+function sxHint(what){return sxOpen?QH:null;}
 async function getJ(p){try{return await api(p);}catch(e){return {ok:false,error:'Could not read the show.'};}}
-async function saveTo(p,body,label,after,what){busy(true,label);let r;try{r=await api(p,body);}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok)await after();showResult(r,what);}
+async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':label);let r;try{r=await api(p,wq(body));}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok&&!r.queued)await after();showResult(r,what);}
 function showErr(id,obj){const er=$(id);if(obj&&!obj.ok){er.style.display='block';er.innerHTML=esc(obj.error);return true;}er.style.display='none';return false;}
 
 // ---------------- Tonight's rig (same step rule as rig.ps1)
@@ -602,7 +857,7 @@ function renderRig(){if(!R)return;
   return `<div class="sc${drop.size?' chg':''}"><div class="nm">${esc(sc.name)}${tags}${ti.length?'<small>button: '+esc(ti.join(', '))+'</small>':''}</div><div class="dots">${dots}</div><div class="st">${st}</div></div>`;}).join('')||'<p class="sub">No chase scenes found on your live buttons.</p>';
  $('rgsum').innerHTML=`<b>${scs.length}</b> chase scenes &middot; <b>${nTrim}</b> trimmed for this rig`;
  stateTag('rgstate',rgDirty());$('foot').textContent='Show: '+R.show;updRig();}
-function updRig(){const ok=!!(R&&R.ok),d=rgDirty(),n=rsel.size;$('rgsave').disabled=sxOpen||!ok||!d||!n;$('rgundo').disabled=!ok||!d;$('rgall').disabled=!ok||R.heads.every(h=>rsel.has(h.id));
+function updRig(){const ok=!!(R&&R.ok),d=rgDirty(),n=rsel.size;$('rgsave').disabled=!ok||!d||!n;$('rgundo').disabled=!ok||!d;$('rgall').disabled=!ok||R.heads.every(h=>rsel.has(h.id));
  $('rghint').innerHTML=!ok?'':sxHint('save')??(!n?'<span style="color:var(--amber)">Tick at least one head.</span>':d?'Only chase scenes change. The full scenes are kept, so ticking every head puts them back.':'The show already matches these heads.');}
 $('rgrefresh').onclick=loadRig;$('rgundo').onclick=()=>{rsel=rSaved();renderRig();};
 $('rgall').onclick=()=>{R.heads.forEach(h=>rsel.add(h.id));renderRig();};
@@ -655,7 +910,7 @@ function renderApc(){if(!A)return;
  document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>{const p=A.pads.find(x=>x.sec===b.dataset.back);apN[p.sec]=p.note;renderApc();});
  document.querySelectorAll('[data-pick]').forEach(b=>b.onclick=()=>{apSel=b.dataset.pick;apMsg='Tap a free pad to put it there.';renderApc();window.scrollTo({top:0,behavior:'smooth'});});
  stateTag('apstate',apDirty());$('foot').textContent='Show: '+A.show;updApc();}
-function updApc(){const ok=!!(A&&A.ok),d=apDirty();$('apsave').disabled=sxOpen||!ok||!d;$('apundo').disabled=!ok||!d;
+function updApc(){const ok=!!(A&&A.ok),d=apDirty();$('apsave').disabled=!ok||!d;$('apundo').disabled=!ok||!d;
  $('aphint').innerHTML=!ok?'':sxHint('save')??(d?A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).length+' button(s) changed. Only the pad notes and pad colours in live.ini change.':'Pads match the show.');}
 $('aprefresh').onclick=loadApc;$('apundo').onclick=()=>{A.pads.forEach(p=>apN[p.sec]=p.note);apC={};apSel=null;apMsg='';renderApc();};
 $('apsave').onclick=()=>saveTo('/api/apc/apply',{changes:A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).map(p=>{const c={sec:p.sec,title:p.title,note:apN[p.sec]};if(colChg(p)&&apN[p.sec]>=0){c.on=apC[p.sec].on;c.off=apC[p.sec].off;}return c;})},'Saving pads…',async()=>{await loadApc();SP=null;H=null;},'apc');
@@ -680,7 +935,7 @@ function renderSpeed(){if(!SP)return;
  document.querySelectorAll('[data-pg]').forEach(s=>s.onchange=()=>{if(s.value==='')return;const k=+s.value,g=pages.find(x=>x.page===+s.dataset.pg);
   if(g)g.bs.forEach(b=>spF[b.sec]=k);renderSpeed();});
  stateTag('spstate',spDirty());$('foot').textContent='Show: '+SP.show;updSpeed();}
-function updSpeed(){const ok=!!(SP&&SP.ok),d=spDirty();$('spsave').disabled=sxOpen||!ok||!d;$('spundo').disabled=!ok||!d;
+function updSpeed(){const ok=!!(SP&&SP.ok),d=spDirty();$('spsave').disabled=!ok||!d;$('spundo').disabled=!ok||!d;
  $('sphint').innerHTML=!ok?'':sxHint('save')??(d?SP.buttons.filter(b=>spF[b.sec]!==b.fader).length+' button(s) changed. Only the speed fader setting in live.ini changes.':'Every button matches the show.');}
 $('spq').oninput=renderSpeed;$('sprefresh').onclick=loadSpeed;$('spundo').onclick=()=>{SP.buttons.forEach(b=>spF[b.sec]=b.fader);renderSpeed();};
 $('spsave').onclick=()=>saveTo('/api/speed/apply',{changes:SP.buttons.filter(b=>spF[b.sec]!==b.fader).map(b=>({sec:b.sec,title:b.title,fader:spF[b.sec]}))},'Saving speed faders…',async()=>{await loadSpeed();A=null;H=null;},'speed');
@@ -700,7 +955,7 @@ function renderHealth(){if(!H)return;if(!H.ok){$('hlsum').innerHTML='<span style
  document.querySelectorAll('.hrev').forEach(b=>b.onclick=()=>hlRev(b.dataset.i,false));
  document.querySelectorAll('.hkeep').forEach(b=>b.onclick=()=>hlKeep(b.dataset.i));
  $('foot').textContent='Show: '+H.show;updHealth();}
-function updHealth(){const ok=!!(H&&H.ok);document.querySelectorAll('.hfix,.hrev').forEach(b=>b.disabled=sxOpen||!ok);
+function updHealth(){const ok=!!(H&&H.ok);document.querySelectorAll('.hfix').forEach(b=>b.disabled=!ok);document.querySelectorAll('.hrev').forEach(b=>b.disabled=sxOpen||!ok);
  $('hlhint').innerHTML=sxHint('apply or revert a fix')??'Checking changes nothing. A fix changes only what it says, and can be reverted at the top of this tab.';}
 async function hlAfter(){if(!dirty())S=null;if(!rgDirty())R=null;if(!apDirty())A=null;if(!spDirty())SP=null;await loadHealth();}
 async function hlFix(k){const i=(H.issues||[]).find(x=>x.fix&&x.fix.key===k);if(!i)return;
@@ -749,8 +1004,7 @@ $('rtpnone').onclick=()=>{delete rtA[rtSlot];$('rtpick').style.display='none';re
 $('rtpcancel').onclick=()=>{$('rtpick').style.display='none';};
 $('rtextra').onchange=e=>{rtX=e.target.checked;renderRt();};
 function rtCount(){return Object.entries(rtA).filter(([k,v])=>v&&rtUsed(k)).length;}
-function updRt(){const ok=!!(RT&&RT.ok),d=rtDirty(),n=ok?rtCount():0;$('rtsave').disabled=sxOpen||!ok||!n;$('rtundo').disabled=!ok||!d;$('rtclear').disabled=!ok||!Object.keys(rtA).length;
- const ib=$('rtinstb');if(ib)ib.disabled=sxOpen;
+function updRt(){const ok=!!(RT&&RT.ok),d=rtDirty(),n=ok?rtCount():0;$('rtsave').disabled=!ok||!n;$('rtundo').disabled=!ok||!d;$('rtclear').disabled=!ok||!Object.keys(rtA).length;
  $('rthint').innerHTML=!ok?'':sxHint('save (it rewrites the 2D view when it closes)')??(!n?'<span style="color:var(--amber)">Put at least one mover on a truss.</span>':n+' mover(s) on trusses. Only the 140 positions in the 2D view change'+($('rtrig').checked?', plus Tonight\'s Rig and SKIP FLASH.':'.'));}
 $('rtrig').onchange=updRt;$('rtrefresh').onclick=loadRt;
 $('rtundo').onclick=()=>{rtA=Object.assign({},RT.assign||{});rtX=!!RT.extra;renderRt();};
@@ -778,7 +1032,7 @@ async function loadPre(){$('presum').innerHTML='Checking&hellip;';$('prelist').i
  document.querySelectorAll('.pfix').forEach(b=>b.onclick=()=>preFix(b.dataset.k));updPre();
  $('prehint').textContent='Checked at '+new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. Checking changes nothing; a fix button changes only what it says.';$('foot').textContent='Show: '+p.show;}
 function updPre(){document.querySelectorAll('.pfix').forEach(b=>{const k=b.dataset.k;b.disabled=sxOpen&&(k==='gsync'||k==='launch');b.title=b.disabled&&k==='gsync'?'Close ShowXpress first (save first)':'';});
- $('pregd').disabled=sxOpen||!(G&&G.ok&&G.found);}
+ $('pregd').disabled=!(G&&G.ok&&G.found);}
 async function preFix(k){const i=PRE.find(x=>x.fix&&x.fix.key===k);if(!i)return;
  if(k.startsWith('tab:'))return setTab(k.slice(4));if(k==='launch')return sxLaunch();if(k==='gsync')return gdSync();
  const msg={sleep:'Sets <b>When plugged in, PC goes to sleep after</b> to <b>Never</b>.',usb:'Turns <b>USB selective suspend</b> off when plugged in, so Windows never powers down the APC mini or the DMX interface.',restart:'<b>Windows restarts in 1 minute</b> to finish its updates. Save and close ShowXpress first. (Changed your mind? Run <b>shutdown /a</b>.)'}[k];
@@ -787,7 +1041,7 @@ async function preFix(k){const i=PRE.find(x=>x.fix&&x.fix.key===k);if(!i)return;
 $('prerun').onclick=()=>{H=null;loadPre();};$('pregd').onclick=()=>gdSync();
 
 // ---------------- Aim Movers: Dance Floor / Room
-const AIMTXT={floor:{t:'Dance floor &mdash; tonight\'s aims',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight\'s dancefloor.','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.'],
+const AIMTXT={floor:{t:'Dance floor &mdash; tonight\'s aims',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight\'s dancefloor &mdash; or just <b>one head per T-bar</b>: the head next to it gets the same aim (unless you aim that one too).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size. A copied head gets this too.','<b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.'],
   depth:'Depth',size:'100% = patterns reach the corners you aimed. Lower keeps them a bit inside the floor.',svg:'dashed = dancefloor · amber = patterns'},
  room:{t:'Room &mdash; AROUND ROOM for tonight',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the middle of where AROUND ROOM should sweep (the walls around the room).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the front-left edge of that sweep (from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below, Apply, and check with <b>ROOM CHECK</b>.'],
   depth:'Height',size:'100% = AROUND ROOM reaches the edge you aimed. Width = across the room, Height = up and down the walls.',svg:'dashed = what you aimed · amber = AROUND ROOM'}};
@@ -818,7 +1072,7 @@ function renderColor(){if(!CL)return;if(showErr('clerr',CL)){$('clstate').style.
  $('clmap').innerHTML=`<span>140 movers</span><b>${sw(n1)}</b><span>251 movers</span><b>${sw(n2)}</b><span>Uplights</span><b>${clHex?'<span class="sw" style="background:#'+clHex+'"></span>exact colour':'&mdash;'}${wa.length?'<br><small style="color:var(--dim)">'+esc(wa.join(', '))+'</small>':' &middot; <span style="color:var(--amber)">none found</span>'}</b>`+
   (CL.hex?`<span>Saved</span><b><span class="sw" style="background:#${CL.hex}"></span>#${CL.hex}${CL.name?' '+esc(CL.name):''}${CL.saved?' &middot; '+fmtT(CL.saved):''}</b>`:'');
  stateTag('clstate',clDirty());if(!CL.hex&&!clHex)$('clstate').style.display='none';$('foot').textContent='Show: '+CL.show;updColor();}
-function updColor(){const ok=!!(CL&&CL.ok),d=clDirty();$('clsave').disabled=sxOpen||!ok||!d;$('clundo').disabled=!ok||!d;
+function updColor(){const ok=!!(CL&&CL.ok),d=clDirty();$('clsave').disabled=!ok||!d;$('clundo').disabled=!ok||!d;
  const miss=ok?(CL.buttons||[]).filter(b=>!b.there).map(b=>b.page):[];
  $('clhint').innerHTML=!ok?'':sxHint('save')??(!clHex?'Pick a colour.':d?'Writes the two TONIGHTS COLOR scenes'+(miss.length?' and adds the button to the '+esc(miss.join(' and '))+' page'+(miss.length>1?'s':''):'')+'.':'This is tonight\'s colour already.');}
 function wheelAt(e){const r=$('clwheel').getBoundingClientRect(),x=e.clientX-r.left-r.width/2,y=e.clientY-r.top-r.height/2,s=Math.min(1,Math.hypot(x,y)/(r.width/2)),h=(Math.atan2(x,-y)*180/Math.PI+360)%360;
@@ -840,19 +1094,154 @@ async function loadGd(){G=await getJ('/api/gdrive');updGd();}
 function updGd(){if(!G)return;
  $('gdsub').innerHTML=!G.ok?'<span style="color:var(--red)">'+esc(G.error)+'</span>':!G.found?'Google Drive isn&rsquo;t on this computer &mdash; install <b>Google Drive for desktop</b> and sign in.':
   'Copies the show to <b>'+esc(G.target)+'</b> &mdash; only new and changed files, nothing is deleted. '+(G.last?'Last sync: <b>'+fmtT(G.last)+'</b>.':'Not synced yet.');
- $('gdsync').disabled=sxOpen||!G.ok||!G.found;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?sxHint('sync, so the newest show is copied'):'';}
+ $('gdsync').disabled=!G.ok||!G.found;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?QH:'';}
 async function gdSync(){await saveTo('/api/gdrive/sync',{},'Copying the show to Google Drive…',async()=>{await loadGd();if($('v-pre').classList.contains('on'))loadPre();},'gsync');}
 $('gdsync').onclick=()=>gdSync();
 async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
 async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
  let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok)showResult(r,'sx');}
 $('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
-async function chkUpd(){const u=await getJ('/api/update');$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
+async function chkUpd(){const u=await getJ('/api/update');if(u.mac)$('lvcall').style.display='none';$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
  if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
 async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Mac installer opens &mdash; follow it.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
  busy(true,'Downloading the update…');let r;try{r=await api('/api/update/install',{});}catch(e){r={ok:false,error:'Lost connection.'}}
  if(r.ok&&r.restarting){UPD=1;busy(true,'Installing the update — the Helper opens again by itself…');return;}busy(false);showResult(r,'update');}
 {const bi=new Image();bi.onload=()=>{const b=$('brand');b.innerHTML='';bi.alt='XSV Productions';b.appendChild(bi);};bi.src='/brand.png?t='+T;}
+
+// ---------------- LIVE AIM: the Helper drives the DMX interface itself (dmx_out.ps1) while ShowXpress is closed
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let LV=null;const LVB=10;   // 16-bit pan steps per mouse pixel at Normal speed (tilt gets more: same angle)
+function lvFlip(id){try{return JSON.parse(localStorage.getItem('sxh_flip_'+id))||{x:false,y:false};}catch(e){return {x:false,y:false};}}
+const lvCl=v=>Math.max(0,Math.min(65535,v));
+function lvAimed(h){const w=LV.W[h.id];return w.tc||w.tk||!h.free;}
+function lvCopies(h){const w=LV.W[h.id],p=h.partner&&LV.byId[h.partner];return !!(p&&!w.tc&&!w.tk&&h.free&&lvAimed(p));}
+function lvCorner(h){const w=LV.W[h.id];return w.k||[lvCl(w.c[0]+h.dk[0]-h.home[0]),lvCl(w.c[1]+h.dk[1]-h.home[1])];}
+function lvPos(h,st){if(lvCopies(h))return lvPos(LV.byId[h.partner],st);return st==='k'?lvCorner(h):LV.W[h.id].c;}
+function lvLit(h){return h===LV.sel||(LV.all&&(!LV.towers||h.order<99||h.hung));}
+// ---- output: only changed channels, one request at a time, at most ~30 a second
+function lvPair(c,v,snap){v=Math.round(v);const k='p'+c;if(!snap&&LV.sent[k]===v)return;LV.sent[k]=v;const o=LV.pend.get(k);LV.pend.set(k,((snap||(o&&o[0]==='s'))?'s':'p')+':'+c+':'+(c+1)+':'+v);}
+function lvByte(ch,v){const k='b'+ch;if(LV.sent[k]===v)return;LV.sent[k]=v;LV.pend.set(k,'b:'+ch+':'+v);}
+function lvPush(snap){if(!LV)return;for(const h of LV.heads){const p=lvPos(h,LV.step),lit=lvLit(h);lvPair(h.addr,p[0],snap);lvPair(h.addr+2,p[1],snap);
+ for(const [i,v] of h.look)lvByte(h.addr+i,(!lit&&(i===h.dimI||i===h.shutI))?0:v);}lvKick();}
+function lvKick(){if(!LV||LV.tm||LV.fl)return;const d=30-(Date.now()-LV.last);if(d>0)LV.tm=setTimeout(()=>{if(LV){LV.tm=0;lvFlush();}},d);else lvFlush();}
+async function lvFlush(){if(!LV||!LV.on||LV.gone||LV.fl)return;let l=((LV.z?'z ':'')+[...LV.pend.values()].join(' ')).trim();if(!l){if(!LV.ka)return;l='k';}
+ const me=LV;LV.z=false;LV.ka=false;LV.pend.clear();LV.fl=true;LV.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,gone:true,error:'Lost connection to the Helper.'};}
+ if(LV!==me||!LV.on)return;LV.fl=false;if(!r.ok){lvGone(r.error);return;}if(LV.pend.size)lvKick();}
+function lvGone(msg){LV.gone=true;if(/^The DMX output stopped/.test(msg||''))msg='Unplugged, or the Helper lost it.';const g=$('lvgone');g.className='lvgone on';
+ g.innerHTML='<b>&#9888; The DMX output stopped.</b><span>'+esc(msg||'')+' Your aims so far are kept.</span><div class="grow"></div><button id="lvre" class="mini primary">Reconnect</button>';$('lvre').onclick=lvReconnect;}
+async function lvStart(mode){busy(true,'Connecting to the DMX interface…');let r;try{r=await api('/api/live/start',{mode});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+ if(!r.ok&&r.nova&&await ask('NovaStar is using the DMX interface','The NovaStar LED-screen software (NovaLCT) has a USB scanner that grabs the DMX interface. Pause it while you aim? NovaLCT starts it again by itself &mdash; your LED screens are not touched.','Pause it and continue')){
+  busy(true,'Pausing NovaStar and connecting…');try{r=await api('/api/live/start',{mode,stopNova:true});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);}
+ return r;}
+async function lvReconnect(){const r=await lvStart(LV.mode);
+ if(!LV)return;if(!r.ok){lvGone(r.error);return;}LV.gone=false;LV.fl=false;$('lvgone').className='lvgone';lvIf(r);LV.sent={};LV.pend.clear();LV.z=true;lvPush(true);}
+function lvIf(r){const t=$('lvif');t.className='tag '+(r.test?'red':'blue');t.textContent=r.test?'TEST - no real output':'Output: '+r.iface;}
+// ---- moving
+function lvTake(h){// a head that shows its T-bar partner's aim starts from there when you aim it yourself
+ if(!lvCopies(h))return;const p=LV.byId[h.partner],w=LV.W[h.id],pw=LV.W[p.id];w.c=lvPos(p,'c').slice();w.k=pw.k?pw.k.slice():null;w.tc=true;}
+function lvMove(dx,dy,sh,ct){if(!LV||!LV.sel||LV.gone)return;const h=LV.sel,w=LV.W[h.id],f=LV.flip,m=LV.spd*(sh?0.25:1)*(ct?4:1);
+ const dp=dx*LVB*m*(f.x?-1:1),dt=-dy*LVB*m*(h.deg[0]/h.deg[1])*(f.y?-1:1);if(!dp&&!dt)return;
+ lvTake(h);
+ if(LV.step==='k'){if(!w.k)w.k=lvCorner(h).slice();w.k=[lvCl(w.k[0]+dp),lvCl(w.k[1]+dt)];w.tk=true;}
+ else{w.c=[lvCl(w.c[0]+dp),lvCl(w.c[1]+dt)];w.tc=true;}
+ lvPush(false);lvDirty();}
+function lvDirty(){if(LV&&!LV.raf)LV.raf=requestAnimationFrame(lvSide);}
+function lvNav(){return LV.order.filter(h=>h===LV.sel||(!lvCopies(h)&&(!LV.towers||h.order<99)));}
+function lvSelect(h,quiet){if(!h)return;LV.sel=h;LV.flip=lvFlip(h.id);$('lvfx').checked=LV.flip.x;$('lvfy').checked=LV.flip.y;if(!quiet)lvPush(false);lvSide();
+ const e=$('lvlist').querySelector('.lvh.on');if(e)e.scrollIntoView({block:'nearest'});}
+function lvSetStep(s){LV.step=s;document.querySelectorAll('[data-st]').forEach(b=>b.classList.toggle('on',b.dataset.st===s));lvPush(false);lvDirty();}
+function lvStepTo(dir){const n=lvNav(),j=n.indexOf(LV.sel)+dir;if(j>=0&&j<n.length){lvSelect(n[j]);return;}
+ if(dir>0&&LV.step==='c'){LV.step='k';const m=LV.order.filter(h=>!lvCopies(h)&&(!LV.towers||h.order<99));lvSetStep('k');lvSelect(m[0]||LV.sel);}}
+// ---- drawing
+function lvList(){const g=[];let cur=null;
+ for(const h of LV.order){const t=h.order<99?h.tower:(LV.towers?'Other heads (not on a truss)':'Heads');if(t!==cur){g.push('<h4>'+esc(t)+'</h4>');cur=t;}
+  const w=LV.W[h.id],cp=lvCopies(h);
+  const st=(w.tc||w.tk)?'<small class="a">aimed'+(w.tk?' + corner':'')+'</small>':cp?'<small class="cp">&#8644; '+esc(LV.byId[h.partner].label)+'</small>':!h.free?'<small class="b">aimed before</small>':'<small>normal</small>';
+  g.push('<div class="lvh'+(h===LV.sel?' on':'')+(LV.towers&&h.order>=99?' dim':'')+'" data-lv="'+esc(h.id)+'"><span class="sd">'+esc(h.side||'')+'</span>'+esc(h.label)+st+'</div>');}
+ $('lvlist').innerHTML=g.join('');$('lvlist').querySelectorAll('[data-lv]').forEach(e=>e.onclick=()=>lvSelect(LV.byId[e.dataset.lv]));}
+function lvSide(){if(!LV)return;LV.raf=0;const h=LV.sel;if(!h)return;lvList();const w=LV.W[h.id],cp=lvCopies(h),st=LV.step,p=lvPos(h,st),pt=h.partner&&LV.byId[h.partner],room=LV.mode==='room';
+ $('lvname').textContent=h.label+(h.tower?' · '+h.tower+(h.side?(h.side==='L'?' left':' right'):''):'');
+ $('lvst').innerHTML=cp?'Not aimed &mdash; gets the same aim as <b>'+esc(pt.label)+'</b> next to it. Drag to aim it yourself.':(w.tc||w.tk)?'Aimed now'+(w.tk?' (center + corner)':' (center)'):!h.free?'Aimed before &mdash; drag to change it.':'Normal aim &mdash; drag to aim it.';
+ $('lvbig').innerHTML=esc(h.label)+' &mdash; <span>'+(st==='k'?'CORNER':'CENTER')+'</span>';
+ $('lvtip').innerHTML=(st==='k'?'Aim it at the front-left '+(room?'edge of the AROUND ROOM sweep':'corner of the floor (from the DJ)')+(w.tk||(h.kSet&&!cp)?'':' &mdash; <i>until you do, it follows the center</i>'):
+  'Aim it at the '+(room?'middle of where AROUND ROOM should sweep':'center of tonight&rsquo;s dance floor'))+'<br><span style="font-size:12px;color:#5d6574">Hold the mouse button down here and drag</span>';
+ const dg=(v,i)=>(v-h.home[i])*h.deg[i]/65536,f1=x=>(x>=0?'+':'&minus;')+Math.abs(x).toFixed(1)+'&deg;';
+ $('lvread').innerHTML='<span>Pan</span><b>'+Math.round(p[0])+' &nbsp;<small>'+f1(dg(p[0],0))+' from normal</small></b><span>Tilt</span><b>'+Math.round(p[1])+' &nbsp;<small>'+f1(dg(p[1],1))+' from normal</small></b>';
+ // minimap in degrees around the normal center, turned like the mouse moves
+ const c=lvPos(h,'c'),k=lvPos(h,'k'),fx=LV.flip.x?-1:1,fy=LV.flip.y?-1:1,X=v=>dg(v,0)*fx,Y=v=>-dg(v,1)*fy;
+ const bx=Math.abs(dg(h.dk[0],0)),by=Math.abs(dg(h.dk[1],1)),kx=Math.abs(X(k[0])-X(c[0])),ky=Math.abs(Y(k[1])-Y(c[1]));
+ const R=Math.max(bx*2.2,by*2.2,10,Math.abs(X(c[0]))+kx+2,Math.abs(Y(c[1]))+ky+2,Math.abs(X(p[0]))+2,Math.abs(Y(p[1]))+2),sc=82/R,px=v=>(120+v*sc).toFixed(1),py=v=>(90+v*sc).toFixed(1);
+ const rc=(x,y,hw,hh,a)=>'<rect x="'+px(x-hw)+'" y="'+py(y-hh)+'" width="'+(2*hw*sc).toFixed(1)+'" height="'+(2*hh*sc).toFixed(1)+'" '+a+'/>';
+ $('lvmap').innerHTML='<line x1="120" y1="0" x2="120" y2="180" stroke="#1d212a"/><line x1="0" y1="90" x2="240" y2="90" stroke="#1d212a"/>'+
+  rc(0,0,bx,by,'fill="none" stroke="#5d6574" stroke-dasharray="4 3" rx="3"')+rc(X(c[0]),Y(c[1]),kx,ky,'fill="rgba(255,176,32,.12)" stroke="#ffb020" stroke-width="1.5" rx="3"')+
+  '<circle cx="'+px(X(c[0]))+'" cy="'+py(Y(c[1]))+'" r="4" fill="#ffb020"/><circle cx="'+px(X(k[0]))+'" cy="'+py(Y(k[1]))+'" r="4" fill="#5aa9ff"/>'+
+  '<circle cx="'+px(X(p[0]))+'" cy="'+py(Y(p[1]))+'" r="8" fill="none" stroke="#fff" stroke-width="2"/>';
+ const b=$('lvpart');b.style.display=pt?'':'none';if(pt)b.innerHTML='&#8644; Same as '+esc(pt.label)+' (next to it)';
+ $('lvundo').disabled=JSON.stringify(w)===LV.I0[h.id];
+ const n=lvNav(),i=n.indexOf(h),nx=$('lvnext');$('lvprev').disabled=i<=0;
+ if(i<n.length-1){nx.disabled=false;nx.innerHTML='Next head &rarr;';}else if(st==='c'){nx.disabled=false;nx.innerHTML='Corners &rarr;';}else{nx.disabled=true;nx.innerHTML='Last head';}}
+// ---- open / close
+async function lvGo(){if(LV)return;let reo=false;
+ if(sxOpen){if(!await ask('Close ShowXpress to aim live?','Only one program can use the DMX interface, so ShowXpress closes while you aim. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It opens again when you finish.','Close and aim live'))return;
+  let r;try{r=await api('/api/sx/close',{live:true});}catch(e){r={ok:false,error:'Lost connection.'};}if(!r.ok){showResult(r,'live');return;}
+  busy(true,'Waiting for ShowXpress to close… (save it if it asks)');const t0=Date.now();let open=true;
+  while(Date.now()-t0<120000){await sleep(1000);try{open=(await api('/api/sx')).open;}catch(e){}if(!open)break;}
+  if(open){busy(false);try{await api('/api/live/stop',{});}catch(e){}showResult({ok:false,error:'ShowXpress is still open. Close it (save if it asks), then press Aim live again.'},'live');return;}
+  busy(true,'ShowXpress closed - waiting for it to let go of the interface…');await sleep(2500);reo=true;}
+ const r=await lvStart(aimMode);
+ if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'live');return;}
+ lvOpen(r,reo);}
+function lvOpen(r,reo){const I=r.info;
+ LV={on:true,mode:aimMode,heads:I.heads,byId:{},W:{},I0:{},sent:{},pend:new Map(),z:true,ka:false,fl:false,tm:0,last:0,step:'c',all:false,spd:+(localStorage.getItem('sxh_lvspd')||1)||1,drag:false,raf:0,gone:false};
+ for(const h of LV.heads){LV.byId[h.id]=h;const w={c:h.c.slice(),k:h.kSet?h.k.slice():null,tc:false,tk:false};LV.W[h.id]=w;LV.I0[h.id]=JSON.stringify(w);}
+ LV.towers=LV.heads.some(h=>h.order<99);LV.order=LV.heads.slice().sort((a,b)=>a.order-b.order);
+ $('lvmode').textContent=(LV.mode==='room'?'Room':'Dance floor')+' · '+I.aimTitle;lvIf(r);$('lvreo').checked=!!reo;$('lvall').checked=false;$('lvgone').className='lvgone';
+ document.querySelectorAll('[data-sp]').forEach(b=>b.classList.toggle('on',+b.dataset.sp===LV.spd));document.querySelectorAll('[data-st]').forEach(b=>b.classList.toggle('on',b.dataset.st==='c'));
+ $('live').classList.add('on');document.body.style.overflow='hidden';
+ LV.kat=setInterval(()=>{if(LV&&LV.on&&Date.now()-LV.last>2000){LV.ka=true;lvKick();}},1000);
+ lvSelect(LV.order.find(h=>!LV.towers||h.order<99)||LV.order[0],true);lvPush(true);}
+function lvClose(){if(!LV)return;clearInterval(LV.kat);if(LV.tm)clearTimeout(LV.tm);LV.on=false;LV=null;$('live').classList.remove('on');document.body.style.overflow='';
+ if(document.pointerLockElement)document.exitPointerLock();}
+function lvEdits(){return LV.heads.some(h=>JSON.stringify(LV.W[h.id])!==LV.I0[h.id]);}
+async function lvStop(reo){lvClose();busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)sxLaunch();}
+function lvResult(r,mode){const reo=r.reopened?'<p class="sub" style="margin:8px 0 0">ShowXpress is opening again.</p>':r.reopenError?'<p style="color:var(--red)">ShowXpress didn&rsquo;t open: '+esc(r.reopenError)+'</p>':'';
+ const at=mode==='room'?'ROOM AIM (ADJUST)':'DF AIM (ADJUST)';
+ if(r.ok&&r.applied){showResult({ok:true,out:r.out},'apply');$('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> Live aims saved and applied';$('rbody').insertAdjacentHTML('beforeend',reo);return;}
+ const box=$('result');box.className='card result err';$('rlog').textContent=r.out||'';
+ if(r.ok){$('rtitle').innerHTML='<span style="color:var(--amber)">&#9888;</span> Aims saved, not applied yet';$('rbody').innerHTML='<p>The aims are saved in <b>'+at+'</b>, but applying them to the show didn&rsquo;t work: '+esc(r.applyError||'unknown error')+'</p><p class="sub">Check the heads above, then press <b>Apply to show</b>.</p>'+reo;}
+ else{$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> Live aims not saved';$('rbody').innerHTML='<p>'+esc(r.error||'Unknown error.')+'</p><p class="sub">Nothing was changed.</p>'+reo;}
+ box.scrollIntoView({behavior:'smooth'});}
+$('lvgo').onclick=lvGo;
+$('lvcancel').onclick=async()=>{if(!LV)return;if(lvEdits()&&!await ask('Stop without saving?','The aims you set here are not saved. The heads go dark and the show keeps the aims it had.','Stop without saving'))return;lvStop($('lvreo').checked);};
+$('lvsave').onclick=async()=>{if(!LV)return;const aims={};let n=0;
+ for(const h of LV.heads){const w=LV.W[h.id];if(!w.tc&&!w.tk)continue;aims[h.id]={c:w.c.map(Math.round),k:w.tk?(w.k?w.k.map(Math.round):h.dk.slice()):null};n++;}
+ const reo=$('lvreo').checked,mode=LV.mode;
+ if(!n){if(await ask('Nothing was aimed','No head was moved, so there is nothing to save. Stop live aim?','Stop'))lvStop(reo);return;}
+ lvClose();busy(true,'Saving '+n+' aim'+(n>1?'s':'')+' and applying them to the show…');
+ let r;try{r=await api('/api/live/save',{mode,aims,apply:true,w:clamp($('w').value),d:clamp($('d').value),force:false,reopen:reo});}catch(e){r={ok:false,error:'Lost connection.'};}
+ busy(false);lvResult(r,mode);load();};
+$('lvnext').onclick=()=>lvStepTo(1);$('lvprev').onclick=()=>lvStepTo(-1);
+$('lvundo').onclick=()=>{const h=LV.sel;LV.W[h.id]=JSON.parse(LV.I0[h.id]);lvPush(false);lvDirty();};
+$('lvhome').onclick=()=>{const h=LV.sel;if(h.free&&!h.kSet)LV.W[h.id]=JSON.parse(LV.I0[h.id]);else LV.W[h.id]={c:h.home.slice(),k:null,tc:true,tk:true};lvPush(false);lvDirty();};
+$('lvpart').onclick=()=>{const h=LV.sel,p=LV.byId[h.partner];if(!p)return;const pw=LV.W[p.id];LV.W[h.id]={c:lvPos(p,'c').slice(),k:pw.k?pw.k.slice():null,tc:true,tk:!!pw.k};lvPush(false);lvDirty();};
+$('lvall').onchange=e=>{LV.all=e.target.checked;lvPush(false);};
+function lvSetFlip(){const h=LV.sel;LV.flip={x:$('lvfx').checked,y:$('lvfy').checked};localStorage.setItem('sxh_flip_'+h.id,JSON.stringify(LV.flip));
+ if(h.partner&&localStorage.getItem('sxh_flip_'+h.partner)===null)localStorage.setItem('sxh_flip_'+h.partner,JSON.stringify(LV.flip));lvDirty();}
+$('lvfx').onchange=lvSetFlip;$('lvfy').onchange=lvSetFlip;
+document.querySelectorAll('[data-st]').forEach(b=>b.onclick=()=>lvSetStep(b.dataset.st));
+document.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{LV.spd=+b.dataset.sp;localStorage.setItem('sxh_lvspd',b.dataset.sp);document.querySelectorAll('[data-sp]').forEach(x=>x.classList.toggle('on',x===b));});
+{const pad=$('lvpad');
+ pad.onmousedown=e=>{if(!LV||e.button!==0)return;e.preventDefault();LV.drag=true;pad.classList.add('drag');try{const pr=pad.requestPointerLock();if(pr&&pr.catch)pr.catch(()=>{});}catch(x){}};
+ const end=()=>{if(!LV||!LV.drag)return;LV.drag=false;pad.classList.remove('drag');if(document.pointerLockElement)document.exitPointerLock();};
+ document.addEventListener('mousemove',e=>{if(LV&&LV.drag)lvMove(e.movementX,e.movementY,e.shiftKey,e.ctrlKey);});
+ document.addEventListener('mouseup',end);document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)end();});}
+document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display==='flex'||$('busy').style.display==='flex')return;
+ const k=e.key,A={ArrowLeft:[-4,0],ArrowRight:[4,0],ArrowUp:[0,-4],ArrowDown:[0,4]}[k];
+ if(A){e.preventDefault();lvMove(A[0],A[1],e.shiftKey,e.ctrlKey);return;}
+ if(k==='Tab'){e.preventDefault();lvStepTo(e.shiftKey?-1:1);return;}
+ if(e.ctrlKey||e.altKey)return;
+ if(k==='n'||k==='N')lvStepTo(1);else if(k==='p'||k==='P')lvStepTo(-1);else if(k==='1')lvSetStep('c');else if(k==='2')lvSetStep('k');});
+window.addEventListener('beforeunload',()=>{if(LV)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
 setTab(location.hash.slice(1)||'home');draw();load();poll();loadGd();chkUpd();
 </script></body></html>
@@ -864,7 +1253,8 @@ try {
   while ($l.IsListening) {
     $task = $l.GetContextAsync()
     while (-not $task.AsyncWaitHandle.WaitOne(1000)) {
-      if (((Get-Date) - $last).TotalSeconds -gt $idleMax) { $l.Stop(); break }
+      try { Step-Queue } catch {}
+      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count) { $l.Stop(); break }
     }
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
@@ -874,6 +1264,11 @@ try {
       $path = $req.Url.AbsolutePath
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
+      if ($req.HttpMethod -eq 'POST' -and $queueable.ContainsKey($path)) {
+        # ShowXpress open + the page asked to queue -> do it when ShowXpress closes; else now
+        if ($body -and $body.queue -and (Test-SxOpen)) { Send-Json $ctx (Add-Queue $path $body) } else { Send-Json $ctx (Invoke-Action $path $body) }
+        continue
+      }
       switch ($path) {
         '/'            { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token)) }
         '/brand.png'   {
@@ -881,21 +1276,53 @@ try {
           if ($bp) { Send-Png $ctx $bp } else { Send-Text $ctx 404 'text/plain' 'no brand image' }
         }
         '/icon.png'    { $ip = Join-Path $here 'aim_movers_1024.png'; if (-not (Test-Path $ip)) { $ip = Join-Path $here '../assets/aim_movers_1024.png' } if (Test-Path $ip) { $ib = [IO.File]::ReadAllBytes($ip); $ctx.Response.ContentType = 'image/png'; $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close() } else { Send-Text $ctx 404 'text/plain' 'no icon' } }
-        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen) } }
-        '/api/sx/launch' {
-          if (Test-SxOpen) { Send-Json $ctx @{ ok = $true; out = '  ShowXpress is already open'; error = '' }; break }
-          if ($onMac) {
-            $a = @(Get-ChildItem -LiteralPath '/Applications' -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' }) | Select-Object -First 1
-            if (-not $a) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress was not found in Applications.'; out = '' }; break }
-            & open $a.FullName
-          } else {
-            $x = Get-SxExe
-            if (-not $x) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress was not found in Program Files\ShowXpress.'; out = '' }; break }
-            Start-Process -FilePath $x -WorkingDirectory (Split-Path $x)
+        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen); q = (Get-QueueInfo); live = (Test-Live) } }
+        '/api/live/start' {
+          if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; sxopen = $true; error = 'ShowXpress is open - it has to be closed while you aim live (only one program can use the DMX interface).'; out = '' }; break }
+          $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
+          $r = Invoke-Engine "-Action LiveInfo$mo"
+          $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+          if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }); out = '' }; break }
+          $script:liveHold = Get-Date
+          # NovaStar NovaLCT (LED screens) has a USB scanner that grabs the D512S (found 2026-11-21). Paused only when the user says so.
+          if ($body.stopNova -and -not $onMac) { Get-Process MarsServerProvider -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 }
+          $s = Start-Live
+          if (-not $s.ok -and -not $onMac -and "$($s.error)" -like '*was not found*' -and (Get-Process MarsServerProvider -ErrorAction SilentlyContinue)) {
+            $s.nova = $true; $s.error = 'The NovaStar LED-screen software (NovaLCT) is holding the DMX interface. Its USB scanner can be paused while you aim - NovaLCT starts it again by itself.'
           }
-          Send-Json $ctx @{ ok = $true; out = '  ShowXpress is starting'; error = '' }
+          if (-not $s.ok) { Send-Json $ctx $s; break }
+          Send-Text $ctx 200 'application/json; charset=utf-8' ('{"ok":true,"iface":' + (ConvertTo-Json $s.iface -Compress) + ',"test":' + $(if ($TestRoot) { 'true' } else { 'false' }) + ',"info":' + $j + '}')
         }
+        '/api/live/out' {
+          $ln = "$($body.l)"
+          if ($ln.Length -gt 60000 -or @($ln -split ' ' | Where-Object { $_ -and $_ -notmatch '^(z|k|b:\d{1,4}:\d{1,3}|[ps]:\d{1,4}:\d{1,4}:\d{1,5})$' }).Count) { Send-Json $ctx @{ ok = $false; error = 'Bad output command.' }; break }
+          if (-not (Test-Live)) { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The DMX output stopped.' }; break }
+          try { $script:liveP.StandardInput.WriteLine($ln); Send-Json $ctx @{ ok = $true } } catch { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The DMX output stopped.' } }
+        }
+        '/api/live/stop' { Stop-Live; $script:liveHold = [datetime]::MinValue; Send-Json $ctx @{ ok = $true } }
+        '/api/live/save' {
+          # stop the output, write the aims into the aim scene, Apply (size from the Aim tab), run anything queued, reopen ShowXpress
+          Stop-Live
+          $mo = if ("$($body.mode)" -eq 'room') { 'room' } else { 'floor' }
+          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+          [IO.File]::WriteAllText($cf, (@{ aims = $body.aims } | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+          try { $r = Invoke-Engine "-Action LiveSave$(if ($mo -eq 'room') { ' -Mode Room' }) -ChangesFile `"$cf`"" } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+          $res = @{ ok = $r.ok; saved = $r.ok; applied = $false; error = "$($r.error)"; out = "$($r.out)"; applyError = '' }
+          if ($r.ok -and $body.apply) {
+            $r2 = Invoke-Action '/api/apply' ([pscustomobject]@{ w = $body.w; d = $body.d; force = [bool]$body.force; mode = $mo })
+            $res.out += "`n" + "$($r2.out)"; $res.applied = [bool]$r2.ok; $res.applyError = "$($r2.error)"
+          }
+          $script:liveHold = [datetime]::MinValue
+          if ($queue.Count) { Invoke-QueueItems $false }
+          if ($body.reopen) { $reo = try { Start-Sx } catch { @{ ok = $false; error = $_.Exception.Message } }; $res.reopened = [bool]$reo.ok; $res.reopenError = "$($reo.error)" }
+          Send-Json $ctx $res
+        }
+        '/api/queue/cancel' { $k = "$($body.key)"; foreach ($o in @($queue | Where-Object { $_.key -eq $k -or $k -eq '*' })) { [void]$queue.Remove($o) }; Send-Json $ctx @{ ok = $true; q = (Get-QueueInfo) } }
+        '/api/queue/reopen' { $script:qReopen = [bool]$body.on; Send-Json $ctx @{ ok = $true; q = (Get-QueueInfo) } }
+        '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }
+        '/api/sx/launch' { Send-Json $ctx (Start-Sx) }
         '/api/sx/close' {
+          if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
           $ps = @(Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' })
           if ($onMac) { foreach ($p in $ps) { & osascript -e "quit app `"$($p.ProcessName)`"" 2>$null } } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
           Send-Json $ctx @{ ok = $true; out = '  ShowXpress was asked to close'; error = '' }
@@ -920,69 +1347,22 @@ try {
           $mo = if ($req.QueryString['mode'] -eq 'room') { ' -Mode Room' } else { '' }
           Send-EngineJson $ctx (Invoke-Engine "-Action Preview$mo")
         }
-        '/api/aim/install' { Send-Json $ctx (Invoke-Engine '-Action Install -Mode Room') }
         '/api/color'   { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $colorEngine) }
-        '/api/color/apply' {
-          $hx = "$($body.hex)".Trim().TrimStart('#')
-          if ($hx -notmatch '^[0-9a-fA-F]{6}$') { Send-Json $ctx @{ ok = $false; error = 'Pick a colour first.'; out = '' }; break }
-          $nm = ("$($body.name)" -replace '[^A-Za-z0-9 \-]', '').Trim(); if ($nm.Length -gt 30) { $nm = $nm.Substring(0, 30) }
-          $na = if ($nm) { " -Name `"$nm`"" } else { '' }
-          Send-Json $ctx (Invoke-Engine "-Action Apply -Color $hx$na" $colorEngine)
-        }
         '/api/gdrive'  { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $gdEngine) }
-        '/api/gdrive/sync' { Send-Json $ctx (Invoke-Engine '-Action Sync' $gdEngine) }
         '/api/pre/fix' {
           $k = "$($body.key)"
           if ($k -notmatch '^(sleep|usb|restart)$') { Send-Json $ctx @{ ok = $false; error = 'Unknown fix.'; out = '' }; break }
           Send-Json $ctx (Invoke-Engine "-Action Fix -FixId $k" $preEngine)
         }
-        '/api/apply' {
-          $w = [int]$body.w; $d = [int]$body.d
-          if ($w -lt 20 -or $w -gt 300 -or $d -lt 20 -or $d -gt 300) { Send-Json $ctx @{ ok = $false; error = 'Size must be 20-300%.'; out = '' }; break }
-          $f = if ($body.force) { ' -Force' } else { '' }
-          $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
-          Send-Json $ctx (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f$mo")
-        }
-        '/api/home'    { $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }; Send-Json $ctx (Invoke-Engine "-Action Home -NoPrompt$mo") }
         '/api/skip'    {
           $r = Invoke-Engine '-Action Preview' $skipEngine
           if ($r.ok) { $j = (($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1); Send-Text $ctx 200 'application/json; charset=utf-8' $j }
           else { Send-Json $ctx @{ ok = $false; error = $r.error } }
         }
-        '/api/skip/apply' {
-          $ids = @($body.heads | ForEach-Object { "$_" })
-          if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 2) { Send-Json $ctx @{ ok = $false; error = 'Pick at least 2 heads.'; out = '' }; break }
-          Send-Json $ctx (Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $skipEngine)
-        }
         '/api/rig'     { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $rigEngine) }
-        '/api/rig/apply' {
-          $ids = @($body.heads | ForEach-Object { "$_" })
-          if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 1) { Send-Json $ctx @{ ok = $false; error = 'Tick at least one head.'; out = '' }; break }
-          $r = Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $rigEngine
-          if ($r.ok) { $r.out += Update-SkipFlash $ids }
-          Send-Json $ctx $r
-        }
         '/api/apc'     { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $apcEngine) }
-        '/api/apc/apply' {
-          $items = @(foreach ($c in @($body.changes)) { if ($c) { $o = [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; note = $c.note }; if ($null -ne $c.on) { $o.on = $c.on; $o.off = $c.off }; $o } })
-          $badC = @($items | Where-Object { $_.Contains('on') -and (("$($_.on)" -notmatch '^\d+$') -or ("$($_.off)" -notmatch '^\d+$') -or [int]$_.on -gt 127 -or [int]$_.off -gt 127) }).Count
-          if ($badC -or -not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.note)" -notmatch '^-?\d+$' -or [int]$_.note -lt -1 -or [int]$_.note -gt 63 }).Count) {
-            Send-Json $ctx @{ ok = $false; error = 'Nothing valid to save.'; out = '' }; break }
-          Send-Json $ctx (Invoke-WithChanges $apcEngine $items)
-        }
         '/api/speed'   { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $speedEngine) }
-        '/api/speed/apply' {
-          $items = @(foreach ($c in @($body.changes)) { if ($c) { [ordered]@{ sec = "$($c.sec)"; title = "$($c.title)"; fader = $c.fader } } })
-          if (-not $items.Count -or @($items | Where-Object { $_.sec -notmatch '^page\d+_button\d+$' -or "$($_.fader)" -notmatch '^\d+$' -or [int]$_.fader -gt 99 }).Count) {
-            Send-Json $ctx @{ ok = $false; error = 'Nothing valid to save.'; out = '' }; break }
-          Send-Json $ctx (Invoke-WithChanges $speedEngine $items)
-        }
         '/api/health'  { Send-EngineJson $ctx (Invoke-Engine '-Action Check' $healthEngine) }
-        '/api/health/fix' {
-          $k = "$($body.key)"
-          if ($k -notmatch '^(speed|midiout|midilight|pad|color|fixtures)\|(page\d+_button\d+|\d+)$') { Send-Json $ctx @{ ok = $false; error = 'Unknown fix.'; out = '' }; break }
-          Send-Json $ctx (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
-        }
         '/api/health/revert' {
           $i = "$($body.id)"
           if ($i -notmatch '^[0-9a-f]{8}$') { Send-Json $ctx @{ ok = $false; error = 'Unknown fix.'; out = '' }; break }
@@ -996,23 +1376,6 @@ try {
           Send-Json $ctx (Invoke-Engine "-Action Keep -FixId $i" $healthEngine)
         }
         '/api/rt'      { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $rtEngine) }
-        '/api/rt/install' { Send-Json $ctx (Invoke-Engine '-Action Install' $rtEngine) }
-        '/api/rt/apply' {
-          $as = [ordered]@{}
-          if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|tm|bl|br|bm)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
-          if (-not $as.Count) { Send-Json $ctx @{ ok = $false; error = 'Put at least one mover on a truss.'; out = '' }; break }
-          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
-          [IO.File]::WriteAllText($cf, (@{ assign = $as; extra = [bool]$body.extra } | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding($false)))
-          try { $r = Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $rtEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
-          if ($r.ok -and $body.rig) {
-            $hl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^RIGHEADS: [\d,]+$' } | Select-Object -Last 1
-            if ($hl) { $r2 = Invoke-Engine "-Action Apply -Heads `"$($hl.Substring(10))`"" $rigEngine
-              if ($r2.ok) { $r.out += "`n  Tonight's Rig:`n" + $r2.out } else { $r.out += "`n  Tonight's Rig NOT updated: $($r2.error)" } }
-            $sl = ($r.out -split "`r?`n") | Where-Object { $_ -match '^SKIPHEADS: [\d,]+$' } | Select-Object -Last 1
-            if ($sl) { $r.out += Update-SkipFlash ($sl.Substring(11) -split ',') }
-          }
-          Send-Json $ctx $r
-        }
         '/api/pre'     { Send-EngineJson $ctx (Invoke-Engine '-Action Check' $preEngine) }
         default        { Send-Text $ctx 404 'text/plain' 'not found' }
       }
@@ -1021,6 +1384,7 @@ try {
     }
   }
 } finally {
+  Stop-Live
   try { $l.Close() } catch {}
   if (Test-Path $infoF) { try { $i = Get-Content $infoF -Raw | ConvertFrom-Json; if ($i.pid -eq $PID) { Remove-Item $infoF } } catch {} }
 }

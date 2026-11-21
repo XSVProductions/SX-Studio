@@ -49,6 +49,14 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
 3. Open **ShowXpress Helper**, check the heads, set the overall size, and press **Apply to show**.
 4. Open ShowXpress again and check the **DF CHECK 140 / 251** scenes. The beams should trace the floor corners.
 
+**Aim live (Windows)** - the quicker way. Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and the Helper drives the DMX interface itself, so the real head follows your mouse as you drag:
+- Only the selected head is lit. Speed **Fine / Normal / Fast**, **Shift** = finer, **Ctrl** = faster, **arrow keys** nudge.
+- **N / P** (or Tab) = next / previous head, **1 / 2** = center / corner step. **Flip** left/right or up/down per head if it moves the wrong way.
+- **Save & finish** writes the aims into DF AIM (ADJUST) (or ROOM AIM), applies them, and opens ShowXpress again.
+- Only one program can use the interface. If the NovaStar LED software (NovaLCT) is holding it, the Helper offers to pause its USB scanner.
+
+**One head per T-bar:** aim just one head of each T-bar pair (set up in Rig Test). The head next to it gets the same aim, unless you aim it too.
+
 **Reset to normal** puts every head back to its default center and size.
 
 **Aim Movers - Room** (the *Room* switch at the top of the tab) does the same for **AROUND ROOM** and **AROUND ROOM SLOW**, using the scene **ROOM AIM (ADJUST)** and checking with **ROOM CHECK** (both on the SETUP page; the tab adds them if they're missing). Width = across the room, Height = up and down the walls.
@@ -78,7 +86,7 @@ The flash order follows the original 16-head skip order, with any 251s spread in
 
 The backups are kept in `health_fixes.json` in the show folder. If you change the same thing again in ShowXpress after a fix, Revert asks before it puts the old version back.
 
-ShowXpress Helper never writes anything while ShowXpress is open.
+ShowXpress Helper never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, the Helper does them and opens ShowXpress again.
 
 ## Google Drive
 

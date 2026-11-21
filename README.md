@@ -67,7 +67,7 @@ Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save t
 
 **APC mini** - tap a pad to move it, or pick its colour while playing and when idle.
 
-**Rig Test** - press **RIG ID** on the SETUP page, tap each truss spot in the tab and pick the look you see, then **Save to 2D view**. It moves the 140s in the 2D view (blinder top center, uplight bottom center) and, ticked by default, also saves Tonight's Rig and SKIP FLASH. *Bigger event* adds a top-middle and a bottom-middle tower.
+**Rig Test** - press **RIG ID** on the SETUP page, tap each truss spot in the tab and pick the look you see, then **Save to 2D view**. RIG ID gives 140 #1-#8 a solid colour (white, deep red, amber, yellow, green, sky blue, blue, purple) and #9-#16 the same colours blinking; the swatches in the tab match the real beams. If the tab says the RIG ID scene is the old one, close ShowXpress and press **Update RIG ID**. It moves the 140s in the 2D view (blinder top center, uplight bottom center) and, ticked by default, also saves Tonight's Rig and SKIP FLASH. *Bigger event* adds a top-middle and a bottom-middle tower.
 
 **Pre-show Check** - one list of what to look at before the guests arrive. Where the Helper can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
 

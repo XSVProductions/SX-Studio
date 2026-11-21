@@ -2,7 +2,7 @@
 #
 #   TONIGHTS COLOR (MOVER COLORS page)  scene "TONIGHTS COLOR MOVERS": every 140SR / 251SR on the nearest colour of
 #                                       its colour wheel. Colour channel only, so it goes on top of any movement scene.
-#   TONIGHTS COLOR (UPLIGHTS page)      scene "TONIGHTS COLOR UPLIGHT": every uplight (+ the Ovation) in the exact colour.
+#   TONIGHTS COLOR (UPLIGHTS page)      scene "TONIGHTS COLOR UPLIGHT": every uplight in the exact colour (not the Ovation - it stays white).
 #
 #   -Action Preview                  -> JSON for the Helper window (writes nothing)
 #   -Action Apply -Color RRGGBB      -> writes both scenes (and adds the 2 buttons the first time)
@@ -43,7 +43,7 @@ function Get-Nearest($model, [string]$hex) {
   [pscustomobject]@{ name = $best[0]; value = $best[1]; hex = $best[2] }
 }
 
-# all fixtures in the show (from every scene's fixture list) -> uplights / Ovation.
+# all fixtures in the show (from every scene's fixture list) -> uplights.
 # Only fixtures still patched (id in fixtures.ini) - old scenes can still list deleted fixtures (e.g. "UPLIGHT #2"),
 # and putting those in a scene makes ShowXpress say "No compatible fixture found" (user 2026-11-21).
 function Get-ShowFixtures {
@@ -61,9 +61,9 @@ function Get-ShowFixtures {
   @($seen.Values | Sort-Object Name)
 }
 function Get-Washes {
-  # RGB fixtures with red/green/blue channels, not movers / blinders: uplights, Ovation...
+  # RGB fixtures with red/green/blue channels, not movers / blinders / the Ovation (kept on white): uplights...
   @(foreach ($f in Get-ShowFixtures) {
-    if ($f.Model -eq $m140 -or $f.Model -eq $m251 -or $f.Model -match 'blinder|OPPSK|350W') { continue }
+    if ($f.Model -eq $m140 -or $f.Model -eq $m251 -or $f.Model -match 'blinder|OPPSK|350W|Ovation') { continue }   # Ovation stays white (user 2026-11-21)
     $p = "$root/fixtures/$($f.Model).txt"; if (-not (Test-Path -LiteralPath $p)) { continue }
     $chs = @(foreach ($l in [IO.File]::ReadAllLines($p)) { if ($l -match '^Channel = (.+?)\s*$') { $matches[1].ToLower() } })
     if ($chs -contains 'red' -and $chs -contains 'green' -and $chs -contains 'blue') { $f | Add-Member -NotePropertyName Chs -NotePropertyValue $chs -PassThru }

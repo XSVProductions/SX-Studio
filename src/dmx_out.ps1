@@ -1,7 +1,6 @@
-# DMX OUT - the Helper's own DMX output for LIVE AIM (Windows + Mac). Started by df_aim_gui.ps1 as a child process.
+# DMX OUT - the Helper's own DMX output for LIVE AIM (Windows). Started by df_aim_gui.ps1 as a child process.
 #
-#   Uses ShowXpress's own interface driver (efk_hardware.dll in the ShowXpress folder; Mac: efk_hardware.dylib next to
-#   TheLightingController.app, Intel only) to send DMX straight to the
+#   Uses ShowXpress's own interface driver (efk_hardware.dll in the ShowXpress folder) to send DMX straight to the
 #   USB interface (EFK D512S). Only ONE program can use the interface: ShowXpress must be CLOSED while this runs.
 #   First line printed:  "OK <interface name>"  or  "ERR <why>".
 #   Then reads commands from stdin, one line = one atomic change (space separated tokens):
@@ -12,8 +11,7 @@
 #     k            keep-alive (nothing else)          q   quit
 #   Safety: no command for 30 s (Helper window gone) or stdin closed -> all channels 0, interface closed, exit.
 #   -Fake = no hardware (testing): the frame is written to -FakeLog as "ch=value" lines for channels above 0.
-#   -Probe = load the driver, print what it finds, exit (troubleshooting; -NoPreload = Mac: let the driver find efk_usb itself).
-param([string]$DllDir = "$env:ProgramFiles\ShowXpress", [switch]$Fake, [string]$FakeLog = '', [switch]$Probe, [switch]$NoPreload)
+param([string]$DllDir = "$env:ProgramFiles\ShowXpress", [switch]$Fake, [string]$FakeLog = '')
 $ErrorActionPreference = 'Stop'
 Add-Type -TypeDefinition @"
 using System; using System.Collections.Generic; using System.IO; using System.Runtime.InteropServices; using System.Text; using System.Threading;
@@ -25,51 +23,6 @@ public static class SxhDmx {
   [DllImport("efk_hardware.dll")] static extern long EFK_stream_mode();
   [DllImport("efk_hardware.dll")] static extern IntPtr EFK_get_name_of_interfaces();
   [DllImport("efk_hardware.dll")] static extern long EFK_send_dmx(byte[] buf);
-  // Mac: the same driver as a .dylib, loaded by full path; it opens efk_usb.dylib (same folder) by its bare name
-  [DllImport("libSystem.dylib")] static extern IntPtr dlopen(string path, int mode);
-  [DllImport("libSystem.dylib")] static extern IntPtr dlsym(IntPtr h, string name);
-  [DllImport("libSystem.dylib")] static extern IntPtr dlerror();
-  [DllImport("libSystem.dylib")] static extern uint _dyld_image_count();
-  [DllImport("libSystem.dylib")] static extern IntPtr _dyld_get_image_name(uint i);
-  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate long FnL();
-  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate IntPtr FnP();
-  [UnmanagedFunctionPointer(CallingConvention.Cdecl)] delegate long FnB(byte[] b);
-  static bool mac;
-  static FnL mCheck, mOpen, mClose, mStream; static FnP mNames; static FnB mSend;
-  static long HwCheck() { return mac ? mCheck() : EFK_check_hardware(); }
-  static long HwOpen() { return mac ? mOpen() : EFK_open(); }
-  static long HwClose() { return mac ? mClose() : EFK_close(); }
-  static long HwStream() { return mac ? mStream() : EFK_stream_mode(); }
-  static IntPtr HwNames() { return mac ? mNames() : EFK_get_name_of_interfaces(); }
-  static long HwSend(byte[] b) { return mac ? mSend(b) : EFK_send_dmx(b); }
-  static Delegate Sym(IntPtr h, string n, Type t) {
-    IntPtr f = dlsym(h, n);
-    if (f == IntPtr.Zero) throw new Exception("the driver has no " + n);
-    return Marshal.GetDelegateForFunctionPointer(f, t);
-  }
-  public static string Loaded() {   // Mac: which EFK libraries are loaded (troubleshooting)
-    StringBuilder sb = new StringBuilder();
-    uint n = _dyld_image_count();
-    for (uint i = 0; i < n; i++) { string s = Marshal.PtrToStringAnsi(_dyld_get_image_name(i)); if (s != null && s.ToLower().Contains("efk")) sb.Append(s).Append(" ; "); }
-    return sb.ToString();
-  }
-  static string MacLoad(string dir, bool preload) {
-    string hw = Path.Combine(dir, "efk_hardware.dylib");
-    if (!File.Exists(hw)) return "ERR ShowXpress's interface driver (efk_hardware.dylib) was not found next to ShowXpress (" + dir + ").";
-    Directory.SetCurrentDirectory(dir);
-    if (preload) dlopen(Path.Combine(dir, "efk_usb.dylib"), 10);   // RTLD_NOW | RTLD_GLOBAL
-    IntPtr h = dlopen(hw, 10);
-    if (h == IntPtr.Zero) {
-      string e = Marshal.PtrToStringAnsi(dlerror()) ?? "";
-      if (e.Contains("incompatible architecture") || e.Contains("wrong architecture")) return "ERR ShowXpress's Mac interface driver only runs on Intel Macs, so live aim can't run on this Mac yet.";
-      return "ERR ShowXpress's interface driver didn't load: " + e;
-    }
-    mCheck = (FnL)Sym(h, "EFK_check_hardware", typeof(FnL)); mOpen = (FnL)Sym(h, "EFK_open", typeof(FnL));
-    mClose = (FnL)Sym(h, "EFK_close", typeof(FnL)); mStream = (FnL)Sym(h, "EFK_stream_mode", typeof(FnL));
-    mNames = (FnP)Sym(h, "EFK_get_name_of_interfaces", typeof(FnP)); mSend = (FnB)Sym(h, "EFK_send_dmx", typeof(FnB));
-    mac = true;
-    return null;
-  }
   const int N = 512 * 16;
   class Pair { public int c, f; public double cur, tgt; }
   static byte[] frame = new byte[N];
@@ -81,18 +34,15 @@ public static class SxhDmx {
   static long lastCmd = DateTime.UtcNow.Ticks;
   static volatile bool dirty = true;
 
-  public static string Open(string dir, bool isFake, string log, bool isMac, bool preload) {
+  public static string Open(string dir, bool isFake, string log) {
     fake = isFake; fakeLog = log;
     if (fake) return "OK test interface";
-    if (isMac) { string e = MacLoad(dir, preload); if (e != null) return e; }
-    else {
-      if (!File.Exists(Path.Combine(dir, "efk_hardware.dll"))) return "ERR ShowXpress's interface driver (efk_hardware.dll) was not found in " + dir;
-      SetDllDirectory(dir);
-    }
-    HwCheck();
-    string n = Marshal.PtrToStringUni(HwNames());
+    if (!File.Exists(Path.Combine(dir, "efk_hardware.dll"))) return "ERR ShowXpress's interface driver (efk_hardware.dll) was not found in " + dir;
+    SetDllDirectory(dir);
+    EFK_check_hardware();
+    string n = Marshal.PtrToStringUni(EFK_get_name_of_interfaces());
     if (n == null || n.Trim('|', ' ') == "" || n.StartsWith("err")) return "ERR none";
-    HwOpen(); HwStream(); opened = true;
+    EFK_open(); EFK_stream_mode(); opened = true;
     return "OK " + n.Trim('|', ' ').ToUpper();
   }
 
@@ -107,7 +57,7 @@ public static class SxhDmx {
         }
         Buffer.BlockCopy(frame, 0, o, 0, N);
       }
-      if (!fake) HwSend(o);
+      if (!fake) EFK_send_dmx(o);
       else if (fakeLog != null && fakeLog != "" && dirty) {
         dirty = false;
         StringBuilder sb = new StringBuilder();
@@ -159,19 +109,13 @@ public static class SxhDmx {
     // lights out, then let ShowXpress have the interface again
     lock (lk) { Array.Clear(frame, 0, N); pairs.Clear(); }
     byte[] z = new byte[N];
-    for (int i = 0; i < 3; i++) { if (!fake) HwSend(z); Thread.Sleep(30); }
+    for (int i = 0; i < 3; i++) { if (!fake) EFK_send_dmx(z); Thread.Sleep(30); }
     if (fake && fakeLog != null && fakeLog != "") { try { File.WriteAllText(fakeLog, ""); } catch { } }
-    if (opened) HwClose();
+    if (opened) EFK_close();
   }
 }
 "@
-$isMac = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
-$r = [SxhDmx]::Open($DllDir, [bool]$Fake, $FakeLog, $isMac, -not $NoPreload)
-if ($Probe) {
-  [Console]::Out.WriteLine("$r")
-  if ($isMac) { [Console]::Out.WriteLine("arch $([Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture)  loaded: $([SxhDmx]::Loaded())") }
-  [Environment]::Exit(0)
-}
+$r = [SxhDmx]::Open($DllDir, [bool]$Fake, $FakeLog)
 [Console]::Out.WriteLine($r); [Console]::Out.Flush()
 if ($r -like 'OK*') { [SxhDmx]::Run() }
 [Environment]::Exit(0)

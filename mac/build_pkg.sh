@@ -14,9 +14,12 @@ xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/mac/app/main.swift" -o "$
 xcrun swiftc -O -target arm64-apple-macos11 "$ROOT/mac/app/main.swift" -o "$B/obj/arm64"
 lipo -create "$B/obj/x86_64" "$B/obj/arm64" -output "$APP/Contents/MacOS/ShowXpressHelper"
 cp "$ROOT/mac/launch.sh" "$APP/Contents/Resources/launch.sh"
+# live aim's DMX output: ShowXpress's Mac driver is Intel only, so this tool is too (Rosetta on Apple Silicon)
+xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/mac/dmx/main.swift" -o "$APP/Contents/MacOS/sxh_dmx"
+codesign --force --sign - "$APP/Contents/MacOS/sxh_dmx"
 sed "s/__VERSION__/$VER/g" "$ROOT/mac/Info.plist" > "$APP/Contents/Info.plist"
-cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/rig_test.ps1" "$ROOT/src/preshow.ps1" "$ROOT/src/color.ps1" "$ROOT/src/gdrive.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/dmx_out.ps1" "$ROOT/src/version.txt" "$ROOT/assets/aim_movers_1024.png" "$APP/Contents/Resources/"
-chmod 755 "$APP/Contents/MacOS/ShowXpressHelper" "$APP/Contents/Resources/launch.sh"
+cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/rig_test.ps1" "$ROOT/src/preshow.ps1" "$ROOT/src/color.ps1" "$ROOT/src/gdrive.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/version.txt" "$ROOT/assets/aim_movers_1024.png" "$APP/Contents/Resources/"
+chmod 755 "$APP/Contents/MacOS/ShowXpressHelper" "$APP/Contents/MacOS/sxh_dmx" "$APP/Contents/Resources/launch.sh"
 
 IS="$B/AppIcon.iconset"; mkdir -p "$IS"
 for s in 16 32 128 256 512; do

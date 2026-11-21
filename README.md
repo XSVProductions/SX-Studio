@@ -28,7 +28,7 @@ The installers aren't code-signed, which is why Windows and macOS ask the first 
 
 **What gets installed**
 - **Windows:** "ShowXpress Helper" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
-- **Mac:** *ShowXpress Helper* in Applications, plus a *ShowXpress Helper* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*). Aim live is Windows only for now: it drives the DMX interface through the Windows ShowXpress driver.
+- **Mac:** *ShowXpress Helper* in Applications, plus a *ShowXpress Helper* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
 
 The Helper always opens on its **Home** page: the tabs, a Google Drive backup button, **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to the Helper's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
 
@@ -49,10 +49,11 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
 3. Open **ShowXpress Helper**, check the heads, set the overall size, and press **Apply to show**.
 4. Open ShowXpress again and check the **DF CHECK 140 / 251** scenes. The beams should trace the floor corners.
 
-**Aim live (Windows)** - the quicker way. Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and the Helper drives the DMX interface itself, so the real head follows your mouse as you drag:
+**Aim live** - the quicker way (Windows and Mac). Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and the Helper drives the DMX interface itself, so the real head follows your mouse as you drag:
 - Only the selected head is lit. Speed **Fine / Normal / Fast**, **Shift** = finer, **Ctrl** = faster, **arrow keys** nudge.
 - **N / P** (or Tab) = next / previous head, **1 / 2** = center / corner step. **Flip** left/right or up/down per head if it moves the wrong way.
 - **Save & finish** writes the aims into DF AIM (ADJUST) (or ROOM AIM), applies them, and opens ShowXpress again.
+- On the Mac it uses the driver that comes with ShowXpress for Mac, so ShowXpress has to be installed there (in Applications, or its ShowXpress folder in Applications).
 - Only one program can use the interface. If the NovaStar LED software (NovaLCT) is holding it, the Helper offers to pause its USB scanner.
 
 **One head per T-bar:** aim just one head of each T-bar pair (set up in Rig Test). The head next to it gets the same aim, unless you aim it too.

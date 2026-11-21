@@ -198,19 +198,21 @@ function Stop-Live {
 }
 function Start-Live {
   Stop-Live
-  $dd = ''
-  if ($onMac -and -not $TestRoot) {
+  $exe = $psExe; $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`""
+  if ($TestRoot) { $ea += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
+  elseif ($onMac) {
+    # Mac: a small tool inside the app (Contents/MacOS/sxh_dmx) drives the interface through ShowXpress's own driver
     $a = Find-SxMacApp
     if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications, so its interface driver was not found either.'; out = '' } }
-    $dd = " -DllDir `"$(Split-Path $a.FullName)`""
+    $exe = Join-Path (Split-Path $here) 'MacOS/sxh_dmx'
+    if (-not (Test-Path -LiteralPath $exe)) { return @{ ok = $false; error = 'The live aim part of the Helper is missing - install the Helper again.'; out = '' } }
+    $ea = "--dir `"$(Split-Path $a.FullName)`""
   }
   $why = ''
   foreach ($try in 1..3) {   # right after ShowXpress closes the interface can take a moment to be free
     $psi = New-Object Diagnostics.ProcessStartInfo
-    $psi.FileName = $psExe
-    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`"$dd"
-    if ($TestRoot) { $a += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
-    $psi.Arguments = $a; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+    $psi.FileName = $exe
+    $psi.Arguments = $ea; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
     $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
     $p = [Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true
     $t = $p.StandardOutput.ReadLineAsync()

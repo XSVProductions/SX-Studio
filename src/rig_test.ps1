@@ -24,6 +24,8 @@ if (-not (Test-Path -LiteralPath "$root/Live/live.ini")) { throw "Show not found
 $twoD      = "$root/Editor/2DView/fixtures.ini"
 $statePath = "$root/rig_test.json"
 $sceneName = 'RIG ID.scex'
+# tilt 61952 (242/48): beams angled DOWN, a bit past the dance-floor center (~59000) - was 49700 = angled up (user 2026-11-21)
+$idTilt = @(242, 48)
 $scenePath = "$root/scenes/$sceneName"
 
 # ---- the looks: 140 #1-#8 solid, #9-#16 the same colours flashing (140SR colour wheel values / shutter strobe)
@@ -85,7 +87,7 @@ function New-IdSceneText {
   [void]$sb.Append("  </Fixtures>$nl  <Steps>$nl    <Step length=`"300`">$nl")
   foreach ($h in $heads) {
     $lk = Get-Look $h
-    $ch = @(@(0,'pan',88,1), @(1,'upan',72,1), @(2,'tilt',194,1), @(3,'utilt',36,1), @(4,'pantilt_speed',0,0), @(5,'color',$lk.look.v,0),
+    $ch = @(@(0,'pan',88,1), @(1,'upan',72,1), @(2,'tilt',$idTilt[0],1), @(3,'utilt',$idTilt[1],1), @(4,'pantilt_speed',0,0), @(5,'color',$lk.look.v,0),
             @(6,'gobo',0,0), @(7,'gobo#2',0,0), @(8,'gobo_rotate',0,0), @(9,'8 facet prism',0,0), @(10,'linear prism',0,0),
             @(13,'zoom',243,0), @(14,'frost',0,0), @(15,'dimmer',255,0), @(16,'shutter',$(if ($lk.flash) { $flashShutter } else { 255 }),0))
     [void]$sb.Append("      <Fixture id=`"$($h.Id)`">$nl")

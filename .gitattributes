@@ -1,5 +1,5 @@
 *.sh            text eol=lf
-mac/run         text eol=lf
+mac/app/*       text eol=lf
 mac/scripts/*   text eol=lf
 mac/Info.plist  text eol=lf
 *.yml           text eol=lf

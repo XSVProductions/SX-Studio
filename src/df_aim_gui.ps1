@@ -44,16 +44,32 @@ function Open-AppWindow($url) {
 }
 
 # ---- one copy only: if it's already running, just bring up its window
+#      (an older version still running - e.g. right after an update - is stopped and replaced)
 $token = [guid]::NewGuid().ToString('N')
 $l = New-Object Net.HttpListener
 $l.Prefixes.Add("http://localhost:$Port/")
 try { $l.Start() }
 catch {
-  if (Test-Path $infoF) { $i = Get-Content $infoF -Raw | ConvertFrom-Json; Open-AppWindow $i.url; return }
-  throw "Port $Port is busy and no running ShowXpress Helper was found."
+  $i = $null
+  if (Test-Path $infoF) { try { $i = Get-Content $infoF -Raw | ConvertFrom-Json } catch {} }
+  $old = $null
+  if ($i -and $i.pid -and "$($i.ver)" -ne $appVer) { $old = Get-Process -Id $i.pid -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(pwsh|powershell)$' } }
+  $up = $false
+  if ($old) {
+    $old | Stop-Process -Force -ErrorAction SilentlyContinue
+    for ($n = 0; $n -lt 20 -and -not $up; $n++) {
+      Start-Sleep -Milliseconds 250
+      $l = New-Object Net.HttpListener; $l.Prefixes.Add("http://localhost:$Port/")
+      try { $l.Start(); $up = $true } catch {}
+    }
+  }
+  if (-not $up) {
+    if ($i) { Open-AppWindow $i.url; return }
+    throw "Port $Port is busy and no running ShowXpress Helper was found."
+  }
 }
 $url = "http://localhost:$Port/?t=$token"
-[IO.File]::WriteAllText($infoF, (@{ url = $url; pid = $PID } | ConvertTo-Json))
+[IO.File]::WriteAllText($infoF, (@{ url = $url; pid = $PID; ver = $appVer } | ConvertTo-Json))
 
 function Test-SxOpen {
   if ($TestRoot) { return (Test-Path -LiteralPath (Join-Path $TestRoot '_sx_open')) }   # testing: marker file = "ShowXpress open"
@@ -1103,9 +1119,9 @@ async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked 
 $('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
 async function chkUpd(){const u=await getJ('/api/update');if(u.mac)$('lvcall').style.display='none';$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
  if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
-async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Mac installer opens &mdash; follow it.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
+async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Helper closes and the Mac installer opens &mdash; follow it, and the Helper opens again when it&rsquo;s done.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
  busy(true,'Downloading the update…');let r;try{r=await api('/api/update/install',{});}catch(e){r={ok:false,error:'Lost connection.'}}
- if(r.ok&&r.restarting){UPD=1;busy(true,'Installing the update — the Helper opens again by itself…');return;}busy(false);showResult(r,'update');}
+ if(r.ok&&r.restarting){UPD=1;busy(true,u.mac?'Opening the installer — follow it, the Helper opens again when it’s done…':'Installing the update — the Helper opens again by itself…');return;}busy(false);showResult(r,'update');}
 {const bi=new Image();bi.onload=()=>{const b=$('brand');b.innerHTML='';bi.alt='XSV Productions';b.appendChild(bi);};bi.src='/brand.png?t='+T;}
 
 // ---------------- LIVE AIM: the Helper drives the DMX interface itself (dmx_out.ps1) while ShowXpress is closed
@@ -1334,7 +1350,16 @@ try {
           $dl = Join-Path ([IO.Path]::GetTempPath()) ($u.name -replace '[^\w\.-]', '_')
           try { Invoke-WebRequest -Uri $u.asset -OutFile $dl -UseBasicParsing -Headers @{ 'User-Agent' = 'ShowXpress-Helper' } -TimeoutSec 300 }
           catch { Send-Json $ctx @{ ok = $false; error = "Download failed: $($_.Exception.Message)"; out = '' }; break }
-          if ($onMac) { & open $dl; Send-Json $ctx @{ ok = $true; out = "  The installer for version $($u.latest) is open - follow it, then open ShowXpress Helper again."; error = '' }; break }
+          if ($onMac) {
+            # this server stops and the app quits (it sees the flag); a small script opens the installer, waits for it, then opens the new version
+            $tmp = [IO.Path]::GetTempPath()
+            $flag = Join-Path $tmp 'sxh_updating'; $us = Join-Path $tmp 'sxh_update.sh'
+            [IO.File]::WriteAllText($flag, "$($u.latest)")
+            [IO.File]::WriteAllText($us, "sleep 2`nopen -W '$dl'`nsleep 1`nrm -f '$flag'`nopen '/Applications/ShowXpress Helper.app'`n")
+            & /bin/bash -c "nohup /bin/bash '$us' >/dev/null 2>&1 &"
+            Send-Json $ctx @{ ok = $true; restarting = $true; out = ''; error = '' }
+            $l.Stop(); break
+          }
           # the installer closes this window server itself; a small script waits for it and opens the new version
           $us = Join-Path ([IO.Path]::GetTempPath()) 'sxh_update.ps1'
           $vbs = Join-Path $here 'showxpress_helper.vbs'

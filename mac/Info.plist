@@ -4,11 +4,16 @@
   <key>CFBundleName</key><string>ShowXpress Helper</string>
   <key>CFBundleDisplayName</key><string>ShowXpress Helper</string>
   <key>CFBundleIdentifier</key><string>io.github.aimmovers.app</string>
-  <key>CFBundleExecutable</key><string>run</string>
+  <key>CFBundleExecutable</key><string>ShowXpressHelper</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>__VERSION__</string>
   <key>CFBundleShortVersionString</key><string>__VERSION__</string>
-  <key>LSMinimumSystemVersion</key><string>10.13</string>
-  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>10.15</string>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppTransportSecurity</key><dict>
+    <key>NSAllowsLocalNetworking</key><true/>
+    <key>NSAllowsArbitraryLoadsInWebContent</key><true/>
+  </dict>
 </dict></plist>

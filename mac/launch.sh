@@ -1,6 +1,7 @@
 #!/bin/bash
-# ShowXpress Helper.app launcher: needs PowerShell 7 (offers to install it), then starts the GUI in the background.
-RES="$(cd "$(dirname "$0")/../Resources" && pwd)"
+# Started by the ShowXpress Helper app (Contents/MacOS/ShowXpressHelper): needs PowerShell 7 (offers to install it),
+# then starts the Helper's server in the background. The app shows the window. Exit 0 = started, anything else = give up.
+RES="$(cd "$(dirname "$0")" && pwd)"
 LOG="$HOME/AwaazTools/showxpress_helper_error.log"
 mkdir -p "$HOME/AwaazTools"
 
@@ -15,7 +16,7 @@ alert() { osascript -e "display alert \"ShowXpress Helper\" message \"$1\"" >/de
 PW="$(find_pwsh)"
 if [ -z "$PW" ]; then
   ans="$(osascript -e 'button returned of (display dialog "ShowXpress Helper needs PowerShell 7 (free, from Microsoft).\n\nDownload and install it now? macOS will ask for your password." buttons {"Cancel", "Install"} default button "Install" with title "ShowXpress Helper")' 2>/dev/null)"
-  [ "$ans" = "Install" ] || exit 0
+  [ "$ans" = "Install" ] || exit 3
   case "$(uname -m)" in arm64) ARCH=osx-arm64;; *) ARCH=osx-x64;; esac
   osascript -e 'display notification "Downloading PowerShell 7..." with title "ShowXpress Helper"' >/dev/null 2>&1
   URL="$(curl -fsSL https://api.github.com/repos/PowerShell/PowerShell/releases/latest | grep -o "https://[^\"]*powershell-[0-9.]*-$ARCH\.pkg" | head -n 1)"
@@ -30,6 +31,6 @@ if [ -z "$PW" ]; then
   [ -n "$PW" ] || { alert "PowerShell 7 didn't install (this macOS may be too old for the newest version). Details: ~/AwaazTools/showxpress_helper_error.log"; exit 1; }
 fi
 
-nohup "$PW" -NoProfile -File "$RES/df_aim_gui.ps1" >/dev/null 2>"$LOG" &
+nohup "$PW" -NoProfile -File "$RES/df_aim_gui.ps1" -NoBrowser >/dev/null 2>"$LOG" &
 disown
 exit 0

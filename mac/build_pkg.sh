@@ -8,10 +8,15 @@ APP="$B/payload/ShowXpress Helper.app"
 rm -rf "$B"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$B/scripts"
 
-cp "$ROOT/mac/run" "$APP/Contents/MacOS/run"
+# the app itself: a small native window (Dock icon, Cmd+Q) around the Helper's local page - Intel + Apple Silicon
+mkdir -p "$B/obj"
+xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/mac/app/main.swift" -o "$B/obj/x86_64"
+xcrun swiftc -O -target arm64-apple-macos11 "$ROOT/mac/app/main.swift" -o "$B/obj/arm64"
+lipo -create "$B/obj/x86_64" "$B/obj/arm64" -output "$APP/Contents/MacOS/ShowXpressHelper"
+cp "$ROOT/mac/launch.sh" "$APP/Contents/Resources/launch.sh"
 sed "s/__VERSION__/$VER/g" "$ROOT/mac/Info.plist" > "$APP/Contents/Info.plist"
 cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/rig_test.ps1" "$ROOT/src/preshow.ps1" "$ROOT/src/color.ps1" "$ROOT/src/gdrive.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/version.txt" "$ROOT/assets/aim_movers_1024.png" "$APP/Contents/Resources/"
-chmod 755 "$APP/Contents/MacOS/run"
+chmod 755 "$APP/Contents/MacOS/ShowXpressHelper" "$APP/Contents/Resources/launch.sh"
 
 IS="$B/AppIcon.iconset"; mkdir -p "$IS"
 for s in 16 32 128 256 512; do
@@ -19,6 +24,10 @@ for s in 16 32 128 256 512; do
   d=$((s * 2)); sips -z $d $d "$ROOT/assets/aim_movers_1024.png" --out "$IS/icon_${s}x${s}@2x.png" >/dev/null
 done
 iconutil -c icns "$IS" -o "$APP/Contents/Resources/AppIcon.icns"
+
+# ad-hoc signature (Apple Silicon only runs signed code)
+codesign --force --sign - "$APP"
+codesign --verify --verbose "$APP"
 
 cp "$ROOT/mac/scripts/postinstall" "$B/scripts/postinstall"
 chmod 755 "$B/scripts/postinstall"

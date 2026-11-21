@@ -17,6 +17,9 @@
 #   Never touched: 251 Ceiling, Around Room* (room coverage).  DF CHECK* = aim + zoom, never resized:
 #   each head traces the 4 corners of the floor it was given -> quick visual check.
 #
+#   CENTER SPOT: Apply (Floor or Room) also copies each head's step-1 CENTER aim into the CENTER SPOT scene
+#                (pan/tilt only; heads still on home are left alone). Home doesn't touch CENTER SPOT.
+#
 #   -Action Apply [-Size "100" | "120 90"]   -Action Home (all corrections off, size 100)
 #
 #   -Mode Room = the same thing for the AROUND ROOM movements (walls / ceiling): scene "ROOM AIM (ADJUST)" (step 1 = center
@@ -388,6 +391,62 @@ function Update-Gpjs($fix, [double]$sx, [double]$sy, $st) {
   $warn | Select-Object -Unique | ForEach-Object { "  WARNING: $_" }
 }
 
+function Update-CenterSpot($movers, $center) {
+  # CENTER SPOT scene: every head that was aimed in step 1 tonight (aim != home) gets that step-1 aim as its
+  # pan/tilt, so the spot lands on tonight's center without setting it up by hand. Only pan/upan/tilt/utilt
+  # are touched (colour, dimmer, zoom ... kept); a missing channel is added. Heads still on home = left as they are.
+  $cs = "$root/scenes/CENTER SPOT.scex"; if (-not (Test-Path -LiteralPath $cs)) { $cs = "$root/scenes/CENTER SPOT (adjust).scex" }
+  if (-not (Test-Path -LiteralPath $cs)) { return "  WARNING: scene CENTER SPOT not found - not updated" }
+  $want = @{}
+  foreach ($m in $movers) {
+    $c = $center[$m.Id]; $h = $homePos[$m.Model]
+    if ($c[0] -eq $h[0] -and $c[1] -eq $h[1]) { continue }   # not aimed in step 1
+    $p = [int]$c[0]; $t = [int]$c[1]
+    $want[$m.Id] = @{ 0 = @('pan', [int][math]::Floor($p/256)); 1 = @('upan', ($p%256)); 2 = @('tilt', [int][math]::Floor($t/256)); 3 = @('utilt', ($t%256)) }
+  }
+  $bytes = [IO.File]::ReadAllBytes($cs)
+  $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+  $text = [IO.File]::ReadAllText($cs)
+  $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+  $src = $text -split "`r?`n"; $out = New-Object Collections.Generic.List[string]
+  $inSteps = $false; $blk = $null; $bid = $null; $n = 0; $heads = @{}
+  foreach ($ln in $src) {
+    if ($ln -match '^\s*<Steps>') { $inSteps = $true }
+    if ($inSteps -and -not $blk -and $ln -match '^\s*<Fixture id="(\d+)">\s*$') {
+      $bid = $matches[1]; $blk = New-Object Collections.Generic.List[string]; $blk.Add($ln); continue
+    }
+    if ($blk) {
+      if ($ln -notmatch '^\s*</Fixture>') { $blk.Add($ln); continue }
+      if ($want.ContainsKey($bid)) {
+        $w = $want[$bid]; $seen = @{}; $ind = '        '
+        for ($i = 1; $i -lt $blk.Count; $i++) {
+          if ($blk[$i] -match '^(\s*)<Channel index="(\d+)"') {
+            $ind = $matches[1]; $ix = [int]$matches[2]
+            if ($w.ContainsKey($ix)) {
+              $seen[$ix] = $true
+              $new = $blk[$i] -replace 'value="\d+"', "value=`"$($w[$ix][1])`""
+              if ($new -ne $blk[$i]) { $blk[$i] = $new; $n++; $heads[$bid] = $true }
+            }
+          }
+        }
+        foreach ($ix in 0, 1, 2, 3) {
+          if ($seen[$ix]) { continue }
+          # insert in index order
+          $at = $blk.Count
+          for ($i = 1; $i -lt $blk.Count; $i++) { if ($blk[$i] -match '<Channel index="(\d+)"' -and [int]$matches[1] -gt $ix) { $at = $i; break } }
+          $blk.Insert($at, "$ind<Channel index=`"$ix`" name=`"$($w[$ix][0])`" value=`"$($w[$ix][1])`" fade=`"1`"/>"); $n++; $heads[$bid] = $true
+        }
+      }
+      foreach ($b in $blk) { $out.Add($b) }; $out.Add($ln); $blk = $null; continue
+    }
+    if ($ln -match '^\s*</Steps>') { $inSteps = $false }
+    $out.Add($ln)
+  }
+  if ($n) { [IO.File]::WriteAllText($cs, ($out -join $nl), (New-Object Text.UTF8Encoding($bom))) }
+  $note = if (-not $want.Count) { ' (no head aimed in step 1 - left as it was)' } elseif (-not $n) { " (already on tonight's step-1 center)" } else { " ($($heads.Count) of $($want.Count) aimed heads moved to tonight's step-1 center)" }
+  "  {0,-46} {1,3} values changed{2}" -f 'CENTER SPOT (spot scene)', $n, $note
+}
+
 function Show-Table($movers, $fix) {
   ""
   "  HEAD      CENTER correction      SIZE from corner (width x depth)"
@@ -508,6 +567,7 @@ if ($Action -eq 'Home') {
   "  OVERALL SIZE: width {0}%  depth {1}%" -f ($sz[0]*100), ($sz[1]*100); ""
 }
 Update-Gpjs $fix $sz[0] $sz[1] $st
+if ($Action -eq 'Apply') { Update-CenterSpot $movers $a.center }   # user 2026-11-21: CENTER SPOT follows step 1
 $st.sx = $sz[0]; $st.sy = $sz[1]
 Save-State $st
 if ($Action -eq 'Home') { "  DONE - all movement scenes back to normal." }

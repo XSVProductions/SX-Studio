@@ -488,6 +488,8 @@ function Update-CenterSpot($movers, $center) {
 # impossible in a Generator scene) that moves like GRAND ENTRANCE.gpj. After every Apply / Home its pan/tilt steps are
 # rebuilt from the .gpj (shape + this head's offset + zoom), so it follows the room aim. STEP 1 IS THE TEMPLATE:
 # every other channel of every fixture in step 1 (colours, prism, focus, dimmer, uplights ...) is copied to all steps.
+# A mover in the scene but NOT in the .gpj (user 2026-11-21: #4 + #7 = white gobo on the center spot) doesn't move: it
+# sits on its CENTER SPOT aim (so it follows tonight's dancefloor center), or on its step-1 pan/tilt if it isn't in CENTER SPOT.
 $rendered = @{ 'GRAND ENTRANCE.gpj' = 'GRAND ENTRANCE.scex' }
 $renderSub = 10   # steps per shape point for curves (Transition 2)
 function Get-CurvePath($pts, [int]$transition) {
@@ -537,8 +539,17 @@ function Update-RenderedScenes {
     $s1 = [regex]::Match($m1.Groups[2].Value, '(?s)^([ \t]*)<Step length="\d+">\r?\n(.*?)\r?\n[ \t]*</Step>')
     if (-not $m1.Success -or -not $s1.Success) { "  WARNING: $label - could not read step 1, not rebuilt"; continue }
     $ind = $s1.Groups[1].Value
+    $spot = @{}   # id -> pan/tilt channel lines from CENTER SPOT (step 1), for the movers that stay still
+    $csp = "$root/scenes/CENTER SPOT.scex"; if (-not (Test-Path -LiteralPath $csp)) { $csp = "$root/scenes/CENTER SPOT (adjust).scex" }
+    if (Test-Path -LiteralPath $csp) {
+      $cst = [IO.File]::ReadAllText($csp); $cs1 = [regex]::Match($cst, '(?s)<Step [^>]*>(.*?)</Step>').Groups[1].Value
+      foreach ($mm in [regex]::Matches($cs1, '(?s)<Fixture id="(\d+)">(.*?)</Fixture>')) {
+        $v = @{}; foreach ($c in [regex]::Matches($mm.Groups[2].Value, 'name="(u?(?:pan|tilt))" value="(\d+)"')) { $v[$c.Groups[1].Value] = $c.Groups[2].Value }
+        if ($v.Count -eq 4) { $spot[$mm.Groups[1].Value] = $v }
+      }
+    }
     $tmpl = @([regex]::Matches($s1.Groups[2].Value, '(?s)([ \t]*)<Fixture id="(\d+)">\r?\n(.*?)\r?\n[ \t]*</Fixture>') | ForEach-Object {
-      [pscustomobject]@{ ind = $_.Groups[1].Value; id = $_.Groups[2].Value
+      [pscustomobject]@{ ind = $_.Groups[1].Value; id = $_.Groups[2].Value; all = @($_.Groups[3].Value -split "\r?\n" | Where-Object { $_ -match '<Channel ' })
         ch = @($_.Groups[3].Value -split "\r?\n" | Where-Object { $_ -match '<Channel ' -and $_ -notmatch '<Channel index="[0-3]" name="u?(pan|tilt)"' }) } })
     $fade = if ($tr -eq 0) { '' } else { ' fade="1"' }; $chInd = "$ind    "
     $out = New-Object Collections.Generic.List[string]; $moved = 0
@@ -554,17 +565,23 @@ function Update-RenderedScenes {
           $out.Add("$chInd<Channel index=`"0`" name=`"pan`" value=`"$([math]::Floor($pv / 256))`"$fade/>"); $out.Add("$chInd<Channel index=`"1`" name=`"upan`" value=`"$($pv % 256)`"$fade/>")
           $out.Add("$chInd<Channel index=`"2`" name=`"tilt`" value=`"$([math]::Floor($tv / 256))`"$fade/>"); $out.Add("$chInd<Channel index=`"3`" name=`"utilt`" value=`"$($tv % 256)`"$fade/>")
         }
+        elseif ($spot.ContainsKey($f.id) -and $f.ch.Count -lt $f.all.Count) {   # a still mover: on its CENTER SPOT aim
+          $v = $spot[$f.id]; $i = 0
+          foreach ($cn in 'pan', 'upan', 'tilt', 'utilt') { $out.Add("$chInd<Channel index=`"$i`" name=`"$cn`" value=`"$($v[$cn])`" fade=`"1`"/>"); $i++ }
+        }
+        else { foreach ($c in $f.all) { if ($f.ch -notcontains $c) { $out.Add($c) } } }   # no CENTER SPOT entry: its own step-1 pan/tilt
         foreach ($c in $f.ch) { $out.Add($c) }
         $out.Add("$($f.ind)</Fixture>")
       }
       $out.Add("$ind</Step>")
     }
     $moved = @($tmpl | Where-Object { $hf.ContainsKey($_.id) }).Count
+    $still = @($tmpl | Where-Object { -not $hf.ContainsKey($_.id) -and $_.ch.Count -lt $_.all.Count }).Count
     $new = $m1.Groups[1].Value + (($out -join $nl) -replace "`r?`n", $nl) + $m1.Groups[3].Value
     $new = ($new -replace "`r?`n", $nl)
     $same = $new -eq $text
     if (-not $same) { [IO.File]::WriteAllText($sp, $new, (New-Object Text.UTF8Encoding($bom))) }
-    "  {0,-46} {1} ({2} steps x {3}/100 s, {4} heads moving, step 1 copied to every step)" -f $label, $(if ($same) { 'already up to date' } else { 'REBUILT' }), $path.Count, $len, $moved
+    "  {0,-46} {1} ({2} steps x {3}/100 s, {4} heads moving{5}, step 1 copied to every step)" -f $label, $(if ($same) { 'already up to date' } else { 'REBUILT' }), $path.Count, $len, $moved, $(if ($still) { ", $still on the center spot" } else { '' })
   }
 }
 

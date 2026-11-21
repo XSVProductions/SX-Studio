@@ -62,6 +62,8 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
 
 **Aim Movers - Room** (the *Room* switch at the top of the tab) does the same for **AROUND ROOM** and **AROUND ROOM SLOW**, using the scene **ROOM AIM (ADJUST)** and checking with **ROOM CHECK** (both on the SETUP page; the tab adds them if they're missing). Width = across the room, Height = up and down the walls.
 
+**GRAND ENTRANCE** (MOVEMENTS page) is one normal step scene that moves like AROUND ROOM, with per-head colours (a Generator scene can't give two movers different colours). Every room Apply / Home rebuilds its pan/tilt steps from `GRAND ENTRANCE.gpj`, so it follows the room aim. **Step 1 is the template**: whatever you set in step 1 (colours, prism, focus, dimmer, uplights ...) is copied to every step. If you reshape AROUND ROOM in Generator, heads you never aimed for the room follow the new shape instead of drifting.
+
 **Tonight's Color**
 Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save tonight's color**. It writes two scenes, each on a **TONIGHTS COLOR** button: on MOVER COLORS (every mover on the nearest colour of its wheel - colour only, so it goes on top of any movement) and on UPLIGHTS (the uplights and the Ovation in exactly that colour).
 

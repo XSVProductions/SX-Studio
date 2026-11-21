@@ -26,7 +26,7 @@
 #                aim. The copies are written into the aim scene too, so you can still nudge them; a nudged copy is then yours.
 #                Not for Room mode (the pairs are physically crossed for the AROUND ROOM looks).
 #
-#   -Action Apply [-Size "100" | "120 90"]   -Action Home (all corrections off, size 100)
+#   -Action Apply [-Size "100" | "120 90"]   -Action Home (all corrections off, size 100)   -Action Rebuild (only GRAND ENTRANCE.scex)
 #
 #   LIVE AIM (Helper, Windows): the Helper drives the DMX interface itself while ShowXpress is closed (dmx_out.ps1) and
 #   the user aims the real heads with the mouse. -Action LiveInfo = heads + DMX addresses + current aims (JSON);
@@ -37,7 +37,7 @@
 #   "Normal" for the room = the middle and size of the original AROUND ROOM shape.  -Action Install = ROOM AIM (ADJUST) +
 #   ROOM CHECK made and put on the SETUP page (under DF AIM / DF CHECK).
 param(
-  [ValidateSet('Apply','Home','Menu','Preview','Install','LiveInfo','LiveSave')][string]$Action = 'Menu',   # Preview / LiveInfo = JSON for the GUI, writes nothing
+  [ValidateSet('Apply','Home','Menu','Preview','Install','LiveInfo','LiveSave','Rebuild')][string]$Action = 'Menu',   # Preview / LiveInfo = JSON for the GUI, writes nothing
   [string]$ChangesFile = '',   # LiveSave: {"aims":{"<id>":{"c":[pan,tilt],"k":[pan,tilt] or null}}} from the Helper's live aim screen
   [ValidateSet('Floor','Room')][string]$Mode = 'Floor',
   [string]$Size = '',
@@ -82,16 +82,27 @@ if ($Mode -eq 'Room') {
   if (-not $roomFiles.Count) { throw "No AROUND ROOM movement found in Generator. NOTHING was changed." }
   $roomMain = if ($roomFiles -contains 'AROUND ROOM.gpj') { 'AROUND ROOM.gpj' } else { $roomFiles[0] }
   # normal = middle + half-size of the ORIGINAL AROUND ROOM shape (from the state if it was already resized)
-  $rt = [IO.File]::ReadAllText("$gdir/$roomMain"); $ptsS = ''
-  if (Test-Path -LiteralPath $stateF) { $sj = [IO.File]::ReadAllText($stateF) | ConvertFrom-Json; if ($sj.files.$roomMain) { $ptsS = "$($sj.files.$roomMain.base)" } }
-  if (-not $ptsS) {
-    $ptSec = (($rt -split '\[Pan/Tilt/uPan/uTilt\]')[1] -split '\r?\n\[')[0]
-    $ptsS = (@([regex]::Matches($ptSec, 'Point_\d+ = (-?\d+),(-?\d+)') | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" }) -join ';')
+  $rt = [IO.File]::ReadAllText("$gdir/$roomMain")
+  $ptSec = (($rt -split '\[Pan/Tilt/uPan/uTilt\]')[1] -split '\r?\n\[')[0]
+  $curS = (@([regex]::Matches($ptSec, 'Point_\d+ = (-?\d+),(-?\d+)') | ForEach-Object { "$($_.Groups[1].Value),$($_.Groups[2].Value)" }) -join ';')
+  $rec = $null
+  if (Test-Path -LiteralPath $stateF) { $sj = [IO.File]::ReadAllText($stateF) | ConvertFrom-Json; if ($sj.files.$roomMain) { $rec = $sj.files.$roomMain } }
+  $toPts = { param($s) @($s -split ';' | ForEach-Object { $xy = $_ -split ','; ,@([double]$xy[0], [double]$xy[1]) }) }
+  $midHalf = { param($pts)
+    $mx = $pts | ForEach-Object { $_[0] } | Measure-Object -Minimum -Maximum; $my = $pts | ForEach-Object { $_[1] } | Measure-Object -Minimum -Maximum
+    @(@([int](($mx.Minimum + $mx.Maximum) / 2), [int](($my.Minimum + $my.Maximum) / 2)),
+      @([int][math]::Max(500, ($mx.Maximum - $mx.Minimum) / 2), [int][math]::Max(500, ($my.Maximum - $my.Minimum) / 2))) }
+  # normal = the ORIGINAL (un-resized) shape. If AROUND ROOM was reshaped in Generator since the last run, the new
+  # shape is the original now (same rule as Update-Gpjs) - and heads left on the OLD normal follow it (Read-AimScene).
+  $roomPrev = $null
+  if ($rec -and "$($rec.written)" -eq $curS) { $mh = & $midHalf (& $toPts "$($rec.base)") }
+  else {
+    $cp = & $toPts $curS
+    if ($rec -and ($rec.sx -ne 1 -or $rec.sy -ne 1)) { $c0 = & $midHalf $cp; $cp = @($cp | ForEach-Object { ,@(($c0[0][0] + ($_[0] - $c0[0][0]) / $rec.sx), ($c0[0][1] + ($_[1] - $c0[0][1]) / $rec.sy)) }) }
+    $mh = & $midHalf $cp
+    if ($rec) { $roomPrev = & $midHalf (& $toPts "$($rec.base)") }
   }
-  $rp = @($ptsS -split ';' | ForEach-Object { $xy = $_ -split ','; ,@([double]$xy[0], [double]$xy[1]) })
-  $mx = $rp | ForEach-Object { $_[0] } | Measure-Object -Minimum -Maximum; $my = $rp | ForEach-Object { $_[1] } | Measure-Object -Minimum -Maximum
-  $rh = @([int](($mx.Minimum + $mx.Maximum) / 2), [int](($my.Minimum + $my.Maximum) / 2))
-  $rr = @([int][math]::Max(500, ($mx.Maximum - $mx.Minimum) / 2), [int][math]::Max(500, ($my.Maximum - $my.Minimum) / 2))
+  $rh = $mh[0]; $rr = $mh[1]
   $homePos = @{ $m140 = $rh; $m251 = $rh }; $refHalf = @{ $m140 = $rr; $m251 = $rr }
   $roomIds = @([regex]::Matches($rt, '(?m)^ID = (\d+)') | ForEach-Object { $_.Groups[1].Value })
   $checks = @{ 'ROOM CHECK.gpj' = $m140 }
@@ -163,11 +174,16 @@ function Read-AimScene($movers) {
   if (-not (Test-Path $scene)) { throw "Aim scene not found: $scene" }
   [xml]$x = [IO.File]::ReadAllText($scene)
   $steps = @($x.Scene.Steps.Step)
-  $r = @{ center = @{}; corner = @{}; steps = $steps.Count }
+  $r = @{ center = @{}; corner = @{}; steps = $steps.Count; moved = 0 }
   foreach ($m in $movers) {
     $r.center[$m.Id] = Read-Step $steps[0] $m $homePos[$m.Model]
     $s2 = if ($steps.Count -ge 2) { $steps[1] } else { $null }
     $r.corner[$m.Id] = Read-Step $s2 $m (Get-DefaultCorner $m)
+    if ($roomPrev) {   # Room: AROUND ROOM was reshaped -> a head still on the OLD normal / default corner = untouched
+      $c = $r.center[$m.Id]; $k = $r.corner[$m.Id]; $ph = $roomPrev[0]; $pr = $roomPrev[1]
+      if ($c[0] -eq $ph[0] -and $c[1] -eq $ph[1]) { $r.center[$m.Id] = @($homePos[$m.Model]); $r.moved++ }
+      if ($k[0] -eq ($ph[0] - $pr[0]) -and $k[1] -eq ($ph[1] + $pr[1])) { $r.corner[$m.Id] = Get-DefaultCorner $m }
+    }
   }
   $r
 }
@@ -468,6 +484,90 @@ function Update-CenterSpot($movers, $center) {
   "  {0,-46} {1,3} values changed{2}" -f 'CENTER SPOT (spot scene)', $n, $note
 }
 
+# ---- STEP SCENES REBUILT FROM A MOVEMENT (user 2026-11-21): GRAND ENTRANCE = one normal scene (per-head colours are
+# impossible in a Generator scene) that moves like GRAND ENTRANCE.gpj. After every Apply / Home its pan/tilt steps are
+# rebuilt from the .gpj (shape + this head's offset + zoom), so it follows the room aim. STEP 1 IS THE TEMPLATE:
+# every other channel of every fixture in step 1 (colours, prism, focus, dimmer, uplights ...) is copied to all steps.
+$rendered = @{ 'GRAND ENTRANCE.gpj' = 'GRAND ENTRANCE.scex' }
+$renderSub = 10   # steps per shape point for curves (Transition 2)
+function Get-CurvePath($pts, [int]$transition) {
+  # one entry per step = where the step FADES TO (step 1 heads for the 2nd position, the last step returns to point 0)
+  $n = $pts.Count; $path = New-Object Collections.Generic.List[object]
+  if ($transition -ne 2) { for ($k = 1; $k -le $n; $k++) { $path.Add(@($pts[$k % $n])) }; return ,$path }
+  $all = New-Object Collections.Generic.List[object]
+  for ($k = 0; $k -lt $n; $k++) {
+    $P = @(foreach ($d in -1, 0, 1, 2) { ,$pts[(($k + $d) % $n + $n) % $n] })   # , = keep each point a pair
+    for ($j = 0; $j -lt $renderSub; $j++) {
+      $t = $j / $renderSub; $xy = @()
+      foreach ($a in 0, 1) {   # closed Catmull-Rom: passes through every point, smooth like Generator "curves"
+        $p0 = $P[0][$a]; $p1 = $P[1][$a]; $p2 = $P[2][$a]; $p3 = $P[3][$a]
+        $xy += 0.5 * (2*$p1 + (-$p0 + $p2)*$t + (2*$p0 - 5*$p1 + 4*$p2 - $p3)*$t*$t + (-$p0 + 3*$p1 - 3*$p2 + $p3)*$t*$t*$t)
+      }
+      $all.Add($xy)
+    }
+  }
+  for ($k = 1; $k -le $all.Count; $k++) { $path.Add($all[$k % $all.Count]) }
+  ,$path
+}
+function Update-RenderedScenes {
+  foreach ($g in @($rendered.Keys | Sort-Object)) {
+    $gp = "$gdir/$g"; $sp = "$root/scenes/$($rendered[$g])"; $label = "$($rendered[$g] -replace '\.scex$', '') (step scene)"
+    if (-not (Test-Path -LiteralPath $gp) -or -not (Test-Path -LiteralPath $sp)) { continue }
+    $gt = [IO.File]::ReadAllText($gp) -replace "`r`n", "`n"
+    $ptSec = (($gt -split '\[Pan/Tilt/uPan/uTilt\]\n')[1] -split '\n\[')[0]
+    $pts = @([regex]::Matches($ptSec, '(?m)^Point_\d+ = (-?\d+),(-?\d+)$') | ForEach-Object { ,@([double]$_.Groups[1].Value, [double]$_.Groups[2].Value) })
+    if ($pts.Count -lt 2) { "  WARNING: $g has no movement shape - $label not rebuilt"; continue }
+    $tr = if ($ptSec -match '(?m)^Transition = (\d+)') { [int]$matches[1] } else { 2 }
+    $dur = if ($ptSec -match '(?m)^Duration = (\d+)') { [int]$matches[1] } else { 200 }   # 1/10 s
+    $cx = (($pts | ForEach-Object { $_[0] } | Measure-Object -Minimum -Maximum) | ForEach-Object { ($_.Minimum + $_.Maximum) / 2 })
+    $cy = (($pts | ForEach-Object { $_[1] } | Measure-Object -Minimum -Maximum) | ForEach-Object { ($_.Minimum + $_.Maximum) / 2 })
+    $hf = @{}   # per head, from the .gpj fixture list
+    foreach ($blk in ($gt -split '\n(?=\[Fixture_\d+\])')) {
+      if ($blk -notmatch '(?m)^ID = (\d+)$') { continue }; $id = $matches[1]; $v = @{}
+      foreach ($k in 'OffsetPan', 'OffsetTilt', 'ZoomPan', 'ZoomTilt', 'ReversePan', 'ReverseTilt') { $v[$k] = if ($blk -match "(?m)^$k = (-?\d+)") { [double]$matches[1] } else { 0 } }
+      $hf[$id] = $v
+    }
+    $path = Get-CurvePath $pts $tr
+    $len = [math]::Max(1, [int][math]::Round($dur * 10 / $path.Count))
+    $bytes = [IO.File]::ReadAllBytes($sp)
+    $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $text = [IO.File]::ReadAllText($sp)
+    $nl = if ($text -match "`r`n") { "`r`n" } else { "`n" }
+    $m1 = [regex]::Match($text, '(?s)^(.*?<Steps>[^\n]*\n)(.*?)(\r?\n[ \t]*</Steps>.*)$')
+    $s1 = [regex]::Match($m1.Groups[2].Value, '(?s)^([ \t]*)<Step length="\d+">\r?\n(.*?)\r?\n[ \t]*</Step>')
+    if (-not $m1.Success -or -not $s1.Success) { "  WARNING: $label - could not read step 1, not rebuilt"; continue }
+    $ind = $s1.Groups[1].Value
+    $tmpl = @([regex]::Matches($s1.Groups[2].Value, '(?s)([ \t]*)<Fixture id="(\d+)">\r?\n(.*?)\r?\n[ \t]*</Fixture>') | ForEach-Object {
+      [pscustomobject]@{ ind = $_.Groups[1].Value; id = $_.Groups[2].Value
+        ch = @($_.Groups[3].Value -split "\r?\n" | Where-Object { $_ -match '<Channel ' -and $_ -notmatch '<Channel index="[0-3]" name="u?(pan|tilt)"' }) } })
+    $fade = if ($tr -eq 0) { '' } else { ' fade="1"' }; $chInd = "$ind    "
+    $out = New-Object Collections.Generic.List[string]; $moved = 0
+    foreach ($pos in $path) {
+      $out.Add("$ind<Step length=`"$len`">")
+      foreach ($f in $tmpl) {
+        $out.Add("$($f.ind)<Fixture id=`"$($f.id)`">")
+        if ($hf.ContainsKey($f.id)) {
+          $h = $hf[$f.id]; $zp = [math]::Pow(1 + $h.ZoomPan / 100, 2); $zt = [math]::Pow(1 + $h.ZoomTilt / 100, 2)   # measured 2026-11-18
+          $pv = $cx + ($pos[0] - $cx) * $zp + $h.OffsetPan; $tv = $cy + ($pos[1] - $cy) * $zt + $h.OffsetTilt
+          if ($h.ReversePan) { $pv = 65535 - $pv }; if ($h.ReverseTilt) { $tv = 65535 - $tv }
+          $pv = [int][math]::Max(0, [math]::Min(65535, [math]::Round($pv))); $tv = [int][math]::Max(0, [math]::Min(65535, [math]::Round($tv)))
+          $out.Add("$chInd<Channel index=`"0`" name=`"pan`" value=`"$([math]::Floor($pv / 256))`"$fade/>"); $out.Add("$chInd<Channel index=`"1`" name=`"upan`" value=`"$($pv % 256)`"$fade/>")
+          $out.Add("$chInd<Channel index=`"2`" name=`"tilt`" value=`"$([math]::Floor($tv / 256))`"$fade/>"); $out.Add("$chInd<Channel index=`"3`" name=`"utilt`" value=`"$($tv % 256)`"$fade/>")
+        }
+        foreach ($c in $f.ch) { $out.Add($c) }
+        $out.Add("$($f.ind)</Fixture>")
+      }
+      $out.Add("$ind</Step>")
+    }
+    $moved = @($tmpl | Where-Object { $hf.ContainsKey($_.id) }).Count
+    $new = $m1.Groups[1].Value + (($out -join $nl) -replace "`r?`n", $nl) + $m1.Groups[3].Value
+    $new = ($new -replace "`r?`n", $nl)
+    $same = $new -eq $text
+    if (-not $same) { [IO.File]::WriteAllText($sp, $new, (New-Object Text.UTF8Encoding($bom))) }
+    "  {0,-46} {1} ({2} steps x {3}/100 s, {4} heads moving, step 1 copied to every step)" -f $label, $(if ($same) { 'already up to date' } else { 'REBUILT' }), $path.Count, $len, $moved
+  }
+}
+
 function Show-Table($movers, $fix) {
   ""
   "  HEAD      CENTER correction      SIZE from corner (width x depth)"
@@ -624,6 +724,7 @@ if ($Action -eq 'Menu') {
 }
 
 Test-SxClosed
+if ($Action -eq 'Rebuild') { Update-RenderedScenes; return }   # only the step scenes (GRAND ENTRANCE) from their .gpj
 # aim scene: create, or upgrade an old 1-step scene to center + corner (keeps your center aims)
 if (-not (Test-Path $scene)) {
   $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner
@@ -631,6 +732,7 @@ if (-not (Test-Path $scene)) {
 } else {
   $a = Read-AimScene $movers
   if ($a.steps -lt 2) { Write-AimScene $movers $a.center $a.corner; "  $aimTitle upgraded: step 2 = CORNER added (your center aims kept)" }
+  elseif ($a.moved) { Write-AimScene $movers $a.center $a.corner; "  CHANGED  AROUND ROOM was reshaped in Generator: $($a.moved) head(s) still on the old normal moved to the new one in $aimTitle" }
 }
 if ($Action -eq 'LiveSave') {
   if (-not $ChangesFile -or -not (Test-Path -LiteralPath $ChangesFile)) { throw "No live aims were sent. NOTHING was changed." }
@@ -686,6 +788,7 @@ if ($Action -eq 'Home') {
 }
 Update-Gpjs $fix $sz[0] $sz[1] $st
 if ($Action -eq 'Apply') { Update-CenterSpot $movers $a.center }   # user 2026-11-21: CENTER SPOT follows step 1
+Update-RenderedScenes                                                # GRAND ENTRANCE step scene follows its .gpj
 $st.sx = $sz[0]; $st.sy = $sz[1]
 Save-State $st
 if ($Action -eq 'Home') { "  DONE - all movement scenes back to normal." }

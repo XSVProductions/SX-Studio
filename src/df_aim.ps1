@@ -60,8 +60,9 @@ $homePos = @{ $m140 = @(22600, 49700); $m251 = @(34200, 10000) }
 # half-extent of the user's dancefloor patterns. A corner aimed exactly this far away = zoom 0.
 $refHalf = @{ $m140 = @(3600, 3400); $m251 = @(4500, 5000) }
 $pageRx  = '(?i)movement'          # live pages found BY NAME (MOVEMENTS + 251s movement) - page numbers move
-$skip    = @('251 Ceiling', 'Around Room')  # never touch: not dancefloor looks (Around Room = room
-                                           # coverage from the physically crossed pairs; user 2026-11-18)
+$skip    = @('251 Ceiling', 'Around Room', 'Grand Entrance')  # never touch: not dancefloor looks (Around Room = room
+                                           # coverage from the physically crossed pairs; user 2026-11-18;
+                                           # GRAND ENTRANCE = AROUND ROOM + tower colours, user 2026-11-21)
 $noScale = @('DF CHECK*')          # shared shape never resized
 $noZoom  = @()                     # per-head zoom stays 0
 $checks  = @{ 'DF CHECK 140.gpj' = $m140; 'DF CHECK 251.gpj' = $m251 }
@@ -77,7 +78,7 @@ if ($Mode -eq 'Room') {
   $aimTitle = 'ROOM AIM (ADJUST)'; $checkTitle = 'ROOM CHECK'
   $scene  = "$root/scenes/ROOM AIM (ADJUST).scex"
   $stateF = "$root/room_aim_state.json"
-  $roomFiles = @(Get-ChildItem -LiteralPath $gdir -Filter '*.gpj' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AROUND ROOM*' } | Sort-Object Name | ForEach-Object Name)
+  $roomFiles = @(Get-ChildItem -LiteralPath $gdir -Filter '*.gpj' -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'AROUND ROOM*' -or $_.Name -like 'GRAND ENTRANCE*' } | Sort-Object Name | ForEach-Object Name)
   if (-not $roomFiles.Count) { throw "No AROUND ROOM movement found in Generator. NOTHING was changed." }
   $roomMain = if ($roomFiles -contains 'AROUND ROOM.gpj') { 'AROUND ROOM.gpj' } else { $roomFiles[0] }
   # normal = middle + half-size of the ORIGINAL AROUND ROOM shape (from the state if it was already resized)

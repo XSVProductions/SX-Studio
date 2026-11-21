@@ -155,11 +155,27 @@ function Invoke-WithChanges([string]$script, $items) {
   try { Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $script } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
 }
 
+# Mac: TheLightingController.app (ShowXpress) - in Applications, or in a ShowXpress folder there (the download's layout,
+# with the interface driver efk_hardware.dylib next to the app)
+function Find-SxMacApp {
+  $c = @()
+  foreach ($r in '/Applications', (Join-Path $HOME 'Applications')) {
+    if (-not (Test-Path -LiteralPath $r)) { continue }
+    $c += @(Get-ChildItem -LiteralPath $r -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' })
+    foreach ($d in @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' -and $_.Name -notlike '*.app' })) {
+      $c += @(Get-ChildItem -LiteralPath $d.FullName -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' })
+    }
+  }
+  if (-not $c.Count) {
+    $c += @(& mdfind "kMDItemFSName == 'TheLightingController.app'" 2>$null | Where-Object { $_ -and $_ -notmatch '^/Volumes/' } | ForEach-Object { Get-Item -LiteralPath $_ -ErrorAction SilentlyContinue })
+  }
+  @($c | Sort-Object { -not (Test-Path -LiteralPath (Join-Path (Split-Path $_.FullName) 'efk_hardware.dylib')) }) | Select-Object -First 1
+}
 function Start-Sx {
   if ($TestRoot) { [IO.File]::WriteAllText((Join-Path $TestRoot '_sx_open'), 'test'); return @{ ok = $true; out = '  (test) ShowXpress would open now'; error = '' } }
   if (Test-SxOpen) { return @{ ok = $true; out = '  ShowXpress is already open'; error = '' } }
   if ($onMac) {
-    $a = @(Get-ChildItem -LiteralPath '/Applications' -Directory -Filter '*.app' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'ShowXpress|LightingController' }) | Select-Object -First 1
+    $a = Find-SxMacApp
     if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications.'; out = '' } }
     & open $a.FullName
   } else {
@@ -182,12 +198,17 @@ function Stop-Live {
 }
 function Start-Live {
   Stop-Live
-  if ($onMac) { return @{ ok = $false; error = 'Live aim works on Windows only for now.'; out = '' } }
+  $dd = ''
+  if ($onMac -and -not $TestRoot) {
+    $a = Find-SxMacApp
+    if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications, so its interface driver was not found either.'; out = '' } }
+    $dd = " -DllDir `"$(Split-Path $a.FullName)`""
+  }
   $why = ''
   foreach ($try in 1..3) {   # right after ShowXpress closes the interface can take a moment to be free
     $psi = New-Object Diagnostics.ProcessStartInfo
     $psi.FileName = $psExe
-    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`""
+    $a = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`"$dd"
     if ($TestRoot) { $a += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
     $psi.Arguments = $a; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
     $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
@@ -1117,7 +1138,7 @@ async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await 
 async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
  let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok)showResult(r,'sx');}
 $('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
-async function chkUpd(){const u=await getJ('/api/update');if(u.mac)$('lvcall').style.display='none';$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
+async function chkUpd(){const u=await getJ('/api/update');$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
  if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
 async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Helper closes and the Mac installer opens &mdash; follow it, and the Helper opens again when it&rsquo;s done.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
  busy(true,'Downloading the update…');let r;try{r=await api('/api/update/install',{});}catch(e){r={ok:false,error:'Lost connection.'}}

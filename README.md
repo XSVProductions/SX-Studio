@@ -111,6 +111,8 @@ The Helper also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, To
 3. **Share -> Add to Home Screen**, then open it from the Home Screen icon.
 4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once. **Unpair all phones** locks them all out again.
 
+**Demo (no laptop needed):** https://xsvproductions.github.io/showxpress-helper/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever the Helper's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
+
 **Aim live from the floor:** stand on the dance floor and drag your finger in the box to move the head. **Fine / Normal / Fast** set the speed, and **Next head** moves on. On an iPad with a keyboard or trackpad, the keys and mouse work as they do on the laptop. If the phone locks or loses Wi-Fi during live aim, the heads go dark after 30 s. Press **Reconnect**, and your aims so far are kept.
 
 **Wi-Fi:** the phone and the laptop must be on the **same** network. Venue Wi-Fi often keeps devices apart. The surest way is your own small travel router, or the laptop on the iPhone's Personal Hotspot.

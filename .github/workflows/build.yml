@@ -27,7 +27,7 @@ jobs:
         run: |
           $T = Join-Path $env:RUNNER_TEMP 'sxh_phone'; New-Item -ItemType Directory -Force $T | Out-Null
           [IO.File]::WriteAllText("$T\phone.json", '{"on":true,"key":"ci0key0ci0key"}')
-          $p = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"$PWD\src\df_aim_gui.ps1",'-NoBrowser','-Port','47392','-PhonePort','47393','-TestRoot',$T -PassThru -RedirectStandardError "$T\err.log"
+          $gui = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"$PWD\src\df_aim_gui.ps1",'-NoBrowser','-Port','47392','-PhonePort','47393','-TestRoot',$T -PassThru -RedirectStandardError "$T\err.log"
           $P = 'http://127.0.0.1:47393'
           function Code($u, $body) { try { if ($body) { (Invoke-WebRequest $u -Method Post -Body $body -ContentType 'text/plain' -UseBasicParsing).StatusCode } else { (Invoke-WebRequest $u -UseBasicParsing).StatusCode } } catch { [int]$_.Exception.Response.StatusCode } }
           for ($i = 0; $i -lt 40 -and (Code "$P/") -ne 200; $i++) { Start-Sleep 1 }
@@ -39,7 +39,7 @@ jobs:
           if ((Invoke-WebRequest "$P/api/phone/pair" -Method Post -Body '{"pin":"000000"}' -ContentType 'text/plain' -UseBasicParsing).Content -notmatch '"ok":false') { $fail += 'pairing without a code' }
           if ((Code "$P/api/live/out?t=ci0key0ci0key" '{"l":"k"}') -ne 200) { $fail += 'POST through the relay' }
           Get-Content "$T\err.log" -ErrorAction SilentlyContinue
-          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          Stop-Process -Id $gui.Id -Force -ErrorAction SilentlyContinue
           if ($fail.Count) { throw ('Phone relay: ' + ($fail -join ', ')) }
           'Phone relay OK'
       - uses: actions/upload-artifact@v4

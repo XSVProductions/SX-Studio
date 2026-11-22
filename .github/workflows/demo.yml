@@ -1,0 +1,40 @@
+name: Demo (GitHub Pages)
+
+# Builds the no-laptop demo from the Helper's own phone page and puts it on
+# https://xsvproductions.github.io/showxpress-helper/demo/  (iPhone / iPad: Share -> Add to Home Screen)
+on:
+  push:
+    branches: [main]
+    paths: ['src/df_aim_gui.ps1', 'demo/**', 'assets/aim_movers_1024.png', '.github/workflows/demo.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}demo/
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the demo
+        run: |
+          python3 demo/build_demo.py
+          python3 -c "import re;h=open('_site/demo/index.html').read();open('/tmp/demo.js','w').write(chr(10).join(re.findall(r'<script>(.*?)</script>',h,re.S)))"
+          node --check /tmp/demo.js
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -12,6 +12,7 @@ Its main tabs:
 - **APC mini:** shows the 8x8 pad grid in each pad's own colours, with the scene and page each pad plays and what the four faders do. Tap a pad, then tap another one to move it there (or swap the two). It flags pads that fire two buttons, mappings outside the 64 pads, and pads whose scene is missing.
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
 - **Auto Show:** the Helper presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
+- **Phone & iPad:** the same Helper on your iPhone or iPad over the Wi-Fi, with touch-friendly screens and Aim live by finger. See [Phone & iPad](#phone--ipad).
 - **Health Check:** a scan for problems that have caused trouble before. It looks for buttons whose scene is missing, scenes that use deleted fixtures, `beats = 0`, speed faders that don't exist, APC pads that fire two buttons, buttons stacked on the same spot, and colour chases that jump back across the colour wheel when they loop. Each problem comes with a recommended fix, and many can be fixed with one click. Every fix can be reverted.
 
 > Built for a show using Chauvet Intimidator Hybrid 140SR / 251SR heads, with the scenes `DF AIM (ADJUST)`, `CENTER SPOT` and `SKIP FLASH`.
@@ -100,6 +101,21 @@ ShowXpress doesn't send its beat to other apps, so the Auto Show counts bars fro
 **ShowXpress remote:** RIG ID, DF CHECK, ROOM CHECK and the Auto Show use ShowXpress's *External App* remote (on this computer only). The first time, press **Turn on remote control** in any of those tabs; the Helper switches it on in the show with a password only it uses. The Helper never presses anything while something outside the SETUP page is playing, so a running show isn't cut.
 
 ShowXpress Helper never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, the Helper does them and opens ShowXpress again.
+
+## Phone & iPad
+
+The Helper also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Skip Flash), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so the Helper has to be open on it.
+
+1. On the laptop, go to **Home -> Phone & iPad** and tick **Let my phone and iPad connect**. The first time, Windows asks whether PowerShell may use the network: tick **Private networks** and press **Allow**. On a Mac, allow **pwsh** to accept incoming connections if macOS asks.
+2. On the iPhone or iPad, open **Safari** and go to the address shown there, e.g. `http://DJ-LAPTOP.local:47322`. The `.local` address stays the same at every venue; the number address changes with the network.
+3. **Share -> Add to Home Screen**, then open it from the Home Screen icon.
+4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once. **Unpair all phones** locks them all out again.
+
+**Aim live from the floor:** stand on the dance floor and drag your finger in the box to move the head. **Fine / Normal / Fast** set the speed, and **Next head** moves on. On an iPad with a keyboard or trackpad, the keys and mouse work as they do on the laptop. If the phone locks or loses Wi-Fi during live aim, the heads go dark after 30 s. Press **Reconnect**, and your aims so far are kept.
+
+**Wi-Fi:** the phone and the laptop must be on the **same** network. Venue Wi-Fi often keeps devices apart. The surest way is your own small travel router, or the laptop on the iPhone's Personal Hotspot.
+
+Phones get no updates or phone settings (those stay on the laptop). Anything a phone saves while ShowXpress is open is queued, the same as on the laptop. If ShowXpress asks whether to save when it closes, answer it on the laptop.
 
 ## Google Drive
 

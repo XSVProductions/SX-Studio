@@ -7,7 +7,8 @@
 #   Auto Show -> sx_remote.ps1 (also presses RIG ID / DF CHECK / ROOM CHECK in a running ShowXpress through its remote)
 #   LIVE AIM (Aim Movers tab) -> dmx_out.ps1 drives the DMX interface while ShowXpress is closed; df_aim.ps1 LiveInfo / LiveSave
 # Quits by itself a few minutes after its window is closed.
-param([string]$TestRoot = '', [int]$Port = 47321, [switch]$NoBrowser)
+#   PHONE / iPAD (user 2026-11-22): the same page, phone-sized, on the Wi-Fi - see "PHONE" below.
+param([string]$TestRoot = '', [int]$Port = 47321, [int]$PhonePort = 47322, [switch]$NoBrowser)
 $ErrorActionPreference = 'Stop'
 $here   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engine = Join-Path $here 'df_aim.ps1'
@@ -425,10 +426,182 @@ function Start-Auto([string]$look) {
   @{ ok = $true; status = $s }
 }
 
+# ---- PHONE / iPAD (user 2026-11-22): the phone opens http://<this computer>:47322 on the same Wi-Fi and gets this same page,
+# phone-sized. The page above stays on localhost; a small relay (C#, no admin needed) takes the phone's requests on the
+# Wi-Fi port and hands them to it with the header X-SXH-Phone. A phone is let in once with a 6-digit code (shown on the
+# Home page for 10 minutes after "Pair a phone"), then it keeps a key (phone.json). "Unpair" makes a new key.
+# A phone can do everything the window can, except updates and these phone settings.
+$cfgDir = if ($TestRoot) { $TestRoot } elseif ($onMac) { Join-Path $HOME 'AwaazTools' } else { Join-Path $env:APPDATA 'ShowXpress Helper' }
+$phoneF = Join-Path $cfgDir 'phone.json'
+$script:ph = [pscustomobject]@{ on = $false; key = '' }
+if (Test-Path -LiteralPath $phoneF) { try { $j = [IO.File]::ReadAllText($phoneF) | ConvertFrom-Json; $script:ph = [pscustomobject]@{ on = [bool]$j.on; key = "$($j.key)" } } catch {} }
+function New-PhoneKey { -join (1..2 | ForEach-Object { [guid]::NewGuid().ToString('N') }) }
+function Save-Phone {
+  if (-not (Test-Path -LiteralPath $cfgDir)) { [void](New-Item -ItemType Directory -Path $cfgDir -Force) }
+  [IO.File]::WriteAllText($phoneF, ($script:ph | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+if (-not $script:ph.key) { $script:ph.key = New-PhoneKey }
+$script:pin = ''; $script:pinUntil = [datetime]::MinValue; $script:pinFails = 0; $script:pinLock = [datetime]::MinValue
+$script:relay = $null; $script:relayErr = ''
+$relayCs = @'
+using System; using System.IO; using System.Net; using System.Net.Sockets; using System.Text; using System.Threading;
+public class SxhRelay {
+  TcpListener ls; int local; int busy;
+  public volatile bool Running; public string Error = ""; public string LastIp = ""; public DateTime LastSeen = DateTime.MinValue;
+  public bool Start(int lanPort, int localPort) {
+    local = localPort;
+    try { ls = TcpListener.Create(lanPort); ls.Start(); }   // IPv4 and IPv6
+    catch (Exception e) { Error = "Port " + lanPort + " can't be used (" + e.Message + ")"; return false; }
+    Running = true; Error = "";
+    Thread t = new Thread(Loop); t.IsBackground = true; t.Start();
+    return true;
+  }
+  public void Stop() { Running = false; try { ls.Stop(); } catch { } }
+  void Loop() {
+    while (Running) {
+      TcpClient c;
+      try { c = ls.AcceptTcpClient(); } catch { break; }
+      if (Interlocked.Increment(ref busy) > 24) { Interlocked.Decrement(ref busy); try { c.Close(); } catch { } continue; }
+      ThreadPool.QueueUserWorkItem(Handle, c);
+    }
+    Running = false;
+  }
+  static string ReadHead(Stream s, out byte[] rest) {
+    rest = new byte[0]; byte[] buf = new byte[32768]; int n = 0;
+    while (n < buf.Length) {
+      int k = s.Read(buf, n, buf.Length - n); if (k <= 0) return null;
+      int from = Math.Max(0, n - 3); n += k;
+      for (int i = from; i <= n - 4; i++) {
+        if (buf[i] == 13 && buf[i + 1] == 10 && buf[i + 2] == 13 && buf[i + 3] == 10) {
+          rest = new byte[n - i - 4]; Array.Copy(buf, i + 4, rest, 0, rest.Length);
+          return Encoding.ASCII.GetString(buf, 0, i);
+        }
+      }
+    }
+    return null;
+  }
+  static TcpClient Dial(int port) {
+    // the window's server is on "localhost": 127.0.0.1, or only ::1 on some Macs
+    try { TcpClient t4 = new TcpClient(AddressFamily.InterNetwork); t4.Connect(IPAddress.Loopback, port); return t4; } catch { }
+    TcpClient t6 = new TcpClient(AddressFamily.InterNetworkV6); t6.Connect(IPAddress.IPv6Loopback, port); return t6;
+  }
+  static void Bad(Stream s, int code) {
+    try { byte[] b = Encoding.ASCII.GetBytes("HTTP/1.1 " + code + " Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"); s.Write(b, 0, b.Length); } catch { }
+  }
+  void Handle(object o) {
+    TcpClient c = (TcpClient)o; TcpClient up = null;
+    try {
+      c.ReceiveTimeout = 15000; c.SendTimeout = 15000;
+      NetworkStream cs = c.GetStream();
+      IPAddress ra = ((IPEndPoint)c.Client.RemoteEndPoint).Address;
+      if (ra.IsIPv4MappedToIPv6) ra = ra.MapToIPv4();
+      string ip = ra.ToString();
+      byte[] rest; string head = ReadHead(cs, out rest);
+      if (head == null) return;
+      string[] lines = head.Split(new string[] { "\r\n" }, StringSplitOptions.None);
+      string[] rl = lines[0].Split(' ');
+      if (rl.Length != 3 || !(rl[0] == "GET" || rl[0] == "POST" || rl[0] == "HEAD") || !rl[1].StartsWith("/") || !rl[2].StartsWith("HTTP/1.")) { Bad(cs, 400); return; }
+      StringBuilder sb = new StringBuilder();
+      sb.Append(rl[0]).Append(' ').Append(rl[1]).Append(" HTTP/1.1\r\n");
+      int cl = 0;
+      for (int i = 1; i < lines.Length; i++) {
+        string ln = lines[i]; int ix = ln.IndexOf(':'); if (ix <= 0) continue;
+        string nm = ln.Substring(0, ix).Trim(), v = ln.Substring(ix + 1).Trim(), lo = nm.ToLowerInvariant();
+        if (lo == "transfer-encoding") { Bad(cs, 411); return; }
+        if (lo == "host" || lo == "connection" || lo == "keep-alive" || lo == "upgrade" || lo == "te" || lo.StartsWith("proxy-") || lo.StartsWith("x-sxh-")) continue;
+        if (lo == "content-length" && (!int.TryParse(v, out cl) || cl < 0 || cl > 4000000)) { Bad(cs, 413); return; }
+        sb.Append(nm).Append(": ").Append(v).Append("\r\n");
+      }
+      sb.Append("Host: localhost:").Append(local).Append("\r\nX-SXH-Phone: ").Append(ip).Append("\r\nConnection: close\r\n\r\n");
+      byte[] body = new byte[cl]; int got = Math.Min(rest.Length, cl); Array.Copy(rest, 0, body, 0, got);
+      while (got < cl) { int k = cs.Read(body, got, cl - got); if (k <= 0) return; got += k; }
+      LastIp = ip; LastSeen = DateTime.Now;
+      up = Dial(local);
+      up.ReceiveTimeout = 200000; up.SendTimeout = 15000;   // a show script can take a while
+      NetworkStream us = up.GetStream();
+      byte[] hb = Encoding.ASCII.GetBytes(sb.ToString()); us.Write(hb, 0, hb.Length);
+      if (cl > 0) us.Write(body, 0, cl);
+      us.Flush();
+      byte[] rrest; string rhead = ReadHead(us, out rrest);
+      if (rhead == null) { Bad(cs, 502); return; }
+      long rcl = -1; StringBuilder ob = new StringBuilder();
+      foreach (string ln in rhead.Split(new string[] { "\r\n" }, StringSplitOptions.None)) {
+        string lo = ln.ToLowerInvariant();
+        if (lo.StartsWith("connection:") || lo.StartsWith("keep-alive:")) continue;
+        if (lo.StartsWith("content-length:")) long.TryParse(ln.Substring(15).Trim(), out rcl);
+        ob.Append(ln).Append("\r\n");
+      }
+      ob.Append("Connection: close\r\n\r\n");
+      byte[] oh = Encoding.ASCII.GetBytes(ob.ToString()); cs.Write(oh, 0, oh.Length);
+      long sent = rrest.Length; if (rcl >= 0 && sent > rcl) sent = rcl;
+      cs.Write(rrest, 0, (int)sent);
+      byte[] buf = new byte[65536];
+      while (rcl < 0 || sent < rcl) {
+        int k = us.Read(buf, 0, buf.Length); if (k <= 0) break;
+        if (rcl >= 0 && sent + k > rcl) k = (int)(rcl - sent);
+        cs.Write(buf, 0, k); sent += k;
+      }
+      cs.Flush();
+    } catch { }
+    finally {
+      try { c.Close(); } catch { }
+      if (up != null) { try { up.Close(); } catch { } }
+      Interlocked.Decrement(ref busy);
+    }
+  }
+}
+'@
+function Start-PhoneRelay {
+  if ($script:relay -and $script:relay.Running) { return }
+  try { if (-not ('SxhRelay' -as [type])) { Add-Type -TypeDefinition $relayCs -Language CSharp } }
+  catch { $script:relayErr = "The phone connection couldn't start: $($_.Exception.Message)"; return }
+  $script:relay = New-Object SxhRelay
+  if ($script:relay.Start($PhonePort, $Port)) { $script:relayErr = '' } else { $script:relayErr = $script:relay.Error; $script:relay = $null }
+}
+function Stop-PhoneRelay { if ($script:relay) { try { $script:relay.Stop() } catch {} }; $script:relay = $null }
+function Get-LanAddrs {
+  # this computer's Wi-Fi / network addresses a phone can use (Wi-Fi first)
+  $a = @()
+  try {
+    foreach ($ni in [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+      if ("$($ni.OperationalStatus)" -ne 'Up' -or "$($ni.NetworkInterfaceType)" -eq 'Loopback') { continue }
+      if ("$($ni.Name) $($ni.Description)" -match 'vEthernet|VMware|VirtualBox|Hyper-V|Loopback|utun|awdl|llw|bridge|docker|WSL|Tailscale|ZeroTier') { continue }
+      foreach ($u in $ni.GetIPProperties().UnicastAddresses) {
+        if ("$($u.Address.AddressFamily)" -ne 'InterNetwork') { continue }
+        $s = "$($u.Address)"; if ($s -like '127.*' -or $s -like '169.254.*') { continue }
+        $wifi = "$($ni.NetworkInterfaceType)" -eq 'Wireless80211' -or "$($ni.Name) $($ni.Description)" -match 'Wi-?Fi|WLAN|Wireless|^en0'
+        $a += [pscustomobject]@{ ip = $s; name = "$($ni.Name)"; wifi = $wifi }
+      }
+    }
+  } catch {}
+  @($a | Sort-Object @{ e = { -not $_.wifi } }, ip)
+}
+function Get-LocalName {
+  # the Bonjour name (stays the same at every venue - iPhone and iPad understand it)
+  $n = ''
+  if ($onMac) { try { $n = "$(& scutil --get LocalHostName 2>$null)".Trim() } catch {} }
+  if (-not $n) { $n = ([Net.Dns]::GetHostName() -replace '\.local$', '') }
+  if ($n -match '^[A-Za-z0-9-]{1,63}$') { "$n.local" } else { '' }
+}
+function Get-PhoneInfo {
+  $pinOn = $script:pin -and (Get-Date) -lt $script:pinUntil
+  $seen = if ($script:relay -and $script:relay.LastSeen -gt [datetime]::MinValue) { $script:relay.LastSeen.ToString('s') } else { '' }
+  @{ ok = $true; on = [bool]$script:ph.on; port = $PhonePort; running = [bool]($script:relay -and $script:relay.Running); error = "$script:relayErr"
+     addrs = @(Get-LanAddrs); local = (Get-LocalName); mac = $onMac
+     pin = $(if ($pinOn) { $script:pin } else { '' }); pinLeft = $(if ($pinOn) { [int]($script:pinUntil - (Get-Date)).TotalSeconds } else { 0 })
+     lastSeen = $seen; lastIp = $(if ($seen) { "$($script:relay.LastIp)" } else { '' }) }
+}
+# routes a phone may use without its key, and routes only the computer itself may use
+$phoneOpen = @('/', '/icon.png', '/brand.png', '/api/phone/pair')
+$phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair')
+if ($script:ph.on) { Start-PhoneRelay }
+
 $html = @'
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>ShowXpress Helper</title>
-<meta name="viewport" content="width=device-width, initial-scale=1"><link rel="icon" href="/icon.png?t=__TOKEN__">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/icon.png?t=__TOKEN__">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SX Helper"><meta name="theme-color" content="#0e1014"><link rel="apple-touch-icon" href="/icon.png">
 <style>
 :root{--bg:#0e1014;--card:#171a21;--line:#262b36;--txt:#e9ecf1;--dim:#8b93a3;--amber:#ffb020;--green:#3ddc84;--red:#ff5c5c;--blue:#5aa9ff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
@@ -574,7 +747,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .lvh .sd{font-size:10px;color:#5d6574;width:10px}
 .lvmain{display:flex;flex-direction:column;gap:12px;padding:14px 18px;min-height:0}
 .seg button small{font-size:10.5px;color:#5d6574;font-weight:500}
-.lvpad{flex:1;min-height:220px;border:2px dashed #3a4150;border-radius:16px;background:radial-gradient(circle at 50% 50%,rgba(255,176,32,.07),transparent 60%),#0b0d11;display:flex;align-items:center;justify-content:center;text-align:center;cursor:grab;user-select:none;color:var(--dim);padding:20px}
+.lvpad{flex:1;min-height:220px;touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none;border:2px dashed #3a4150;border-radius:16px;background:radial-gradient(circle at 50% 50%,rgba(255,176,32,.07),transparent 60%),#0b0d11;display:flex;align-items:center;justify-content:center;text-align:center;cursor:grab;user-select:none;color:var(--dim);padding:20px}
 .lvpad:hover{border-color:#566070}.lvpad.drag{cursor:none;border-color:var(--amber);border-style:solid}
 .lvbig{font-size:30px;font-weight:700;color:var(--txt);margin-bottom:6px}.lvbig span{color:var(--amber)}
 .lvkeys{color:var(--dim);font-size:12.5px}.lvkeys b{color:var(--txt);font-weight:600}
@@ -596,9 +769,55 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .pkl{max-height:52vh;overflow:auto;margin:8px 0 12px}.pkl h4{margin:10px 0 5px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
 .pks{display:flex;flex-wrap:wrap;gap:5px}.pkb{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;cursor:pointer;user-select:none}.pkb:hover{border-color:var(--amber)}.pkb.on{border-color:var(--amber);background:rgba(255,176,32,.12)}.pkb.no{opacity:.4;cursor:not-allowed}
 #aupill{background:rgba(61,220,132,.1);border-color:rgba(61,220,132,.45);color:var(--green)}
+.pair{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:50;padding:24px}.pair.on{display:flex}
+.pair .box{max-width:380px;width:100%;text-align:center;display:grid;gap:12px;justify-items:center}.pair h2{margin:0;font-size:21px}.pair .sub{margin:0}
+.pair input{font:600 30px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:10px;text-align:center;width:100%;max-width:280px;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0f1217;color:var(--txt)}
+.pair .primary{width:100%;max-width:280px}
+.offl{position:fixed;left:0;right:0;top:0;z-index:45;display:none;padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;background:rgba(200,60,60,.96);color:#fff;font-weight:600;font-size:13px;text-align:center}.offl.on{display:block}
+.phaddr{font:600 16px ui-monospace,Menlo,Consolas,monospace;background:#0f1217;border:1px solid var(--line);border-radius:10px;padding:7px 12px;display:inline-block;margin:4px 8px 4px 0;user-select:all;color:var(--txt)}
+.phaddr small{font:500 11.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--dim);margin-left:8px}
+.phpin{font:700 34px ui-monospace,Menlo,Consolas,monospace;letter-spacing:8px;color:var(--amber);line-height:1.1}
+.phgrid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;margin-top:12px;align-items:start}.phbox{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.phbox h3{margin:0 0 6px;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}
+.ph #phcard,.ph #upd{display:none!important}
+.ph header{padding-top:calc(10px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right))}
+.ph .bar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
+.ph body{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
+.ph button,.ph .chip,.ph .hd,.ph .slot,.ph .cp,.ph .pkb,.ph .pad,.ph .lvh,.ph .lg,.ph .pick div{touch-action:manipulation}
+.ph .lvkeys{display:none}.ph .lvtop{padding-top:calc(10px + env(safe-area-inset-top))}
+.ph .ht[data-go=rt]{order:1}.ph .ht[data-go=rig]{order:2}.ph .ht[data-go=skip]{order:3}.ph .ht[data-go=aim]{order:4}.ph .ht[data-go=color]{order:5}.ph .ht[data-go=pre]{order:6}.ph .ht[data-go=auto]{order:7}.ph .ht[data-go=apc]{order:8}.ph .ht[data-go=speed]{order:9}.ph .ht[data-go=health]{order:10}
 @media (max-width:860px){.clwrap{grid-template-columns:1fr}.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
-@media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
+@media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}.phgrid{grid-template-columns:1fr}}
+@media (max-width:640px){
+ header{padding:10px 12px;gap:8px}.logo{width:28px;height:28px}h1{font-size:16px}
+ .tabs{order:5;margin:0;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tabs button{flex:none;padding:8px 12px}
+ .hright{gap:6px}.pill{padding:4px 9px;font-size:11.5px}
+ main{padding:12px 10px 160px;gap:12px}.card{padding:14px 13px;border-radius:12px}.qbar{margin:10px 10px 0}
+ .htiles{grid-template-columns:1fr;gap:8px}.ht{padding:12px 14px}.hero{gap:12px}.hlogo{width:54px;height:54px}.hname{font-size:20px}.brand{display:none}
+ .heads{gap:6px}.hd{padding:11px 0 9px;font-size:16px}
+ .legend2{grid-template-columns:repeat(4,1fr)}.rtmap{gap:6px;padding:8px}.tw{padding:6px}.tw .pr{gap:4px}.slot{min-height:60px;padding:6px 3px}.slot b{font-size:14px}
+ .pick{grid-template-columns:repeat(2,1fr)}.wheel{width:190px;height:190px}.clwrap .slider{width:100%!important}
+ .bar{padding:10px 10px calc(10px + env(safe-area-inset-bottom))}.bar .in{flex-wrap:wrap;gap:8px}.bar .in .hint{flex-basis:100%;order:-1;font-size:12px}
+ .bar .in .primary{flex:1;padding:12px 14px}.bar .in button{padding:11px 12px}
+ .modal .box{max-width:94vw;padding:18px}.sp{grid-template-columns:1fr}.srch{width:100%}
+ .tiles{grid-template-columns:repeat(auto-fill,minmax(100px,1fr))}.seg button{padding:8px 14px}
+ .aubig{font-size:22px}.lvcall{flex-direction:column;align-items:stretch}
+ .card>.row:first-child>.grow:first-child{flex-basis:100%}.card>.row:first-child>.state{margin-right:auto}
+ .bar .in button:not(.primary){flex:1}
+ .lvmain .seg button{padding:8px 10px}.lvmain .seg button small,.lvmain>.row>.sub{display:none}
+}
+@media (max-width:820px){
+ .lvtop{flex-wrap:wrap;padding:8px 10px;gap:8px}.lvtop .link{order:5;flex-basis:100%}
+ .lvbody{display:flex;flex-direction:column;overflow:auto;-webkit-overflow-scrolling:touch}
+ .lvlist{display:flex;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;flex:none}
+ .lvlist h4{display:none}.lvh{flex:none;border-color:var(--line);background:#12151b}.lvh small{margin-left:6px}
+ .lvmain{padding:10px;flex:none}.lvmain>.row{gap:8px}
+ .lvpad{flex:none;min-height:38vh;touch-action:none}
+ .lvside{display:flex;flex-direction:column;border-left:none;border-top:1px solid var(--line);overflow:visible;padding:12px 12px calc(16px + env(safe-area-inset-bottom))}
+ .lvbtns{order:-1;margin:0 0 12px}.lvbtns button{padding:11px 10px}
+ #lvmap{max-width:320px;display:block;margin:0 auto}
+}
 </style></head><body>
 <header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>
   <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button></nav>
@@ -623,6 +842,8 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
    </div>
   </section>
   <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><button id="gdsync" class="primary" disabled>Sync to Google Drive</button></div></section>
+  <section class="card" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use the Helper from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
+   <label class="link"><input type="checkbox" id="phon"> Let my phone and iPad connect</label></div><div id="phbody"></div></section>
  </div>
 
  <div class="view" id="v-aim">
@@ -832,12 +1053,22 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 <div class="modal" id="aupk"><div class="box" style="max-width:660px;width:92vw"><h2 id="aupkt"></h2><input id="aupks" class="srch" placeholder="Search buttons&hellip;" style="width:100%"><div id="aupkl" class="pkl"></div><div class="row" style="justify-content:flex-end"><button id="aupkd" class="primary" style="padding:9px 18px;font-size:14px">Done</button></div></div></div>
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
+<div class="pair" id="pair"><div class="box"><img src="/icon.png" alt="" class="hlogo" style="width:64px;height:64px"><h2>Connect to the laptop</h2>
+ <p class="sub">On the laptop, open <b>ShowXpress Helper</b>: on <b>Home</b>, in <b>Phone &amp; iPad</b>, press <b>Pair a phone</b>. Type the 6-digit code here.</p>
+ <input id="pairpin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="------">
+ <button id="pairgo" class="primary">Connect</button><div id="pairmsg" class="sub"></div>
+ <p class="sub" style="font-size:12px;margin-top:8px">Tip: first add this page to your Home Screen (Share &rarr; <b>Add to Home Screen</b>), then open it from there and pair &mdash; the Home Screen icon keeps its own pairing.</p></div></div>
+<div class="offl" id="offl">Can&rsquo;t reach the laptop &mdash; trying again&hellip; (same Wi-Fi? Helper still open?)</div>
 <div class="gone" id="gone"><h2 style="color:var(--txt)">ShowXpress Helper has closed</h2><p>Open it again from its icon.</p></div>
 <script>
-const T='__TOKEN__';const $=id=>document.getElementById(id);
+const PH=__PHONE__||/[?&]phone=1/.test(location.search);   // phone / iPad over the Wi-Fi (phone=1: try the phone layout on the computer)
+let T='__TOKEN__';const $=id=>document.getElementById(id);
+if(__PHONE__){try{T=localStorage.getItem('sxh_phone_key')||'';}catch(e){T='';}}
+if(PH)document.documentElement.classList.add('ph');
 let P=null,sxOpen=false,linked=true;
 function wq(b){return sxOpen?Object.assign({},b||{},{queue:true}):b;}
-async function api(p,body){const r=await fetch(p+(p.includes('?')?'&':'?')+'t='+T,body?{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)}:{});return r.json();}
+async function api(p,body){const r=await fetch(p+(p.includes('?')?'&':'?')+'t='+T,body?{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)}:{});
+ if(r.status===403&&__PHONE__){phUnpaired(await r.text());throw new Error('not paired');}return r.json();}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function sign(v){return (v>0?'+':'')+v;}
 function tile(h){const moved=h.op||h.ot,cls=['tile',moved?'moved':'',h.sized?'sized':'',h.warn?'warn':'',h.copyFrom?'copied':''].join(' ');
@@ -918,13 +1149,14 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
 function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
  LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');loadGd();}
-async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
  updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
- catch(e){if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+ catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}
+  if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
 const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto'];
@@ -1488,7 +1720,7 @@ function lvSide(){if(!LV)return;LV.raf=0;const h=LV.sel;if(!h)return;lvList();co
  $('lvst').innerHTML=cp?'Not aimed &mdash; gets the same aim as <b>'+esc(pt.label)+'</b> next to it. Drag to aim it yourself.':(w.tc||w.tk)?'Aimed now'+(w.tk?' (center + corner)':' (center)'):!h.free?'Aimed before &mdash; drag to change it.':'Normal aim &mdash; drag to aim it.';
  $('lvbig').innerHTML=esc(h.label)+' &mdash; <span>'+(st==='k'?'CORNER':'CENTER')+'</span>';
  $('lvtip').innerHTML=(st==='k'?'Aim it at the front-left '+(room?'edge of the AROUND ROOM sweep':'corner of the floor (from the DJ)')+(w.tk||(h.kSet&&!cp)?'':' &mdash; <i>until you do, it follows the center</i>'):
-  'Aim it at the '+(room?'middle of where AROUND ROOM should sweep':'center of tonight&rsquo;s dance floor'))+'<br><span style="font-size:12px;color:#5d6574">Hold the mouse button down here and drag</span>';
+  'Aim it at the '+(room?'middle of where AROUND ROOM should sweep':'center of tonight&rsquo;s dance floor'))+'<br><span style="font-size:12px;color:#5d6574">'+(PH?'Put your finger in this box and drag':'Hold the mouse button down here and drag')+'</span>';
  const dg=(v,i)=>(v-h.home[i])*h.deg[i]/65536,f1=x=>(x>=0?'+':'&minus;')+Math.abs(x).toFixed(1)+'&deg;';
  $('lvread').innerHTML='<span>Pan</span><b>'+Math.round(p[0])+' &nbsp;<small>'+f1(dg(p[0],0))+' from normal</small></b><span>Tilt</span><b>'+Math.round(p[1])+' &nbsp;<small>'+f1(dg(p[1],1))+' from normal</small></b>';
  // minimap in degrees around the normal center, turned like the mouse moves
@@ -1558,7 +1790,14 @@ document.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{LV.spd=+b.datas
  pad.onmousedown=e=>{if(!LV||e.button!==0)return;e.preventDefault();LV.drag=true;pad.classList.add('drag');try{const pr=pad.requestPointerLock();if(pr&&pr.catch)pr.catch(()=>{});}catch(x){}};
  const end=()=>{if(!LV||!LV.drag)return;LV.drag=false;pad.classList.remove('drag');if(document.pointerLockElement)document.exitPointerLock();};
  document.addEventListener('mousemove',e=>{if(LV&&LV.drag)lvMove(e.movementX,e.movementY,e.shiftKey,e.ctrlKey);});
- document.addEventListener('mouseup',end);document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)end();});}
+ document.addEventListener('mouseup',end);document.addEventListener('pointerlockchange',()=>{if(!document.pointerLockElement)end();});
+ // phone / iPad: drag a finger (or the Pencil) in the box - the head moves as far as the finger does, like the mouse
+ let tp=null;
+ pad.addEventListener('pointerdown',e=>{if(!LV||e.pointerType==='mouse'||tp)return;e.preventDefault();tp={id:e.pointerId,x:e.clientX,y:e.clientY};LV.drag=true;pad.classList.add('drag');try{pad.setPointerCapture(e.pointerId);}catch(x){}});
+ pad.addEventListener('pointermove',e=>{if(!tp||e.pointerId!==tp.id||!LV)return;e.preventDefault();const dx=e.clientX-tp.x,dy=e.clientY-tp.y;tp.x=e.clientX;tp.y=e.clientY;lvMove(dx,dy,false,false);});
+ const tend=e=>{if(!tp||e.pointerId!==tp.id)return;tp=null;if(LV)LV.drag=false;pad.classList.remove('drag');};
+ pad.addEventListener('pointerup',tend);pad.addEventListener('pointercancel',tend);
+ pad.addEventListener('touchmove',e=>{if(tp)e.preventDefault();},{passive:false});}
 document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display==='flex'||$('busy').style.display==='flex')return;
  const k=e.key,A={ArrowLeft:[-4,0],ArrowRight:[4,0],ArrowUp:[0,-4],ArrowDown:[0,4]}[k];
  if(A){e.preventDefault();lvMove(A[0],A[1],e.shiftKey,e.ctrlKey);return;}
@@ -1566,8 +1805,42 @@ document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display
  if(e.ctrlKey||e.altKey)return;
  if(k==='n'||k==='N')lvStepTo(1);else if(k==='p'||k==='P')lvStepTo(-1);else if(k==='1')lvSetStep('c');else if(k==='2')lvSetStep('k');});
 window.addEventListener('beforeunload',()=>{if(LV)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('pagehide',()=>{if(LV&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
-setTab(location.hash.slice(1)||'home');draw();load();poll();loadGd();chkUpd();
+// ---------------- PHONE / iPAD: pairing (on the phone) and the Phone & iPad card (on the computer)
+function phUnpaired(msg){try{localStorage.removeItem('sxh_phone_key');}catch(e){}T='';
+ $('pairmsg').innerHTML=/turned off/.test(msg||'')?'<span style="color:var(--amber)">Phone access is turned off on the laptop (Home &rarr; Phone &amp; iPad).</span>':'';$('pair').classList.add('on');}
+async function phPair(){const v=$('pairpin').value.replace(/\D/g,'');if(v.length!==6){$('pairmsg').textContent='Type the 6 digits from the laptop.';return;}
+ $('pairgo').disabled=true;let r;
+ try{const x=await fetch('/api/phone/pair',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({pin:v})});r=x.ok?await x.json():{ok:false,error:await x.text()};}
+ catch(e){r={ok:false,error:'Can’t reach the laptop. Is this phone on the same Wi-Fi?'};}
+ $('pairgo').disabled=false;if(!r.ok){$('pairmsg').innerHTML='<span style="color:var(--red)">'+esc(r.error)+'</span>';return;}
+ try{localStorage.setItem('sxh_phone_key',r.key);}catch(e){}location.reload();}
+$('pairgo').onclick=phPair;$('pairpin').addEventListener('keydown',e=>{if(e.key==='Enter')phPair();});
+$('pairpin').addEventListener('input',e=>{const v=e.target.value.replace(/\D/g,'').slice(0,6);e.target.value=v;if(v.length===6)phPair();});
+let PHI=null,phT=0;
+async function loadPhone(){if(PH)return;PHI=await getJ('/api/phone');renderPhone();}
+function renderPhone(){const p=PHI,b=$('phbody');if(!p)return;$('phon').checked=!!(p.ok&&p.on);
+ if(!p.ok){b.innerHTML='<div class="warnbox" style="display:block">'+esc(p.error||'')+'</div>';return;}
+ if(!p.on){b.innerHTML='<p class="sub" style="margin:10px 0 0">Off. Tick the box, then open the address it shows in Safari on the iPhone or iPad.</p>';return;}
+ if(!p.running){b.innerHTML='<div class="warnbox" style="display:block">'+esc(p.error||'The phone connection is not running.')+'</div>';return;}
+ const u=a=>'http://'+a+':'+p.port,list=[];
+ if(p.local)list.push('<span class="phaddr">'+esc(u(p.local))+'<small>same at every venue &mdash; try this first</small></span>');
+ p.addrs.forEach(a=>list.push('<span class="phaddr">'+esc(u(a.ip))+'<small>'+esc(a.name)+'</small></span>'));
+ const seen=p.lastSeen?'<p class="sub" style="margin:10px 0 0">Last phone: <b>'+esc(p.lastIp)+'</b>, '+fmtT(p.lastSeen)+'.</p>':'';
+ b.innerHTML='<div class="phgrid"><div><div class="phbox"><h3>ON THE PHONE OR iPAD, OPEN SAFARI AND GO TO</h3>'+(list.length?list.join(''):'<span style="color:var(--red)">This computer isn&rsquo;t on a network right now.</span>')+'</div>'+
+  '<p class="sub" style="margin:10px 0 0">Then <b>Share &rarr; Add to Home Screen</b> for an app icon. The phone and the laptop must be on the <b>same Wi-Fi</b>. Venue Wi-Fi often keeps devices apart &mdash; the surest way is your own small travel router, or the laptop on your iPhone&rsquo;s Personal Hotspot.'+
+  (p.mac?' If macOS asks whether <b>pwsh</b> may accept incoming connections, press <b>Allow</b>.':' The first time, Windows may ask whether <b>PowerShell</b> may use the network &mdash; tick <b>Private networks</b> and press <b>Allow</b>.')+'</p>'+seen+'</div>'+
+  '<div class="phbox" style="text-align:center"><h3>PAIR A PHONE</h3>'+(p.pin?'<div class="phpin">'+esc(p.pin)+'</div><p class="sub" style="margin:4px 0 10px">Type this on the phone. Good for '+Math.max(1,Math.ceil(p.pinLeft/60))+' more min.</p>':
+   '<p class="sub" style="margin:0 0 10px">Each phone or iPad is paired once, with a 6-digit code.</p><button id="phpinb" class="primary" style="padding:10px 22px;font-size:14px">Pair a phone</button>')+
+  '<div style="margin-top:12px"><button id="phunp" class="mini">Unpair all phones</button></div></div></div>';
+ const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await getJ('/api/phone/pin');renderPhone();};
+ $('phunp').onclick=async()=>{if(!await ask('Unpair all phones?','Every paired phone and iPad has to be paired again with a new code.','Unpair'))return;PHI=await api('/api/phone/unpair',{});renderPhone();};}
+$('phon').onchange=async e=>{busy(true,e.target.checked?'Turning on phone access…':'Turning off phone access…');try{PHI=await api('/api/phone/set',{on:e.target.checked});}catch(x){PHI={ok:false,error:'Lost connection.'};}busy(false);renderPhone();};
+if(!PH){loadPhone();setInterval(()=>{if(PHI&&PHI.on&&$('v-home').classList.contains('on')&&!document.hidden)loadPhone();},5000);}
+
+if(__PHONE__&&!T){phUnpaired('');}
+else{setTab(location.hash.slice(1)||'home');draw();load();poll();loadGd();chkUpd();}
 </script></body></html>
 '@
 
@@ -1584,9 +1857,15 @@ try {
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
     try {
-      if ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open ShowXpress Helper from its icon.'; continue }
-      $last = Get-Date
       $path = $req.Url.AbsolutePath
+      # a phone (through the Wi-Fi relay) needs the phone key; everything else needs this window's key
+      $fromPhone = [bool]"$($req.Headers['X-SXH-Phone'])"
+      if ($fromPhone) {
+        if (-not $script:ph.on) { Send-Text $ctx 403 'text/plain' 'Phone access is turned off in ShowXpress Helper.'; continue }
+        if ($phoneNever -contains $path) { Send-Text $ctx 403 'text/plain' 'Only on the computer.'; continue }
+        if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and $req.QueryString['t'] -ceq $script:ph.key)) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
+      } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open ShowXpress Helper from its icon.'; continue }
+      $last = Get-Date
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
       if ($req.HttpMethod -eq 'POST' -and $queueable.ContainsKey($path)) {
@@ -1595,7 +1874,33 @@ try {
         continue
       }
       switch ($path) {
-        '/'            { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token)) }
+        '/'            {
+          if ($fromPhone) { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', '').Replace('__PHONE__', 'true')) }
+          else { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token).Replace('__PHONE__', 'false')) }
+        }
+        '/api/phone'   { Send-Json $ctx (Get-PhoneInfo) }
+        '/api/phone/set' {
+          $script:ph.on = [bool]$body.on; Save-Phone
+          if ($script:ph.on) { Start-PhoneRelay } else { Stop-PhoneRelay; $script:pin = '' }
+          Send-Json $ctx (Get-PhoneInfo)
+        }
+        '/api/phone/pin' {
+          # a new 6-digit code, good for 10 minutes (any number of phones / iPads can use it in that time)
+          $script:pin = '{0:D6}' -f (Get-Random -Minimum 0 -Maximum 1000000); $script:pinUntil = (Get-Date).AddMinutes(10); $script:pinFails = 0
+          Send-Json $ctx (Get-PhoneInfo)
+        }
+        '/api/phone/unpair' { $script:ph.key = New-PhoneKey; Save-Phone; $script:pin = ''; Send-Json $ctx (Get-PhoneInfo) }
+        '/api/phone/pair' {
+          $now = Get-Date
+          if (-not $fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Pairing is for phones.' }; break }
+          if ($now -lt $script:pinLock) { Send-Json $ctx @{ ok = $false; error = 'Too many wrong codes. On the laptop, press "Pair a phone" again for a new code.' }; break }
+          if (-not $script:pin -or $now -gt $script:pinUntil) { Send-Json $ctx @{ ok = $false; error = 'No code is showing on the laptop. In ShowXpress Helper on the laptop, open Home and press "Pair a phone".' }; break }
+          if ("$($body.pin)".Trim() -ceq $script:pin) { $script:pinFails = 0; Save-Phone; Send-Json $ctx @{ ok = $true; key = $script:ph.key }; break }
+          $script:pinFails++
+          if ($script:pinFails -ge 5) { $script:pin = ''; $script:pinLock = $now.AddSeconds(60) }
+          Start-Sleep -Milliseconds 600
+          Send-Json $ctx @{ ok = $false; error = 'That code is not right. Check the 6 digits on the laptop.' }
+        }
         '/brand.png'   {
           $bp = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ShowXpress Helper/brand.png'), (Join-Path $HOME 'AwaazTools/brand.png'), (Join-Path $here 'brand.png')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if ($bp) { Send-Png $ctx $bp } else { Send-Text $ctx 404 'text/plain' 'no brand image' }
@@ -1754,6 +2059,7 @@ try {
     }
   }
 } finally {
+  Stop-PhoneRelay
   Stop-Live
   Stop-Auto
   Remove-Item -LiteralPath $autoStat -ErrorAction SilentlyContinue

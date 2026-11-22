@@ -22,6 +22,26 @@ jobs:
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
           & $iscc windows\aim_movers.iss
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Smoke test (Windows PowerShell 5.1, phone / iPad over the Wi-Fi relay)
+        shell: powershell
+        run: |
+          $T = Join-Path $env:RUNNER_TEMP 'sxh_phone'; New-Item -ItemType Directory -Force $T | Out-Null
+          [IO.File]::WriteAllText("$T\phone.json", '{"on":true,"key":"ci0key0ci0key"}')
+          $gui = Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',"$PWD\src\df_aim_gui.ps1",'-NoBrowser','-Port','47392','-PhonePort','47393','-TestRoot',$T -PassThru -RedirectStandardError "$T\err.log"
+          $P = 'http://127.0.0.1:47393'
+          function Code($u, $body) { try { if ($body) { (Invoke-WebRequest $u -Method Post -Body $body -ContentType 'text/plain' -UseBasicParsing).StatusCode } else { (Invoke-WebRequest $u -UseBasicParsing).StatusCode } } catch { [int]$_.Exception.Response.StatusCode } }
+          for ($i = 0; $i -lt 40 -and (Code "$P/") -ne 200; $i++) { Start-Sleep 1 }
+          $fail = @()
+          if ((Invoke-WebRequest "$P/" -UseBasicParsing).Content -notmatch 'Connect to the laptop') { $fail += 'phone page' }
+          if ((Code "$P/api/sx") -ne 403) { $fail += 'no key not refused' }
+          if ((Invoke-WebRequest "$P/api/sx?t=ci0key0ci0key" -UseBasicParsing).Content -notmatch '"open"') { $fail += 'key refused' }
+          if ((Code "$P/api/phone?t=ci0key0ci0key") -ne 403) { $fail += 'computer-only route open' }
+          if ((Invoke-WebRequest "$P/api/phone/pair" -Method Post -Body '{"pin":"000000"}' -ContentType 'text/plain' -UseBasicParsing).Content -notmatch '"ok":false') { $fail += 'pairing without a code' }
+          if ((Code "$P/api/live/out?t=ci0key0ci0key" '{"l":"k"}') -ne 200) { $fail += 'POST through the relay' }
+          Get-Content "$T\err.log" -ErrorAction SilentlyContinue
+          Stop-Process -Id $gui.Id -Force -ErrorAction SilentlyContinue
+          if ($fail.Count) { throw ('Phone relay: ' + ($fail -join ', ')) }
+          'Phone relay OK'
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -66,6 +86,26 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:47321/)" = 403
           pgrep -f "ShowXpress Helper.app/Contents/MacOS/ShowXpressHelper"
           osascript -e 'quit app id "io.github.aimmovers.app"' || true
+      - name: Smoke test (phone / iPad over the Wi-Fi relay)
+        run: |
+          A="/Applications/ShowXpress Helper.app/Contents"
+          T="$(mktemp -d)"; printf '{"on":true,"key":"ci0key0ci0key"}' > "$T/phone.json"
+          pwsh -NoProfile -File "$A/Resources/df_aim_gui.ps1" -NoBrowser -Port 47392 -PhonePort 47393 -TestRoot "$T" > /tmp/gui2.log 2>&1 &
+          for i in $(seq 40); do curl -s -o /dev/null "http://127.0.0.1:47393/" && break; sleep 1; done
+          P=http://127.0.0.1:47393
+          curl -fsS "$P/" | grep -q "Connect to the laptop"                                        # phone page, served through the relay
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$P/api/sx")" = 403                         # no key -> refused
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$P/api/sx?t=wrong")" = 403
+          curl -fsS "$P/api/sx?t=ci0key0ci0key" | tee /tmp/p.json; echo; grep -q '"open"' /tmp/p.json   # key -> works
+          test "$(curl -s -o /dev/null -w '%{http_code}' "$P/api/phone?t=ci0key0ci0key")" = 403        # computer-only routes
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST --data '{}' "$P/api/update/install?t=ci0key0ci0key")" = 403
+          curl -fsS -X POST -H 'Content-Type: text/plain' --data '{"pin":"000000"}' "$P/api/phone/pair" | tee /tmp/p.json; echo
+          grep -q '"ok":false' /tmp/p.json                                                         # no code showing -> no pairing
+          curl -fsS -X POST -H 'Content-Type: text/plain' --data '{"l":"k"}' "$P/api/live/out?t=ci0key0ci0key"; echo   # POST body through the relay
+          IP="$(ipconfig getifaddr en0 2>/dev/null || true)"
+          if [ -n "$IP" ]; then curl -fsS "http://$IP:47393/api/sx?t=ci0key0ci0key" | grep -q '"open"'; fi   # from the network side too
+          cat /tmp/gui2.log
+          pkill -f "df_aim_gui.ps1 -NoBrowser -Port 47392" || true
       - uses: actions/upload-artifact@v4
         with:
           name: mac

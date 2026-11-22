@@ -4,6 +4,7 @@
 #   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
 #   APC mini -> apc.ps1        Speed Faders -> speed.ps1      Health Check -> health.ps1 (check, fix, revert)
 #   Rig Test -> rig_test.ps1   Pre-show Check -> preshow.ps1
+#   Auto Show -> sx_remote.ps1 (also presses RIG ID / DF CHECK / ROOM CHECK in a running ShowXpress through its remote)
 #   LIVE AIM (Aim Movers tab) -> dmx_out.ps1 drives the DMX interface while ShowXpress is closed; df_aim.ps1 LiveInfo / LiveSave
 # Quits by itself a few minutes after its window is closed.
 param([string]$TestRoot = '', [int]$Port = 47321, [switch]$NoBrowser)
@@ -20,6 +21,7 @@ $preEngine    = Join-Path $here 'preshow.ps1'
 $colorEngine  = Join-Path $here 'color.ps1'
 $gdEngine     = Join-Path $here 'gdrive.ps1'
 $liveEngine   = Join-Path $here 'dmx_out.ps1'
+$remoteEngine = Join-Path $here 'sx_remote.ps1'
 $repo   = 'XSVProductions/showxpress-helper'
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -245,7 +247,10 @@ function Invoke-Action([string]$path, $body) {
       if ($w -lt 20 -or $w -gt 300 -or $d -lt 20 -or $d -gt 300) { return @{ ok = $false; error = 'Size must be 20-300%.'; out = '' } }
       $f = if ($body.force) { ' -Force' } else { '' }
       $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
-      return (Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f$mo")
+      $r = Invoke-Engine "-Action Apply -Size `"$w $d`" -NoPrompt$f$mo"
+      # when ShowXpress is (next) open, show the result: DF CHECK 140 + 251 / ROOM CHECK
+      if ($r.ok) { if ($mo) { Set-PendingPress @('ROOM CHECK') 'ROOM CHECK' } else { Set-PendingPress @('DF CHECK 140', 'DF CHECK 251') 'DF CHECK 140 + 251' } }
+      return $r
     }
     '/api/home' { $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }; return (Invoke-Engine "-Action Home -NoPrompt$mo") }
     '/api/skip/apply' {
@@ -279,6 +284,7 @@ function Invoke-Action([string]$path, $body) {
       return (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
     }
     '/api/rt/install' { return (Invoke-Engine '-Action Install' $rtEngine) }
+    '/api/remote/enable' { return (Invoke-Engine '-Action Enable' $remoteEngine) }
     '/api/rt/apply' {
       $as = [ordered]@{}
       if ($body.assign) { foreach ($pp in $body.assign.PSObject.Properties) { if ($pp.Name -match '^(tl|tr|tm|bl|br|bm)-(l|r)$' -and "$($pp.Value)" -match '^\d+$') { $as[$pp.Name] = "$($pp.Value)" } } }
@@ -307,7 +313,8 @@ $queueable = @{
   '/api/apply' = 'Aim Movers'; '/api/home' = 'Aim Movers (reset)'; '/api/aim/install' = 'ROOM buttons on the SETUP page'
   '/api/color/apply' = "Tonight's Color"; '/api/skip/apply' = 'Skip Flash'; '/api/rig/apply' = "Tonight's Rig"
   '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
-  '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive' }
+  '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive'
+  '/api/remote/enable' = 'ShowXpress remote control' }
 $queue = New-Object Collections.Generic.List[object]
 $qReopen = $true; $qDone = $null; $qClosed = 0
 function Get-QueueKey([string]$path, $body) {
@@ -351,6 +358,73 @@ function Invoke-QueueItems([bool]$reopen) {
   $script:qDone = @{ at = (Get-Date).ToString('s'); results = $res; reopened = [bool]($reo -and $reo.ok); reopenError = $(if ($reo -and -not $reo.ok) { "$($reo.error)" } else { '' }) }
 }
 
+# ---- SHOWXPRESS REMOTE (user 2026-11-22): the Helper presses Live buttons itself (sx_remote.ps1, ShowXpress "External
+# App" TCP remote). Rig Test turns RIG ID on, Aim turns DF AIM / DF CHECK on, and after an aim Apply the CHECK buttons
+# come on by themselves as soon as ShowXpress is open again. Automatic presses never cut a running show (-Idle).
+$titleRx = '^[^"|\r\n]{1,80}$'
+function Invoke-Remote([string]$act, [string[]]$titles = @(), [string]$flags = '') {
+  $ta = if (@($titles).Count) { " -Titles `"$(@($titles) -join '|')`"" } else { '' }
+  $r = Invoke-Engine "-Action $act$ta $flags" $remoteEngine
+  $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+  if ($j) { return ($j | ConvertFrom-Json) }
+  [pscustomobject]@{ ok = $false; error = $(if ($r.error) { $r.error } else { 'No answer from the helper script.' }) }
+}
+$script:pend = $null; $script:pendT = [datetime]::MinValue; $script:remLast = $null
+function Set-PendingPress([string[]]$titles, [string]$label, [int]$secs = 1200) { $script:pend = @{ titles = $titles; label = $label; until = (Get-Date).AddSeconds($secs) } }
+function Step-Pending {
+  $p = $script:pend; if (-not $p) { return }
+  if ((Get-Date) -gt $p.until -or (Test-Auto)) { $script:pend = $null; return }
+  if (((Get-Date) - $script:pendT).TotalSeconds -lt 3 -or -not (Test-SxOpen) -or (Test-Live)) { return }
+  $script:pendT = Get-Date
+  $r = Invoke-Remote 'Press' $p.titles '-Solo -Idle'
+  if ($r.connected -or ($r.PSObject.Properties['ready'] -and -not $r.ready)) {
+    $script:pend = $null
+    $script:remLast = @{ at = (Get-Date).ToString('o'); label = $p.label; ok = [bool]($r.connected -and -not $r.skipped); skipped = [bool]$r.skipped
+                         playing = @($r.playing); error = "$($r.error)" }
+  }
+}
+
+# ---- AUTO SHOW (user 2026-11-22): sx_remote.ps1 -Action Auto runs as a child process and plays the looks from
+# <show>/auto_show.json; commands go to its stdin, it writes its state to a temp file. The Helper doesn't quit while it plays.
+$script:autoP = $null; $autoStat = Join-Path ([IO.Path]::GetTempPath()) "sxh_autoshow_$PID.json"
+function Test-Auto { [bool]($script:autoP -and -not $script:autoP.HasExited) }
+function Get-AutoStatus {
+  $s = $null
+  if (Test-Path -LiteralPath $autoStat) { try { $s = [IO.File]::ReadAllText($autoStat) | ConvertFrom-Json } catch {} }
+  if ($s -and -not (Test-Auto)) { $s.running = $false }
+  $s
+}
+function Stop-Auto {
+  $p = $script:autoP; $script:autoP = $null
+  if (-not $p) { return }
+  try { if (-not $p.HasExited) { $p.StandardInput.WriteLine('q'); if (-not $p.WaitForExit(6000)) { $p.Kill() } } } catch { try { $p.Kill() } catch {} }
+}
+function Send-Auto([string]$c) { if (Test-Auto) { try { $script:autoP.StandardInput.WriteLine($c); return $true } catch {} }; $false }
+function Start-Auto([string]$look) {
+  Stop-Auto
+  Remove-Item -LiteralPath $autoStat -ErrorAction SilentlyContinue
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $psExe
+  $a = "-NoProfile -ExecutionPolicy Bypass -File `"$remoteEngine`" -Action Auto -StatusFile `"$autoStat`""
+  if ($look -match '^[0-9a-f]{8}$') { $a += " -Titles $look" }
+  if ($TestRoot) { $a += " -TestRoot `"$TestRoot`"" }
+  $psi.Arguments = $a; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+  $p = [Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true
+  $script:autoErr = $p.StandardError.ReadToEndAsync(); $script:autoOut = $p.StandardOutput.ReadToEndAsync()
+  $script:autoP = $p
+  for ($i = 0; $i -lt 60; $i++) {   # wait for its first state (or for it to stop with a reason)
+    Start-Sleep -Milliseconds 100
+    $s = Get-AutoStatus
+    if ($s -and $s.running) { return @{ ok = $true; status = $s } }
+    if ($p.HasExited) { break }
+  }
+  $s = Get-AutoStatus
+  if ($s -and $s.error) { return @{ ok = $false; error = "$($s.error)"; status = $s } }
+  if ($p.HasExited) { $e = "$($script:autoErr.Result)".Trim(); Stop-Auto; return @{ ok = $false; error = $(if ($e) { ($e -split "`r?`n")[0] } else { 'The Auto Show didn''t start.' }) } }
+  @{ ok = $true; status = $s }
+}
+
 $html = @'
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>ShowXpress Helper</title>
@@ -366,7 +440,7 @@ h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.3px}h1 span{color:var
 main{max-width:1080px;margin:0 auto;padding:20px 22px 120px;display:grid;gap:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
 .card h2{margin:0 0 4px;font-size:15px;font-weight:650}.sub{color:var(--dim);font-size:13px;margin:0 0 14px}
-.how{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.how div{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:#c7cdd8}.how b{display:block;color:var(--amber);font-size:12px;letter-spacing:.6px;margin-bottom:2px}
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.how div{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:#c7cdd8}.how b:first-child{display:block;color:var(--amber);font-size:12px;letter-spacing:.6px;margin-bottom:2px}.how b:not(:first-child){color:var(--txt)}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.grow{flex:1}
 .group{margin-top:10px}.group h3{font-size:12px;letter-spacing:1px;color:var(--dim);margin:12px 0 8px;font-weight:600}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
@@ -508,13 +582,27 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .lvside .kv{grid-template-columns:40px 1fr;margin:6px 0 8px}.lvside .kv small{color:var(--dim)}
 .lvflip{display:grid;gap:4px;margin:10px 0}
 .lvbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.lvbtns button{padding:8px 10px;font-size:13px}.lvbtns .w2{grid-column:span 2}
+.remrow{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;background:rgba(61,220,132,.05);border:1px solid rgba(61,220,132,.3);font-size:13px;color:#c7cdd8}.remrow.on{display:flex}.remrow b{color:var(--txt)}
+.mini.son{border-color:var(--green);color:var(--green);background:rgba(61,220,132,.1)}
+.aulook{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}.aulook.off{opacity:.55}.aulook.cur{border-color:var(--green);box-shadow:0 0 0 1px rgba(61,220,132,.4)}
+.aun{flex:none;width:24px;height:24px;border-radius:50%;background:#262b36;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}.aulook.cur .aun{background:var(--green);color:#06210f}
+.auchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}.auchips .none{color:#5d6574;font-size:12.5px}
+.auchip{display:inline-flex;align-items:center;gap:2px;background:#0f1217;border:1px solid #3a4150;border-radius:99px;padding:3px 4px 3px 11px;font-size:12.5px}.auchip.bad{border-color:var(--red);color:#ffb3b3}
+.auchip button{border:none;background:transparent;color:var(--dim);padding:0 5px;font-size:12px}.auchip button:hover{color:var(--red)}
+.auplay{background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px}.auplay.on{border-color:rgba(61,220,132,.5)}
+.aubig{font-size:28px;font-weight:700;line-height:1.15}.aubig small{font-size:14px;color:var(--amber);font-weight:600;margin-left:6px}
+.auprog{height:8px;border-radius:99px;background:#1d212a;margin:12px 0;overflow:hidden}.auprog i{display:block;height:100%;background:linear-gradient(90deg,#3ddc84,#ffb020);width:0;transition:width .25s linear}
+.aubeats{display:flex;gap:8px}.aubeats i{width:18px;height:18px;border-radius:50%;background:#262b36}.aubeats i.on{background:var(--amber);box-shadow:0 0 12px rgba(255,176,32,.6)}.aubeats i.on.one{background:var(--green);box-shadow:0 0 12px rgba(61,220,132,.6)}
+.pkl{max-height:52vh;overflow:auto;margin:8px 0 12px}.pkl h4{margin:10px 0 5px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
+.pks{display:flex;flex-wrap:wrap;gap:5px}.pkb{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;cursor:pointer;user-select:none}.pkb:hover{border-color:var(--amber)}.pkb.on{border-color:var(--amber);background:rgba(255,176,32,.12)}.pkb.no{opacity:.4;cursor:not-allowed}
+#aupill{background:rgba(61,220,132,.1);border-color:rgba(61,220,132,.45);color:var(--green)}
 @media (max-width:860px){.clwrap{grid-template-columns:1fr}.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}}
 </style></head><body>
 <header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button></nav>
-  <div class="hright"><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button></div></header>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button></nav>
+  <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
  <div class="view" id="v-home">
@@ -531,6 +619,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
     <button class="ht" data-go="apc"><b>APC mini</b><span>Move pads and pick their colours</span></button>
     <button class="ht" data-go="speed"><b>Speed Faders</b><span>Which fader drives which button</span></button>
     <button class="ht" data-go="health"><b>Health Check</b><span>Find and fix problems in the show</span></button>
+    <button class="ht" data-go="auto"><b>Auto Show</b><span>The Helper changes your looks every few bars while you mix</span></button>
    </div>
   </section>
   <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><button id="gdsync" class="primary" disabled>Sync to Google Drive</button></div></section>
@@ -544,8 +633,9 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
     <div class="how" id="aimhow">
       <div><b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight's dancefloor &mdash; or just <b>one head per T-bar</b>: the head next to it gets the same aim (unless you aim that one too).</div>
       <div><b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size. A copied head gets this too.</div>
-      <div><b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.</div>
+      <div><b>THEN</b>Save, close ShowXpress, press Refresh below, check the heads and Apply &mdash; <b>DF CHECK</b> comes on by itself when ShowXpress opens again.</div>
     </div>
+    <div id="aimrem" class="remrow"></div>
     <div class="lvcall" id="lvcall"><div class="grow"><b>&#9678; Aim live</b> &mdash; aim from here instead of ShowXpress: slow, fine mouse control, and the real head follows as you drag. ShowXpress closes while you aim and opens again when you finish.</div><button id="lvgo" class="primary" style="padding:9px 20px;font-size:14px;white-space:nowrap">&#9678; Aim live</button></div>
     <div class="row"><div id="summary" class="summary grow">Loading&hellip;</div><button id="refresh">&#8635; Refresh</button></div>
     <div id="heads"></div>
@@ -577,8 +667,9 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
  <div class="view" id="v-rt">
   <section class="card">
     <div class="row"><div class="grow"><h2>Rig test &mdash; which mover is where</h2>
-      <p class="sub" style="margin-bottom:0"><b>1.</b> In ShowXpress press <b>RIG ID</b> on the SETUP page &mdash; every 140 lights in its own look (key below). <b>2.</b> Tap each truss spot and pick the look you see on that head. <b>3.</b> Close ShowXpress (save first) and press <b>Save to 2D view</b>.</p></div>
+      <p class="sub" style="margin-bottom:0"><b>1.</b> <b>RIG ID</b> comes on in ShowXpress by itself (green bar below &mdash; or press it on the SETUP page): every 140 lights in its own look (key below). <b>2.</b> Tap each truss spot and pick the look you see on that head. <b>3.</b> Close ShowXpress (save first) and press <b>Save to 2D view</b>.</p></div>
       <span id="rtstate" class="state ok" style="display:none"></span><button id="rtrefresh">&#8635; Refresh</button></div>
+    <div id="rtrem" class="remrow" style="margin:12px 0 0"></div>
     <div id="rterr" class="warnbox"></div>
     <div id="rtinst" class="warnbox"></div>
     <div id="rtlegend" class="legend2"></div>
@@ -673,6 +764,23 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
   </section>
  </div>
 
+ <div class="view" id="v-auto">
+  <section class="card">
+   <div class="row"><div class="grow"><h2>Auto Show</h2><p class="sub" style="margin:0">The Helper presses your <b>looks</b> in ShowXpress one after another, each for a number of bars &mdash; for the stretches when you&rsquo;re busy mixing. A look is a few buttons that play together (a movement, a colour, uplights&hellip;). Whatever you press yourself on the APC still works on top. Tap the BPM to the music and press <b>Bar 1 now</b> on a downbeat to line the changes up.</p></div><span id="austate" class="state ok" style="display:none"></span></div>
+   <div id="auerr" class="warnbox"></div><div id="aurem" class="warnbox"></div>
+   <div id="auplay" class="auplay"></div>
+  </section>
+  <section class="card">
+   <div class="row"><div class="grow"><h2>Looks</h2><p class="sub" style="margin:0" id="ausum"></p></div><button id="aunew">+ New look</button><button id="augrab">&#8681; New look from what&rsquo;s playing</button></div>
+   <div id="aulooks"></div>
+   <div class="row" style="margin-top:16px;gap:14px">
+    <span class="sub" style="margin:0">Order</span><div class="seg"><button data-ao="order">In order</button><button data-ao="shuffle">Shuffle</button></div>
+    <span class="sub" style="margin:0">When I stop</span><select id="austop" style="width:auto"><option value="keep">Leave the last look playing</option><option value="off">Turn the look off</option></select>
+    <label class="link"><input type="checkbox" id="auclean"> At start, turn off everything else that&rsquo;s playing</label></div>
+   <div id="aumsg" class="sub" style="margin:10px 0 0"></div>
+  </section>
+ </div>
+
  <div class="view" id="v-health">
   <section class="card">
     <h2>Show health check</h2>
@@ -695,6 +803,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
   <div class="in" data-for="rig"><button id="rgsave" class="primary">Save tonight's rig</button><button id="rgall">All heads (put back)</button><button id="rgundo">Undo changes</button><div class="hint grow" id="rghint"></div></div>
   <div class="in" data-for="apc"><button id="apsave" class="primary">Save pads</button><button id="apundo">Undo changes</button><div class="hint grow" id="aphint"></div></div>
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
+  <div class="in" data-for="auto"><button id="ausave" class="primary">Save Auto Show</button><button id="auundo">Undo changes</button><div class="hint grow" id="auhint"></div></div>
   <div class="in" data-for="health"><button id="hlrun" class="primary">Check again</button><div class="hint grow" id="hlhint"></div></div></div>
 <div class="live" id="live">
  <div class="lvtop"><b class="lvt">&#9678; LIVE AIM</b><span id="lvmode" class="sub" style="margin:0"></span><span id="lvif" class="tag amber"></span><div class="grow"></div>
@@ -720,6 +829,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
  </div>
 </div>
 <div class="modal" id="rtpick"><div class="box" style="max-width:540px"><h2 id="rtpt"></h2><p class="sub" style="margin:0 0 4px">Pick the look you see on this head.</p><div id="rtpb"></div><div class="row" style="justify-content:flex-end"><button id="rtpnone">Nothing hung here</button><button id="rtpcancel">Cancel</button></div></div></div>
+<div class="modal" id="aupk"><div class="box" style="max-width:660px;width:92vw"><h2 id="aupkt"></h2><input id="aupks" class="srch" placeholder="Search buttons&hellip;" style="width:100%"><div id="aupkl" class="pkl"></div><div class="row" style="justify-content:flex-end"><button id="aupkd" class="primary" style="padding:9px 18px;font-size:14px">Done</button></div></div></div>
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
 <div class="gone" id="gone"><h2 style="color:var(--txt)">ShowXpress Helper has closed</h2><p>Open it again from its icon.</p></div>
@@ -768,12 +878,12 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
   $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; the Helper does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','prefix','roominstall','sx','update'];
+ const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','prefix','roominstall','sx','update','remote','auto'];
  if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='live'?'Live aim didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened'}[what]);
-  const use=['rig','apc','speed','rt','install','color','roominstall'].includes(what),chk=['fix','revert'].includes(what);
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
+  const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert'].includes(what);
   $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(use||chk?'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(use?'use':'check')+' it.</p>':'');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
@@ -781,7 +891,7 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
  else{const tot=lines.find(l=>/movement scenes checked/.test(l))||'';const ch=lines.filter(l=>/\s[1-9]\d* values changed/.test(l)).map(l=>l.trim().replace(/\s{2,}/g,' — '));
   const wr=lines.filter(l=>/WARNING/.test(l)).map(l=>l.replace(/^\s*WARNING:\s*/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(what==='home'?'Everything is back to normal':'Applied to the show');
-  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+esc(tot.replace(/^\s*->\s*/,''))+'. '+(what==='home'?'':aimMode==='room'?'Open ShowXpress and check <b>ROOM CHECK</b> &mdash; the beams should trace the edge you aimed.':'Open ShowXpress and check <b>DF CHECK 140</b> / <b>DF CHECK 251</b> &mdash; the beams should trace the floor corners.')+'</p>'+
+  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+esc(tot.replace(/^\s*->\s*/,''))+'. '+(what==='home'?'':aimMode==='room'?'When ShowXpress opens, <b>ROOM CHECK</b> comes on by itself (with the remote on) &mdash; the beams should trace the edge you aimed.':'When ShowXpress opens, <b>DF CHECK 140</b> + <b>DF CHECK 251</b> come on by themselves (with the remote on) &mdash; the beams should trace the floor corners.')+'</p>'+
    (ch.length?'<ul>'+ch.map(c=>'<li>'+esc(c)+'</li>').join('')+'</ul>':'')+(wr.length?'<div class="warnbox" style="display:block">'+wr.map(esc).join('<br>')+'</div>':'');}
  box.scrollIntoView({behavior:'smooth'});}
 $('apply').onclick=async()=>{let force=false;const w=P.heads.filter(h=>h.warn);
@@ -809,6 +919,7 @@ async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e
 function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
  LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');loadGd();}
 async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r.open;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+ remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
  updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();
@@ -816,12 +927,14 @@ async function poll(){try{const r=await api('/api/sx');const was=sxOpen;sxOpen=r
  catch(e){if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre'];
-function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto'];
+let lastTab='';
+function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='home')loadGd();}
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='home')loadGd();
+ if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 $('logo').onclick=$('ttl').onclick=()=>setTab('home');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
@@ -1082,13 +1195,183 @@ async function preFix(k){const i=PRE.find(x=>x.fix&&x.fix.key===k);if(!i)return;
 $('prerun').onclick=()=>{H=null;loadPre();};$('pregd').onclick=()=>gdSync();
 
 // ---------------- Aim Movers: Dance Floor / Room
-const AIMTXT={floor:{t:'Dance floor &mdash; tonight\'s aims',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight\'s dancefloor &mdash; or just <b>one head per T-bar</b>: the head next to it gets the same aim (unless you aim that one too).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size. A copied head gets this too.','<b>THEN</b>Save, close ShowXpress, press Refresh below and check the heads.'],
+const AIMTXT={floor:{t:'Dance floor &mdash; tonight\'s aims',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the center of tonight\'s dancefloor &mdash; or just <b>one head per T-bar</b>: the head next to it gets the same aim (unless you aim that one too).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the same corner (front-left from the DJ) to set its size. A copied head gets this too.','<b>THEN</b>Save, close ShowXpress, press Refresh below, check the heads and Apply &mdash; <b>DF CHECK</b> comes on by itself when ShowXpress opens again.'],
   depth:'Depth',size:'100% = patterns reach the corners you aimed. Lower keeps them a bit inside the floor.',svg:'dashed = dancefloor · amber = patterns'},
- room:{t:'Room &mdash; AROUND ROOM for tonight',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the middle of where AROUND ROOM should sweep (the walls around the room).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the front-left edge of that sweep (from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below, Apply, and check with <b>ROOM CHECK</b>.'],
+ room:{t:'Room &mdash; AROUND ROOM for tonight',how:['<b>STEP 1 &middot; CENTER</b>Aim every head at the middle of where AROUND ROOM should sweep (the walls around the room).','<b>STEP 2 &middot; CORNER</b>Optional: aim a head at the front-left edge of that sweep (from the DJ) to set its size.','<b>THEN</b>Save, close ShowXpress, press Refresh below and Apply &mdash; <b>ROOM CHECK</b> comes on by itself when ShowXpress opens again.'],
   depth:'Height',size:'100% = AROUND ROOM reaches the edge you aimed. Width = across the room, Height = up and down the walls.',svg:'dashed = what you aimed · amber = AROUND ROOM'}};
 function aimTxt(){const x=AIMTXT[aimMode];$('aimttl').innerHTML=x.t;$('aimhow').innerHTML=x.how.map(h=>'<div>'+h+'</div>').join('');$('dlab').textContent=x.depth;$('sizesub').textContent=x.size;$('svgl').textContent=x.svg;$('aimsc').textContent=aimMode==='room'?'ROOM AIM (ADJUST)':'DF AIM (ADJUST)';}
 document.querySelectorAll('[data-am]').forEach(b=>b.onclick=()=>{if(aimMode===b.dataset.am)return;aimMode=b.dataset.am;document.querySelectorAll('[data-am]').forEach(x=>x.classList.toggle('on',x===b));
- aimTxt();$('aiminst').style.display='none';$('heads').innerHTML='';$('warnbox').style.display='none';$('result').className='card result';P=PM[aimMode];LD[aimMode]=0;render();load();});
+ aimTxt();remRefresh('aim',sxOpen&&!remRecent());$('aiminst').style.display='none';$('heads').innerHTML='';$('warnbox').style.display='none';$('result').className='card result';P=PM[aimMode];LD[aimMode]=0;render();load();});
+
+// ---------------- ShowXpress remote (sx_remote.ps1): the Helper presses buttons in ShowXpress itself
+let PEND=false,REMSEEN=null,REMAT=0,remWait=0,remBusy=false;const REMR={},REMBOX={rt:'rtrem',aim:'aimrem'};
+function remSets(t){if(t==='rt')return [{label:'RIG ID',titles:['RIG ID']}];
+ return aimMode==='room'?[{label:'ROOM AIM (ADJUST)',titles:['ROOM AIM (ADJUST)']},{label:'ROOM CHECK',titles:['ROOM CHECK']}]
+  :[{label:'DF AIM (ADJUST)',titles:['DF AIM (ADJUST)']},{label:'DF CHECK 140 + 251',titles:['DF CHECK 140','DF CHECK 251']}];}
+function curTab(){const b=document.querySelector('.tabs button.on');return b?b.dataset.tab:'home';}
+const isSetup=p=>/^\s*setup\s*$/i.test(p||'');
+function remRecent(){return PEND||(REMAT&&Date.now()-REMAT<60000);}
+async function remGet(p,b){try{return await api(p,b);}catch(e){return {ok:false,error:'Lost connection.'};}}
+async function remRefresh(t,auto){if(!REMBOX[t])return null;const sets=remSets(t),box=$(REMBOX[t]);
+ if(!REMR[t]){box.className='remrow on';box.innerHTML='<span>Checking ShowXpress&hellip;</span>';}
+ const doAuto=auto&&sxOpen&&!(AUS&&AUS.running)&&!PEND;
+ const r=doAuto?await remGet('/api/remote/press',{titles:sets[0].titles,solo:true,idle:true}):await remGet('/api/remote');
+ r.auto=doAuto;if(doAuto&&r.connected&&!r.skipped&&(r.pressedNow||[]).length)r.note='&#10003; Turned on by the Helper.';
+ REMR[t]=r;if(curTab()===t)remDraw(t);return r;}
+function remDraw(t){const box=$(REMBOX[t]),r=REMR[t],sets=remSets(t);box.className='remrow on';if(!r){box.innerHTML='';return;}let h;
+ if(r.ok===false&&!r.setup)h='<div class="grow">'+esc(r.error||'')+'</div><button class="mini" data-rem="retry">Try again</button>';
+ else if(!r.ready)h='<div class="grow"><b>Let the Helper press '+esc(sets.map(s=>s.label).join(' / '))+' for you.</b> Turn on ShowXpress remote control once &mdash; it&rsquo;s saved in the show'+(sxOpen?' (done when ShowXpress next closes).':'.')+'</div><button class="mini primary" data-rem="enable">Turn on remote control</button>';
+ else if(!r.open)h='<div class="grow">ShowXpress is closed. Open it and the Helper turns on <b>'+esc(sets[0].label)+'</b> by itself.</div><button class="mini" data-rem="launch">&#9654; Launch ShowXpress</button>';
+ else if(!r.connected)h='<div class="grow">'+esc(r.error||'')+'</div><button class="mini" data-rem="retry">Try again</button>';
+ else{const on=new Set((r.pressed||[]).map(p=>p.title)),have=new Set(r.titles||[]),cur=sets.find(s=>s.titles.every(x=>on.has(x)));
+  h='<div class="grow">'+(r.note?r.note+' ':'')+(r.skipped?'<b style="color:var(--amber)">Your show is playing</b> ('+esc((r.playing||[]).slice(0,4).join(', '))+((r.playing||[]).length>4?'&hellip;':'')+') &mdash; the Helper didn&rsquo;t press anything, so it isn&rsquo;t cut. ':'')+
+   (cur?'<b style="color:var(--green)">&#9679; '+esc(cur.label)+'</b> is on in ShowXpress.':on.size?'Playing: '+esc([...on].slice(0,5).join(', '))+(on.size>5?'&hellip;':''):'Nothing is playing in ShowXpress.')+'</div>'+
+   sets.map((s,i)=>{const miss=s.titles.some(x=>!have.has(x));return '<button class="mini'+(cur===s?' son':'')+'" data-rem="set" data-i="'+i+'"'+(miss?' disabled title="Not in the show yet"':'')+'>'+esc(s.label)+'</button>';}).join('')+
+   (on.size?'<button class="mini" data-rem="off">All off</button>':'');}
+ box.innerHTML=h;box.querySelectorAll('[data-rem]').forEach(b=>b.onclick=()=>remAct(t,b.dataset.rem,+b.dataset.i));}
+async function remEnable(after){if(!await ask('Turn on ShowXpress remote control?','Lets the Helper press buttons in ShowXpress (RIG ID, DF CHECK, ROOM CHECK, Auto Show). It switches on <b>External App</b> in ShowXpress and remote access for every Live page, with a password only the Helper uses. Only this computer connects to it.'+(sxOpen?'<br><br>ShowXpress is open, so it&rsquo;s done when you next close it.':''),'Turn it on'))return;
+ await saveTo('/api/remote/enable',{},'Turning on the remote…',after,'remote');}
+async function remAct(t,k,i){const sets=remSets(t),r=REMR[t];
+ if(k==='retry')return remRefresh(t,false);
+ if(k==='launch')return sxLaunch();
+ if(k==='enable')return remEnable(async()=>{await remRefresh(t,false);});
+ if(k==='off'){if(!await ask('Turn everything off?','Releases every button that is playing in ShowXpress.'+(AUS&&AUS.running?' The Auto Show keeps playing &mdash; stop it in its tab.':''),'All off'))return;
+  REMR[t]=await remGet('/api/remote/off',{});remDraw(t);return;}
+ if(k==='set'){const s=sets[i],pl=((r&&r.pressed)||[]).filter(p=>!isSetup(p.page)&&!s.titles.includes(p.title)).map(p=>p.title);
+  if(pl.length&&!await ask('Turn off what is playing?','<b>'+esc(pl.slice(0,6).join(', '))+(pl.length>6?'&hellip;':'')+'</b> '+(pl.length>1?'are':'is')+' playing. Turning on '+esc(s.label)+' turns '+(pl.length>1?'them':'it')+' off.','Turn on '+s.label))return;
+  REMR[t]=await remGet('/api/remote/press',{titles:s.titles,solo:true});remDraw(t);}}
+function remPoll(r,was){PEND=!!r.pend;const a=AUS;AUS=r.auto||null;auPill();if(curTab()==='auto'&&(!!(a&&a.running)!==!!(AUS&&AUS.running)))auPlay();
+ if(r.rem){REMAT=Date.parse(r.rem.at)||0;if(REMSEEN!==null&&r.rem.at!==REMSEEN){const t=curTab(),m=r.rem;
+   const msg=m.ok?'&#10003; The Helper turned on <b>'+esc(m.label)+'</b> &mdash; check the beams.':m.skipped?'Your show was playing, so <b>'+esc(m.label)+'</b> wasn&rsquo;t turned on.':'';
+   if(REMBOX[t])remRefresh(t,false).then(x=>{if(x&&msg){x.note=msg;remDraw(t);}});}
+  REMSEEN=r.rem.at;}else if(REMSEEN===null)REMSEEN='';
+ if(!was&&r.open)remWait=Date.now();
+ if(was&&!r.open){for(const k in REMBOX)if(REMR[k]){REMR[k]=null;if(curTab()===k)remRefresh(k,false);}}
+ const t=curTab();
+ if(remWait&&REMBOX[t]&&r.open&&!remBusy){if(Date.now()-remWait>90000)remWait=0;
+  else if(!REMR[t]||!REMR[t].connected||(!REMR[t].auto&&!remRecent())){remBusy=true;remRefresh(t,!remRecent()).then(x=>{remBusy=false;if(x&&(x.connected||x.ready===false))remWait=0;});}}}
+
+// ---------------- Auto Show (sx_remote.ps1 -Action Auto, settings in <show>/auto_show.json)
+let AU=null,auC=null,AUS=null,auTried=[],auTaps=[],auPk=-1,auStF=false,auLastId='',auBpmT=0;
+const AUBARS=[1,2,4,8,12,16,24,32,48,64];
+const rid=()=>Array.from({length:8},()=>'0123456789abcdef'[Math.random()*16|0]).join('');
+const clone=o=>JSON.parse(JSON.stringify(o));
+function auDirty(){return !!(AU&&AU.ok&&auC&&JSON.stringify(auC)!==JSON.stringify(AU.config));}
+async function loadAuto(){$('ausum').textContent='Loading…';AU=await getJ('/api/auto');if(AU.ok){auC=clone(AU.config);if(AU.status)AUS=AU.status;}renderAuto();}
+function auBtn(t){return AU.buttons.find(b=>b.title===t&&!b.dup);}
+function auSec(l){return l.bars*4*60/auC.bpm;}
+// ShowXpress "swap" page (MOVEMENTS): one button at a time - several of them in one look can't play together
+function auClash(l){const g={};for(const x of l.titles){const b=auBtn(x);if(b&&b.swap)(g[b.page]=g[b.page]||[]).push(x);}return Object.entries(g).filter(e=>e[1].length>1);}
+function auSplit(i){const l=auC.looks[i],cl=auClash(l);if(!cl.length)return 0;const[pg,many]=cl.sort((a,b)=>b[1].length-a[1].length)[0];
+ const rest=l.titles.filter(x=>!many.includes(x)),one=new Set(many);
+ const nl=many.map((m,k)=>({id:k?rid():l.id,name:(many.length>1?m:l.name).slice(0,40),bars:l.bars,on:l.on,titles:rest.filter(x=>!(auBtn(x)&&auBtn(x).swap&&auBtn(x).page===pg)).concat([m])}));
+ auC.looks.splice(i,1,...nl);return nl.length;}
+async function auAskSplit(i){const l=auC.looks[i],cl=auClash(l);if(!cl.length)return;const[pg,many]=cl.sort((a,b)=>b[1].length-a[1].length)[0];
+ if(!await ask('Make each one its own look?','<b>'+esc(pg)+'</b> plays one button at a time in ShowXpress, so <b>'+many.length+'</b> of them in one look can&rsquo;t play together &mdash; only the last would stay on.<br><br>Split it into <b>'+many.length+' looks</b> ('+esc(many.join(', '))+')'+(l.titles.length>many.length?', each keeping the other buttons of this look':'')+', so the Auto Show cycles through them?','Split into '+many.length+' looks'))return;
+ const n=auSplit(i);auMsg('&#10003; Split into '+n+' looks of '+l.bars+' bars. Save to keep it.');auLooks();auPlay();updAuto();}
+function fmtS(s){s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+function auMsg(h){$('aumsg').innerHTML=h||'';}
+function renderAuto(){if(!AU)return;
+ if(showErr('auerr',AU)){['aulooks','auplay'].forEach(i=>$(i).innerHTML='');$('ausum').textContent='';updAuto();return;}
+ const rb=$('aurem');
+ if(!AU.ready){rb.style.display='block';rb.innerHTML='The ShowXpress remote is off, so the Auto Show can&rsquo;t press anything yet. <button class="mini primary" id="auen" style="margin-left:8px">Turn on remote control</button>';$('auen').onclick=()=>remEnable(loadAuto);}
+ else rb.style.display='none';
+ document.querySelectorAll('[data-ao]').forEach(b=>b.classList.toggle('on',b.dataset.ao===auC.order));$('austop').value=auC.stop;$('auclean').checked=!!auC.clean;
+ auLooks();auPlay();$('foot').textContent='Show: '+AU.show+' · Auto Show settings are kept in the show folder (auto_show.json)';updAuto();}
+function auLooks(){const L=auC.looks,run=!!(AUS&&AUS.running);
+ const act=L.filter(l=>l.on&&l.titles.length);
+ $('ausum').innerHTML=L.length?'<b>'+act.length+'</b> of '+L.length+' look'+(L.length>1?'s':'')+' in the show &middot; one round &asymp; <b>'+fmtS(act.reduce((a,l)=>a+auSec(l),0))+'</b> at '+auC.bpm+' BPM':'';
+ if(!L.length){$('aulooks').innerHTML='<p class="sub" style="margin:12px 0 0">No looks yet. A look is what plays at the same time &mdash; e.g. one movement + a colour + the uplights. To cycle through movements, make one look per movement. Build one in ShowXpress, then press <b>New look from what&rsquo;s playing</b> &mdash; or press <b>+ New look</b> and pick the buttons.</p>';return;}
+ $('aulooks').innerHTML=L.map((l,i)=>{const cur=run&&AUS.lookId===l.id,bars=AUBARS.includes(l.bars)?AUBARS:[...AUBARS,l.bars].sort((a,b)=>a-b);
+  const chips=l.titles.map((x,j)=>{const b=auBtn(x),bad=!b?'Not in the show (renamed or deleted?)':!b.reach?'Its page can’t be reached by the remote - turn the remote on again':'';
+   return '<span class="auchip'+(bad?' bad':'')+'" title="'+esc(bad||b.page)+'">'+esc(x)+'<button data-ad="'+i+'" data-j="'+j+'" title="Take it out of this look">&#10005;</button></span>';}).join('');
+  return '<div class="aulook'+(l.on?'':' off')+(cur?' cur':'')+'"><div class="row"><span class="aun">'+(i+1)+'</span><input class="srch" data-ln="'+i+'" value="'+esc(l.name)+'" maxlength="40" style="width:190px">'+
+   '<select data-lb="'+i+'" style="width:auto">'+bars.map(b=>'<option value="'+b+'"'+(b===l.bars?' selected':'')+'>'+b+' bar'+(b>1?'s':'')+'</option>').join('')+'</select><span class="sub" style="margin:0" data-ls="'+i+'">&asymp; '+fmtS(auSec(l))+'</span><div class="grow"></div>'+
+   '<label class="link"><input type="checkbox" data-lo="'+i+'"'+(l.on?' checked':'')+'> In the show</label>'+
+   '<button class="mini" data-la="try" data-i="'+i+'"'+(l.titles.length?'':' disabled')+'>&#9654; '+(run?'Play now':'Try')+'</button><button class="mini" data-la="up" data-i="'+i+'"'+(i?'':' disabled')+' title="Move up">&uarr;</button><button class="mini" data-la="down" data-i="'+i+'"'+(i<L.length-1?'':' disabled')+' title="Move down">&darr;</button><button class="mini" data-la="copy" data-i="'+i+'">Copy</button><button class="mini" data-la="del" data-i="'+i+'">Delete</button></div>'+
+   (auClash(l).length?'<div class="row" style="margin-top:8px;color:var(--amber);font-size:13px"><div class="grow">&#9888; '+auClash(l).map(c=>'<b>'+esc(c[0])+'</b> plays one button at a time &mdash; only <b>'+esc(c[1][c[1].length-1])+'</b> of these '+c[1].length+' would play.').join(' ')+'</div><button class="mini primary" data-la="split" data-i="'+i+'">Split into one look each</button></div>':'')+
+   '<div class="auchips">'+(chips||'<span class="none">No buttons yet &mdash;</span>')+'<button class="mini" data-la="add" data-i="'+i+'">+ Button</button><button class="mini" data-la="grab" data-i="'+i+'" title="Use the buttons playing in ShowXpress now">&#8681; What&rsquo;s playing</button></div></div>';}).join('');
+ const q=s=>$('aulooks').querySelectorAll(s);
+ q('[data-ln]').forEach(e=>e.oninput=()=>{auC.looks[+e.dataset.ln].name=e.value;updAuto();});
+ q('[data-lb]').forEach(e=>e.onchange=()=>{auC.looks[+e.dataset.lb].bars=+e.value;auLooks();updAuto();});
+ q('[data-lo]').forEach(e=>e.onchange=()=>{auC.looks[+e.dataset.lo].on=e.checked;auLooks();auPlay();updAuto();});
+ q('[data-ad]').forEach(e=>e.onclick=()=>{auC.looks[+e.dataset.ad].titles.splice(+e.dataset.j,1);auLooks();updAuto();});
+ q('[data-la]').forEach(e=>e.onclick=()=>auLookAct(e.dataset.la,+e.dataset.i));}
+async function auGrab(){const r=await remGet('/api/remote');
+ if(!r.connected){auMsg('<span style="color:var(--amber)">'+esc(!r.ready&&r.setup?'The ShowXpress remote is off.':r.error||'ShowXpress isn’t answering.')+'</span>');return null;}
+ const ts=[...new Set((r.pressed||[]).filter(p=>!isSetup(p.page)).map(p=>p.title))];
+ if(!ts.length){auMsg('<span style="color:var(--amber)">Nothing is playing in ShowXpress (SETUP page buttons don&rsquo;t count). Press the buttons for the look there first.</span>');return null;}
+ auMsg('');return ts.slice(0,24);}
+async function auLookAct(k,i){const L=auC.looks,l=L[i];
+ if(k==='up'&&i>0){[L[i-1],L[i]]=[L[i],L[i-1]];}
+ else if(k==='down'&&i<L.length-1){[L[i+1],L[i]]=[L[i],L[i+1]];}
+ else if(k==='copy'){const c=clone(l);c.id=rid();c.name=(l.name+' copy').slice(0,40);L.splice(i+1,0,c);}
+ else if(k==='del'){if(!await ask('Delete '+l.name+'?','The look is taken out of the Auto Show (nothing in ShowXpress changes). Undo changes brings it back until you save.','Delete'))return;L.splice(i,1);}
+ else if(k==='add'){auPick(i);return;}
+ else if(k==='split'){await auAskSplit(i);return;}
+ else if(k==='grab'){const ts=await auGrab();if(!ts)return;l.titles=ts;auMsg('&#10003; <b>'+esc(l.name)+'</b> now uses what&rsquo;s playing: '+esc(ts.join(', ')));}
+ else if(k==='try'){await auTry(l);return;}
+ auLooks();auPlay();updAuto();}
+async function auTry(l){
+ if(AUS&&AUS.running){if(auDirty()&&!(await auSave(true)))return;const r=await remGet('/api/auto/cmd',{cmd:'go',v:l.id});if(r.status){AUS=r.status;auPlay();auLooks();}if(!r.ok)auMsg('<span style="color:var(--red)">'+esc(r.error)+'</span>');return;}
+ const r=await remGet('/api/remote/press',{titles:l.titles,release:auTried.filter(x=>!l.titles.includes(x))});
+ if(!r.connected){auMsg('<span style="color:var(--amber)">'+esc(!r.ready&&r.setup?'The ShowXpress remote is off.':r.error||'ShowXpress isn’t answering.')+'</span>');return;}
+ auTried=l.titles.slice();auMsg('&#9654; Trying <b>'+esc(l.name)+'</b> in ShowXpress'+((r.missing||[]).length?' &mdash; <span style="color:var(--red)">not in the show: '+esc(r.missing.join(', '))+'</span>':'')+'. Press Try on another look to switch.');}
+function auPick(i){auPk=i;$('aupkt').textContent='Buttons in '+auC.looks[i].name;$('aupks').value='';auPickDraw();$('aupk').style.display='flex';setTimeout(()=>$('aupks').focus(),50);}
+function auPickDraw(){const l=auC.looks[auPk],q=$('aupks').value.trim().toLowerCase(),on=new Set(l.titles),pages=[];
+ for(const b of AU.buttons){if(isSetup(b.page))continue;if(q&&!b.title.toLowerCase().includes(q)&&!b.page.toLowerCase().includes(q))continue;let g=pages.find(x=>x.p===b.page);if(!g){g={p:b.page,bs:[]};pages.push(g);}g.bs.push(b);}
+ $('aupkl').innerHTML=pages.length?pages.map(g=>'<h4>'+esc(g.p)+(g.bs[0].swap?' &middot; one at a time':'')+'</h4><div class="pks">'+g.bs.map(b=>{const no=b.dup?'Same name as another button - ShowXpress can only press the first one. Rename one in ShowXpress.':!b.reach?'This page can’t be reached by the remote yet':'';
+  return '<span class="pkb'+(on.has(b.title)&&!b.dup?' on':'')+(no?' no':'')+'"'+(no?' title="'+esc(no)+'"':' data-pk2="'+esc(b.title)+'"')+'>'+esc(b.title)+'</span>';}).join('')+'</div>').join(''):'<p class="sub">No button matches.</p>';
+ $('aupkl').querySelectorAll('[data-pk2]').forEach(e=>e.onclick=()=>{const x=e.dataset.pk2,ts=l.titles,j=ts.indexOf(x);if(j>=0)ts.splice(j,1);else if(ts.length<24)ts.push(x);e.classList.toggle('on',ts.includes(x));});}
+$('aupks').oninput=auPickDraw;$('aupkd').onclick=async()=>{$('aupk').style.display='none';auLooks();auPlay();updAuto();if(auPk>=0&&auC.looks[auPk])await auAskSplit(auPk);};
+$('aunew').onclick=()=>{if(!auC)return;auC.looks.push({id:rid(),name:'Look '+(auC.looks.length+1),bars:16,on:true,titles:[]});auLooks();updAuto();auPick(auC.looks.length-1);};
+$('augrab').onclick=async()=>{if(!auC)return;const ts=await auGrab();if(!ts)return;auC.looks.push({id:rid(),name:'Look '+(auC.looks.length+1),bars:16,on:true,titles:ts});auLooks();auPlay();updAuto();
+ auMsg('&#10003; New look <b>Look '+auC.looks.length+'</b>: '+esc(ts.join(', '))+'. Give it a name and save.');};
+document.querySelectorAll('[data-ao]').forEach(b=>b.onclick=()=>{if(!auC)return;auC.order=b.dataset.ao;document.querySelectorAll('[data-ao]').forEach(x=>x.classList.toggle('on',x===b));updAuto();});
+$('austop').onchange=e=>{if(auC){auC.stop=e.target.value;updAuto();}};$('auclean').onchange=e=>{if(auC){auC.clean=e.target.checked;updAuto();}};
+function auSetBpm(v,live){v=Math.round(Math.max(40,Math.min(220,+v||124))*10)/10;auC.bpm=v;const e=$('aubpm');if(e&&document.activeElement!==e)e.value=v;auLooks();updAuto();
+ if(live&&AUS&&AUS.running){clearTimeout(auBpmT);auBpmT=setTimeout(async()=>{const r=await remGet('/api/auto/cmd',{cmd:'bpm',v:String(v)});if(r.status)AUS=r.status;},350);}}
+function auTap(){const n=Date.now();if(auTaps.length&&n-auTaps[auTaps.length-1]>2000)auTaps=[];auTaps.push(n);if(auTaps.length>9)auTaps.shift();
+ if(auTaps.length>=3){const d=(auTaps[auTaps.length-1]-auTaps[0])/(auTaps.length-1);auSetBpm(Math.round(60000/d),true);}
+ const b=$('autap');if(b)b.textContent='Tap'+(auTaps.length<3?' ('+(3-auTaps.length)+' more)':' ✓');}
+function auPlay(){const el=$('auplay');if(!AU||!AU.ok||!auC){el.innerHTML='';return;}const s=AUS,run=!!(s&&s.running);el.className='auplay'+(run?' on':'');
+ const act=auC.looks.filter(l=>l.on&&l.titles.length);
+ const bpm='<span class="sub" style="margin:0">BPM</span><input id="aubpm" class="num" type="number" min="40" max="220" step="1" value="'+auC.bpm+'"><button class="mini" id="autap" title="Tap along with the beat (3 taps or more)">Tap</button>';
+ if(!run){el.innerHTML='<div class="row"><div class="grow"><div class="aubig">Not playing</div><div class="sub" style="margin:2px 0 0">'+(act.length?act.length+' look'+(act.length>1?'s':'')+' ready &middot; '+(auC.order==='shuffle'?'shuffled':'in order'):'Add a look below to start.')+'</div>'+
+   (s&&s.error?'<div style="color:var(--red);margin-top:4px">'+esc(s.error)+'</div>':'')+'</div>'+bpm+
+   (act.length?'<select id="aufirst" style="width:auto">'+act.map(l=>'<option value="'+l.id+'">Start with '+esc(l.name)+'</option>').join('')+'</select>':'')+
+   '<button class="primary" id="austart"'+(act.length&&AU.ready?'':' disabled')+'>&#9654; Start Auto Show</button></div>';
+  $('austart').onclick=auStart;}
+ else{el.innerHTML='<div class="row"><div class="grow"><div class="sub" style="margin:0;letter-spacing:1px;font-size:11.5px">NOW PLAYING</div><div class="aubig" id="auname"></div><div class="sub" id="aunext" style="margin:2px 0 0"></div><div id="auwarn" style="color:var(--amber);font-size:13px"></div></div><div class="aubeats" id="aubeats"><i></i><i></i><i></i><i></i></div></div>'+
+   '<div class="auprog"><i id="aupr"></i></div><div class="row"><button id="auprev" title="The look before">&#9198; Back</button><button id="aunextb" class="primary" style="padding:9px 18px;font-size:14px">&#9197; Next look</button><button id="auhold"></button><button id="ausync" title="Press on the first beat of a bar: the bar count starts again from here">Bar 1 now</button><div class="grow"></div>'+bpm+'<button id="austopb">&#9632; Stop</button></div>';
+  const c=(id,cmd)=>$(id).onclick=async()=>{const r=await remGet('/api/auto/cmd',{cmd:typeof cmd==='function'?cmd():cmd});if(r.status){AUS=r.status;auDraw();auLooks();}if(!r.ok)auMsg('<span style="color:var(--red)">'+esc(r.error)+'</span>');};
+  c('auprev','prev');c('aunextb','next');c('ausync','sync');c('auhold',()=>AUS&&AUS.held?'resume':'hold');
+  $('austopb').onclick=async()=>{busy(true,'Stopping the Auto Show…');const r=await remGet('/api/auto/stop',{});busy(false);AUS=r.status||null;if(AUS)AUS.error='';auPlay();auLooks();auPill();};}
+ $('aubpm').onchange=e=>auSetBpm(e.target.value,true);$('autap').onclick=auTap;auDraw();}
+function auDraw(){const s=AUS;if(!s||!s.running||!$('auname'))return;
+ const beatMs=60000/s.bpm,tot=s.bars*4*beatMs,dt=Math.max(0,Date.now()-(Date.parse(s.at)||Date.now()));
+ const left=s.held?null:Math.max(0,s.msLeft-dt),el=left===null?null:tot-left;
+ const bar=el===null?s.bar:Math.min(s.bars,Math.floor(el/(beatMs*4))+1),beat=el===null?s.beat:Math.floor(el/beatMs)%4+1;
+ $('auname').innerHTML=esc(s.name||'')+(s.held?'<small>HELD</small>':'');
+ $('aunext').innerHTML='bar <b>'+bar+'</b> of '+s.bars+' &middot; '+(s.held?'held &mdash; stays on this look until you resume':'next: <b>'+esc(s.next||s.name)+'</b> in '+fmtS(left/1000));
+ $('aupr').style.width=(el===null?(s.bar-1)/s.bars*100:Math.min(100,el/tot*100))+'%';
+ $('aubeats').querySelectorAll('i').forEach((x,k)=>{x.className=k<beat?'on'+(k===0?' one':''):'';});
+ $('auwarn').textContent=s.error||((s.missing||[]).length?'Not in the show: '+s.missing.join(', '):'');
+ $('auhold').innerHTML=s.held?'&#9654; Resume':'&#9208; Hold';
+ if(s.lookId!==auLastId){auLastId=s.lookId;auLooks();}}
+async function auSave(quiet){busy(true,'Saving the Auto Show…');let r;try{r=await api('/api/auto/save',{config:auC});}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);
+ if(r.ok&&r.config){AU.config=r.config;auC=clone(r.config);renderAuto();}
+ if(!quiet||!r.ok)showResult(r,'auto');return r.ok;}
+async function auStart(){if(auDirty()&&!(await auSave(true)))return;busy(true,'Starting the Auto Show…');const f=$('aufirst');
+ let r;try{r=await api('/api/auto/start',{look:f?f.value:''});}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);
+ AUS=r.status||null;if(!r.ok){showResult(r,'sx');$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> The Auto Show didn&rsquo;t start';}auTried=[];auPlay();auLooks();auPill();}
+function updAuto(){const ok=!!(AU&&AU.ok),d=auDirty();$('ausave').disabled=!ok||!d;$('auundo').disabled=!ok||!d;if(ok)stateTag('austate',d);
+ $('auhint').innerHTML=!ok?'':d?'Not saved yet'+(AUS&&AUS.running?' &mdash; the Auto Show picks the changes up when you save':'')+'.':'Saved. Starting, stopping and BPM taps work any time &mdash; ShowXpress stays open.';}
+function auPill(){const b=$('aupill'),on=!!(AUS&&AUS.running);b.style.display=on?'':'none';if(on)b.innerHTML='&#9679; AUTO &middot; '+esc(AUS.name||'');}
+$('aupill').onclick=()=>setTab('auto');
+$('ausave').onclick=()=>auSave(false);$('auundo').onclick=()=>{auC=clone(AU.config);renderAuto();};
+setInterval(async()=>{if(curTab()!=='auto'||!AUS||!AUS.running)return;auDraw();
+ if(!auStF&&Date.now()%1000<260){auStF=true;try{const r=await api('/api/auto/status');AUS=r.status;if(!AUS||!AUS.running){auPlay();auLooks();}auPill();}catch(e){}auStF=false;}},250);
 
 // ---------------- Tonight's Color (color.ps1)
 const CPRE=[['Red','ff0000'],['Wine','8b0a2a'],['Rose','ff2a6d'],['Blush','f4a6b8'],['Hot pink','ff3fa4'],['Magenta','ff00ff'],['Purple','8a2be2'],['Lavender','b48cff'],['Royal blue','1f3fff'],['Navy','0a1a6e'],['Sky blue','6ec8ff'],
@@ -1295,7 +1578,8 @@ try {
     $task = $l.GetContextAsync()
     while (-not $task.AsyncWaitHandle.WaitOne(1000)) {
       try { Step-Queue } catch {}
-      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count) { $l.Stop(); break }
+      try { Step-Pending } catch {}
+      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto)) { $l.Stop(); break }
     }
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
@@ -1317,7 +1601,43 @@ try {
           if ($bp) { Send-Png $ctx $bp } else { Send-Text $ctx 404 'text/plain' 'no brand image' }
         }
         '/icon.png'    { $ip = Join-Path $here 'aim_movers_1024.png'; if (-not (Test-Path $ip)) { $ip = Join-Path $here '../assets/aim_movers_1024.png' } if (Test-Path $ip) { $ib = [IO.File]::ReadAllBytes($ip); $ctx.Response.ContentType = 'image/png'; $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close() } else { Send-Text $ctx 404 'text/plain' 'no icon' } }
-        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen); q = (Get-QueueInfo); live = (Test-Live) } }
+        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen); q = (Get-QueueInfo); live = (Test-Live); auto = (Get-AutoStatus); pend = [bool]$script:pend; rem = $script:remLast } }
+        '/api/remote'  { Send-Json $ctx (Invoke-Remote 'State') }
+        '/api/remote/press' {
+          $ts = @($body.titles | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+          $rs = @($body.release | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+          if (-not $ts.Count -or $ts.Count -gt 30 -or $rs.Count -gt 30 -or @($ts + $rs | Where-Object { $_ -notmatch $titleRx }).Count) { Send-Json $ctx @{ ok = $false; error = 'Unknown button.' }; break }
+          $fl = ''
+          if ($body.solo) { $fl += '-Solo ' }
+          if ($body.idle) { $fl += '-Idle ' }
+          if ($rs.Count) { $fl += '-Release "' + ($rs -join '|') + '"' }
+          Send-Json $ctx (Invoke-Remote 'Press' $ts $fl)
+        }
+        '/api/remote/off' { Send-Json $ctx (Invoke-Remote 'Off') }
+        '/api/auto' {
+          $r = Invoke-Engine '-Action AutoGet' $remoteEngine
+          $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+          if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }) }; break }
+          $st = Get-AutoStatus; Send-Text $ctx 200 'application/json; charset=utf-8' ($j.Substring(0, $j.Length - 1) + ',"status":' + $(if ($st) { $st | ConvertTo-Json -Depth 4 -Compress } else { 'null' }) + '}')
+        }
+        '/api/auto/status' { Send-Json $ctx @{ ok = $true; status = (Get-AutoStatus) } }
+        '/api/auto/save' {
+          if (-not $body -or -not $body.config) { Send-Json $ctx @{ ok = $false; error = 'Nothing to save.'; out = '' }; break }
+          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+          [IO.File]::WriteAllText($cf, ($body.config | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+          try { $r = Invoke-Engine "-Action AutoSave -ConfigFile `"$cf`"" $remoteEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+          if ($r.ok) { [void](Send-Auto 'reload'); $j = ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1; if ($j) { $r.config = ($j | ConvertFrom-Json) } }
+          Send-Json $ctx $r
+        }
+        '/api/auto/start' { Send-Json $ctx (Start-Auto "$($body.look)") }
+        '/api/auto/stop'  { Stop-Auto; Start-Sleep -Milliseconds 100; Send-Json $ctx @{ ok = $true; status = (Get-AutoStatus) } }
+        '/api/auto/cmd' {
+          $c = "$($body.cmd)"; $v = "$($body.v)"
+          if ($c -notin 'next', 'prev', 'hold', 'resume', 'sync', 'bpm', 'go' -or ($c -eq 'bpm' -and $v -notmatch '^\d{2,3}(\.\d)?$') -or ($c -eq 'go' -and $v -notmatch '^[0-9a-f]{8}$')) { Send-Json $ctx @{ ok = $false; error = 'Unknown command.' }; break }
+          $ok = Send-Auto $(if ($c -eq 'bpm' -or $c -eq 'go') { "$c $v" } else { $c })
+          Start-Sleep -Milliseconds 350
+          Send-Json $ctx @{ ok = $ok; error = $(if ($ok) { '' } else { 'The Auto Show isn''t playing.' }); status = (Get-AutoStatus) }
+        }
         '/api/live/start' {
           if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; sxopen = $true; error = 'ShowXpress is open - it has to be closed while you aim live (only one program can use the DMX interface).'; out = '' }; break }
           $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
@@ -1435,6 +1755,8 @@ try {
   }
 } finally {
   Stop-Live
+  Stop-Auto
+  Remove-Item -LiteralPath $autoStat -ErrorAction SilentlyContinue
   try { $l.Close() } catch {}
   if (Test-Path $infoF) { try { $i = Get-Content $infoF -Raw | ConvertFrom-Json; if ($i.pid -eq $PID) { Remove-Item $infoF } } catch {} }
 }

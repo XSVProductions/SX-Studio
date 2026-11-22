@@ -10,10 +10,11 @@
 #           doesn't exist, two buttons on the same APC pad, scene uses fixtures that aren't in the show
 #   warns : APC notes outside the 8x8 pads, pad light on a different pad than its trigger, faders on the same CC,
 #           two buttons on the same spot of a page, colour chases that jump back across the colour wheel when they
-#           loop (the mechanical wheel visibly spins through every colour), page button count off
+#           loop (the mechanical wheel visibly spins through every colour), 251s on a different colour from the
+#           140s in the same step (the wheels are laid out differently), page button count off
 #   info  : keyboard keys shared by several buttons, scene files no button uses
 #
-#   Fixes that can be applied: colour wheel (play the steps back and forth), deleted fixtures (.scex), speed fader that
+#   Fixes that can be applied: colour wheel (play the steps back and forth), 251 colour (matching slot), deleted fixtures (.scex), speed fader that
 #   doesn't exist, mapping outside the pads, pad light on another pad, two buttons on one pad (move to the nearest free pad).
 #   What each fix changed (live.ini keys before/after, whole scene files before) is kept in <show>/health_fixes.json.
 param(
@@ -229,6 +230,42 @@ foreach ($p in $used.Keys) {
   else { Add-Issue 'warn' 'color' "$($b.Title): colour wheel spins on loop" $d $adv (New-Fix "color|$($b.Sec)" 'Play it back and forth' @() ([pscustomobject]@{ path = $rp; op = 'pingpong' })) }
 }
 
+# ---- 251s showing a different colour from the 140s in the same step (the two colour wheels are laid out differently,
+#      so the same DMX value is a different colour: e.g. 13 = green on a 140 but yellow on a 251)
+$to251 = @{ white = @('white'); red = @('red'); yellow = @('yellow', 13); green = @('green', 17); pastel_sky_blue = @('blue', 21, 'cyan')
+            purple = @('magenta', 36, 'lavender'); dark_yellow = @('orange', 10); blue = @('blue', 21); magenta = @('magenta', 36, 'pink')
+            light_green = @('green', 41); natural_white = @('cto', 26); cold_white = @('white', 2, 'lavender'); uv = @('uv', 56) }
+function Get-ColorName($model, [int]$v) { $i = Get-ColorSlot $root $model $v; if ($i -lt 0) { return $null }; (Get-FixtureDef $root $model)['color'][$i].n }
+foreach ($p in $used.Keys) {
+  if ($p -notlike '*.scex') { continue }
+  $b = $used[$p]; $steps = Get-SceneSteps $root $realPath[$p] $modelOf
+  $sets = @(); $ex = $null; $si = 0
+  foreach ($s in $steps) {
+    $si++
+    $n140 = @(foreach ($m in $movers) { if ($m.Is140 -and $s.colors.ContainsKey($m.Id)) { Get-ColorName $m.Model $s.colors[$m.Id] } })
+    $u = @($n140 | Select-Object -Unique)
+    if ($u.Count -ne 1 -or -not $u[0] -or -not $to251.ContainsKey($u[0])) { continue }   # no 140s, mixed colours or rotate -> leave
+    $want = $to251[$u[0]]; $ok = @($want[0]); if ($want.Count -gt 2) { $ok += $want[2] }
+    foreach ($m in $movers) {
+      if ($m.Is140 -or -not $s.colors.ContainsKey($m.Id)) { continue }
+      $v = $s.colors[$m.Id]; if ($v -ge 60) { continue }
+      $cur = Get-ColorName $m.Model $v
+      if ($cur -in $ok) { continue }
+      $nv = $want[1]   # white / red sit at the same numbers on both wheels -> copy the 140 value
+      if ($want.Count -eq 1) { foreach ($q in $movers) { if ($q.Is140 -and $s.colors.ContainsKey($q.Id)) { $nv = $s.colors[$q.Id]; break } } }
+      $sets += [pscustomobject]@{ step = $si; id = $m.Id; value = [int]$nv }
+      if (-not $ex) { $ex = "step $si`: 140s $($u[0] -replace '_', ' '), 251s $cur" }
+    }
+  }
+  if (-not $sets.Count) { continue }
+  $rp = $realPath[$p]; $fn = [IO.Path]::GetFileName($rp)
+  $nSteps = @($sets | Select-Object -ExpandProperty step -Unique).Count
+  $d = "The 251s show a different colour from the 140s in $nSteps step(s) ($ex). The two wheels are laid out differently, so the same number isn't the same colour."
+  $adv = "Put the 251s on the matching colour of their own wheel (sky blue -> blue, purple -> magenta, dark yellow -> orange, natural white -> CTO). Only the 251 colour channel changes."
+  if ($rigFiles[$fn.ToLower()]) { Add-Issue 'warn' 'color251' "$($b.Title): 251s don't match the 140s" ($d + $rigNote) $adv }
+  else { Add-Issue 'warn' 'color251' "$($b.Title): 251s don't match the 140s" $d $adv (New-Fix "color251|$($b.Sec)" 'Match the 251s' @() ([pscustomobject]@{ path = $rp; op = 'match251'; sets = $sets })) }
+}
+
 # ---- scene files no button uses
 $unused = @()
 foreach ($f in @(Get-ChildItem -LiteralPath "$root/scenes" -Filter '*.scex') + @(Get-ChildItem -LiteralPath "$root/Editor/Generator/projects" -Filter '*.gpj' -ErrorAction SilentlyContinue)) {
@@ -276,6 +313,20 @@ if ($fx.file) {
     }
     try { [void]([xml]$new) } catch { throw "Taking the fixtures out would break the scene file. NOTHING was changed." }
     $out += "  $([IO.Path]::GetFileName($p)): removed $(@($fx.file.ids).Count) missing fixture(s) ($cnt entries)"
+  } elseif ($fx.file.op -eq 'match251') {
+    $ms = $stepRx.Matches($t); $sb = New-Object Text.StringBuilder; $pos = 0; $cnt = 0
+    for ($i = 0; $i -lt $ms.Count; $i++) {
+      $st = $ms[$i].Value
+      foreach ($x in @($fx.file.sets | Where-Object { $_.step -eq $i + 1 })) {
+        $rx = '(?s)(<Fixture id="' + [regex]::Escape("$($x.id)") + '">(?:(?!</Fixture>).)*?<Channel index="\d+" name="color" value=")\d+(")'
+        $st2 = [regex]::Replace($st, $rx, "`${1}$($x.value)`${2}", 1)
+        if ($st2 -ne $st) { $cnt++ }; $st = $st2
+      }
+      [void]$sb.Append($t.Substring($pos, $ms[$i].Index - $pos)); [void]$sb.Append($st); $pos = $ms[$i].Index + $ms[$i].Length
+    }
+    [void]$sb.Append($t.Substring($pos)); $new = $sb.ToString()
+    try { [void]([xml]$new) } catch { throw "Changing the colours would break the scene file. NOTHING was changed." }
+    $out += "  $([IO.Path]::GetFileName($p)): $cnt 251 colour value(s) matched to the 140s"
   }
   if ($new -eq $t) { throw "Nothing to change in the scene. NOTHING was changed." }
   $rel = [IO.Path]::GetFullPath($p).Substring([IO.Path]::GetFullPath($root).TrimEnd('\', '/').Length + 1) -replace '\\', '/'

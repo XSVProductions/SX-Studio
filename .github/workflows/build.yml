@@ -41,7 +41,7 @@ jobs:
           sudo installer -pkg build/mac/*.pkg -target /
           A="/Applications/ShowXpress Helper.app/Contents"
           ls -l "$A/MacOS" "$A/Resources"
-          test -x "$A/MacOS/ShowXpressHelper" && test -f "$A/Resources/launch.sh" && test -x "$A/MacOS/sxh_dmx" && lipo "$A/MacOS/ShowXpressHelper" -verify_arch x86_64 arm64 && test -f "$A/Resources/AppIcon.icns" && test -f "$A/Resources/color.ps1" && test -f "$A/Resources/gdrive.ps1" && test -f "$A/Resources/version.txt"
+          test -x "$A/MacOS/ShowXpressHelper" && test -f "$A/Resources/launch.sh" && test -x "$A/MacOS/sxh_dmx" && lipo "$A/MacOS/ShowXpressHelper" -verify_arch x86_64 arm64 && test -f "$A/Resources/AppIcon.icns" && test -f "$A/Resources/color.ps1" && test -f "$A/Resources/gdrive.ps1" && test -f "$A/Resources/sx_remote.ps1" && test -f "$A/Resources/version.txt"
           test ! -e "$A/Resources/sync_from_windows.sh"
           pwsh -NoProfile -File "$A/Resources/df_aim_gui.ps1" -NoBrowser -Port 47390 > /tmp/gui.log 2>&1 &
           sleep 8

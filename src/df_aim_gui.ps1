@@ -76,7 +76,18 @@ $url = "http://localhost:$Port/?t=$token"
 
 function Test-SxOpen {
   if ($TestRoot) { return (Test-Path -LiteralPath (Join-Path $TestRoot '_sx_open')) }   # testing: marker file = "ShowXpress open"
-  [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' })
+  [bool]@(Get-SxProcess).Count
+}
+# ShowXpress itself = TheLightingController (Windows), TheLightingController.app (Mac; pwsh on Mac cuts process names
+# to 16 letters, "TheLightingContr"). NOT our own Mac app "ShowXpressHelper" - matching it made the Helper think
+# ShowXpress was always open on the Mac (user 2026-11-22).
+function Get-SxProcess {
+  $ps = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh' })
+  if ($onMac) {
+    $ps = @($ps | Where-Object { "$($_.Path)" -notmatch 'ShowXpress Helper\.app' })
+    if (-not $ps.Count) { $ps = @(& pgrep -f 'TheLightingController\.app/Contents/MacOS/' 2>$null | ForEach-Object { Get-Process -Id ([int]$_) -ErrorAction SilentlyContinue }) }
+  }
+  $ps
 }
 function Get-SxExe {
   foreach ($p in "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
@@ -243,6 +254,7 @@ function Invoke-Action([string]$path, $body) {
       return (Invoke-Engine "-Action Apply -Color $hx$na" $colorEngine)
     }
     '/api/gdrive/sync' { return (Invoke-Engine '-Action Sync' $gdEngine) }
+    '/api/gdrive/import' { return (Invoke-Engine '-Action Import' $gdEngine) }
     '/api/apply' {
       $w = [int]$body.w; $d = [int]$body.d
       if ($w -lt 20 -or $w -gt 300 -or $d -lt 20 -or $d -gt 300) { return @{ ok = $false; error = 'Size must be 20-300%.'; out = '' } }
@@ -315,6 +327,7 @@ $queueable = @{
   '/api/color/apply' = "Tonight's Color"; '/api/skip/apply' = 'Skip Flash'; '/api/rig/apply' = "Tonight's Rig"
   '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
   '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive'
+  '/api/gdrive/import' = 'Import from Google Drive'
   '/api/remote/enable' = 'ShowXpress remote control' }
 $queue = New-Object Collections.Generic.List[object]
 $qReopen = $true; $qDone = $null; $qClosed = 0
@@ -347,7 +360,8 @@ function Step-Queue {
   Invoke-QueueItems $qReopen
 }
 function Invoke-QueueItems([bool]$reopen) {
-  $items = @($queue | Where-Object { $_.path -ne '/api/gdrive/sync' }) + @($queue | Where-Object { $_.path -eq '/api/gdrive/sync' })
+  $gd = '/api/gdrive/sync', '/api/gdrive/import'
+  $items = @($queue | Where-Object { $_.path -eq '/api/gdrive/import' }) + @($queue | Where-Object { $gd -notcontains $_.path }) + @($queue | Where-Object { $_.path -eq '/api/gdrive/sync' })
   $queue.Clear(); $script:qClosed = 0
   $res = @(foreach ($it in $items) {
     $b = $it.body | ConvertFrom-Json
@@ -776,6 +790,8 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .offl{position:fixed;left:0;right:0;top:0;z-index:45;display:none;padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;background:rgba(200,60,60,.96);color:#fff;font-weight:600;font-size:13px;text-align:center}.offl.on{display:block}
 .phaddr{font:600 16px ui-monospace,Menlo,Consolas,monospace;background:#0f1217;border:1px solid var(--line);border-radius:10px;padding:7px 12px;display:inline-block;margin:4px 8px 4px 0;user-select:all;color:var(--txt)}
 .phaddr small{font:500 11.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--dim);margin-left:8px}
+.phrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.phrow .phaddr{margin-right:0}
+.phcopy{flex:none}.phcopy.done{background:var(--green);border-color:var(--green);color:#0b0d11}
 .phpin{font:700 34px ui-monospace,Menlo,Consolas,monospace;letter-spacing:8px;color:var(--amber);line-height:1.1}
 .phgrid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;margin-top:12px;align-items:start}.phbox{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .phbox h3{margin:0 0 6px;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}
@@ -841,7 +857,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
     <button class="ht" data-go="auto"><b>Auto Show</b><span>The Helper changes your looks every few bars while you mix</span></button>
    </div>
   </section>
-  <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><button id="gdsync" class="primary" disabled>Sync to Google Drive</button></div></section>
+  <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><div style="display:flex;flex-direction:column;gap:6px"><button id="gdsync" class="primary" disabled>Sync to Google Drive</button><button id="gdimp" disabled>Import from Google Drive</button></div></div></section>
   <section class="card" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use the Helper from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
    <label class="link"><input type="checkbox" id="phon"> Let my phone and iPad connect</label></div><div id="phbody"></div></section>
  </div>
@@ -1109,11 +1125,11 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
   $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; the Helper does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','prefix','roominstall','sx','update','remote','auto'];
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='live'?'Live aim didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto'];
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
   const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert'].includes(what);
   $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(use||chk?'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(use?'use':'check')+' it.</p>':'');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
@@ -1649,10 +1665,15 @@ function fmtT(s){const d=new Date(s);if(isNaN(d))return esc(s);const t=d.toLocal
 async function loadGd(){G=await getJ('/api/gdrive');updGd();}
 function updGd(){if(!G)return;
  $('gdsub').innerHTML=!G.ok?'<span style="color:var(--red)">'+esc(G.error)+'</span>':!G.found?'Google Drive isn&rsquo;t on this computer &mdash; install <b>Google Drive for desktop</b> and sign in.':
-  'Copies the show to <b>'+esc(G.target)+'</b> &mdash; only new and changed files, nothing is deleted. '+(G.last?'Last sync: <b>'+fmtT(G.last)+'</b>.':'Not synced yet.');
- $('gdsync').disabled=!G.ok||!G.found;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?QH:'';}
+  'Copies the show to <b>'+esc(G.target)+'</b> &mdash; only new and changed files, nothing is deleted. '+(G.last?'Last sync: <b>'+fmtT(G.last)+'</b>.':'Not synced yet.')+
+  '<br><b>Import</b> copies the show from Google Drive into <b>'+esc(G.show)+'</b> and replaces the one on this computer'+(G.srcFound?' (Google Drive copy saved '+fmtT(G.srcTime)+')':' &mdash; <span style="color:var(--amber)">no show on Google Drive yet</span>')+'.'+(G.lastImport?' Last import: <b>'+fmtT(G.lastImport)+'</b>.':'');
+ $('gdsync').disabled=!G.ok||!G.found||!G.here;$('gdimp').disabled=!G.ok||!G.found||!G.srcFound;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?QH:'';}
 async function gdSync(){await saveTo('/api/gdrive/sync',{},'Copying the show to Google Drive…',async()=>{await loadGd();if($('v-pre').classList.contains('on'))loadPre();},'gsync');}
 $('gdsync').onclick=()=>gdSync();
+async function gdImport(){if(!G||!G.srcFound)return;
+ if(!await ask('Import the show from Google Drive?','The show on this computer is <b>replaced</b> by the Google Drive copy'+(G.srcTime?' (saved '+fmtT(G.srcTime)+')':'')+' &mdash; anything changed here since then is lost. The old show is kept as a backup.'+(sxOpen?'<br><br>ShowXpress is open: this waits until you close it.':''),'Import'))return;
+ await saveTo('/api/gdrive/import',{},'Copying the show from Google Drive…',async()=>{reloadAll();},'gimport');}
+$('gdimp').onclick=()=>gdImport();
 async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
 async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
  let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok)showResult(r,'sx');}
@@ -1820,18 +1841,25 @@ $('pairgo').onclick=phPair;$('pairpin').addEventListener('keydown',e=>{if(e.key=
 $('pairpin').addEventListener('input',e=>{const v=e.target.value.replace(/\D/g,'').slice(0,6);e.target.value=v;if(v.length===6)phPair();});
 let PHI=null,phT=0;
 async function loadPhone(){if(PH)return;PHI=await getJ('/api/phone');renderPhone();}
+async function copyText(t){try{if(navigator.clipboard&&window.isSecureContext){await navigator.clipboard.writeText(t);return true;}}catch(e){}
+ const ta=document.createElement('textarea');ta.value=t;ta.setAttribute('readonly','');ta.style.cssText='position:fixed;left:-9999px;top:0';document.body.appendChild(ta);ta.select();
+ let ok=false;try{ok=document.execCommand('copy');}catch(e){}ta.remove();return ok;}
+document.addEventListener('click',async e=>{const b=e.target.closest&&e.target.closest('.phcopy');if(!b)return;e.preventDefault();
+ const ok=await copyText(b.dataset.copy),was=b.dataset.label||(b.dataset.label=b.innerHTML);b.classList.toggle('done',ok);b.innerHTML=ok?'&#10003; Copied':'Select it and copy';
+ clearTimeout(b._t);b._t=setTimeout(()=>{b.classList.remove('done');b.innerHTML=was;},1600);});
 function renderPhone(){const p=PHI,b=$('phbody');if(!p)return;$('phon').checked=!!(p.ok&&p.on);
  if(!p.ok){b.innerHTML='<div class="warnbox" style="display:block">'+esc(p.error||'')+'</div>';return;}
  if(!p.on){b.innerHTML='<p class="sub" style="margin:10px 0 0">Off. Tick the box, then open the address it shows in Safari on the iPhone or iPad.</p>';return;}
  if(!p.running){b.innerHTML='<div class="warnbox" style="display:block">'+esc(p.error||'The phone connection is not running.')+'</div>';return;}
  const u=a=>'http://'+a+':'+p.port,list=[];
- if(p.local)list.push('<span class="phaddr">'+esc(u(p.local))+'<small>same at every venue &mdash; try this first</small></span>');
- p.addrs.forEach(a=>list.push('<span class="phaddr">'+esc(u(a.ip))+'<small>'+esc(a.name)+'</small></span>'));
+ const cb=t=>'<button class="mini phcopy" data-copy="'+esc(t)+'" title="Copy">&#128203; Copy</button>';
+ if(p.local)list.push('<div class="phrow"><span class="phaddr">'+esc(u(p.local))+'<small>same at every venue &mdash; try this first</small></span>'+cb(u(p.local))+'</div>');
+ p.addrs.forEach(a=>list.push('<div class="phrow"><span class="phaddr">'+esc(u(a.ip))+'<small>'+esc(a.name)+'</small></span>'+cb(u(a.ip))+'</div>'));
  const seen=p.lastSeen?'<p class="sub" style="margin:10px 0 0">Last phone: <b>'+esc(p.lastIp)+'</b>, '+fmtT(p.lastSeen)+'.</p>':'';
  b.innerHTML='<div class="phgrid"><div><div class="phbox"><h3>ON THE PHONE OR iPAD, OPEN SAFARI AND GO TO</h3>'+(list.length?list.join(''):'<span style="color:var(--red)">This computer isn&rsquo;t on a network right now.</span>')+'</div>'+
   '<p class="sub" style="margin:10px 0 0">Then <b>Share &rarr; Add to Home Screen</b> for an app icon. The phone and the laptop must be on the <b>same Wi-Fi</b>. Venue Wi-Fi often keeps devices apart &mdash; the surest way is your own small travel router, or the laptop on your iPhone&rsquo;s Personal Hotspot.'+
   (p.mac?' If macOS asks whether <b>pwsh</b> may accept incoming connections, press <b>Allow</b>.':' The first time, Windows may ask whether <b>PowerShell</b> may use the network &mdash; tick <b>Private networks</b> and press <b>Allow</b>.')+'</p>'+seen+'</div>'+
-  '<div class="phbox" style="text-align:center"><h3>PAIR A PHONE</h3>'+(p.pin?'<div class="phpin">'+esc(p.pin)+'</div><p class="sub" style="margin:4px 0 10px">Type this on the phone. Good for '+Math.max(1,Math.ceil(p.pinLeft/60))+' more min.</p>':
+  '<div class="phbox" style="text-align:center"><h3>PAIR A PHONE</h3>'+(p.pin?'<div class="phpin">'+esc(p.pin)+'</div><div style="margin:6px 0 2px">'+cb(p.pin).replace('&#128203; Copy','&#128203; Copy code')+'</div><p class="sub" style="margin:4px 0 10px">Type this on the phone. Good for '+Math.max(1,Math.ceil(p.pinLeft/60))+' more min.</p>':
    '<p class="sub" style="margin:0 0 10px">Each phone or iPad is paired once, with a 6-digit code.</p><button id="phpinb" class="primary" style="padding:10px 22px;font-size:14px">Pair a phone</button>')+
   '<div style="margin-top:12px"><button id="phunp" class="mini">Unpair all phones</button></div></div></div>';
  const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await getJ('/api/phone/pin');renderPhone();};
@@ -1989,8 +2017,12 @@ try {
         '/api/sx/launch' { Send-Json $ctx (Start-Sx) }
         '/api/sx/close' {
           if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
-          $ps = @(Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' })
-          if ($onMac) { foreach ($p in $ps) { & osascript -e "quit app `"$($p.ProcessName)`"" 2>$null } } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
+          $ps = @(Get-SxProcess)
+          if ($onMac) {
+            $apps = @($ps | ForEach-Object { if ("$($_.Path)" -match '^(.+?\.app)/') { $Matches[1] } } | Select-Object -Unique)
+            if ($ps.Count -and -not $apps.Count) { $a = Find-SxMacApp; if ($a) { $apps = @($a.FullName) } }
+            foreach ($ap in $apps) { & osascript -e "tell application `"$ap`" to quit" 2>$null }
+          } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
           Send-Json $ctx @{ ok = $true; out = '  ShowXpress was asked to close'; error = '' }
         }
         '/api/update'  { Send-Json $ctx (Get-Update) }

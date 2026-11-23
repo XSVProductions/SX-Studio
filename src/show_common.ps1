@@ -27,7 +27,18 @@ function Find-Show {
   throw "Can't find the show. Write its folder path into $($pfs[0]) and try again. NOTHING was changed."
 }
 
-function Test-SxRunning { [bool](Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) }
+# ShowXpress itself = TheLightingController (Windows), TheLightingController.app (Mac; pwsh on Mac cuts process names
+# to 16 letters, "TheLightingContr"). NOT our own Mac app "ShowXpressHelper" - matching it made the Helper think
+# ShowXpress was always open on the Mac (user 2026-11-22).
+function Get-SxProcess {
+  $ps = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh' })
+  if ($onMac) {
+    $ps = @($ps | Where-Object { "$($_.Path)" -notmatch 'ShowXpress Helper\.app' })
+    if (-not $ps.Count) { $ps = @(& pgrep -f 'TheLightingController\.app/Contents/MacOS/' 2>$null | ForEach-Object { Get-Process -Id ([int]$_) -ErrorAction SilentlyContinue }) }
+  }
+  $ps
+}
+function Test-SxRunning { [bool]@(Get-SxProcess).Count }
 
 function Get-ShowMovers($root) {
   # all 140SR + 251SR in the show, from the CENTER SPOT scene's fixture list (has all 22)

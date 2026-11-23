@@ -339,7 +339,7 @@ if ($Action -eq 'Auto') {
       # ---- ShowXpress opened again (a fresh start has nothing pressed): play the current look again
       if ($now - $lastOpen -gt 2000) {
         $lastOpen = $now; $sp = 0
-        if ($TestRoot) { if (Test-Open) { $sp = 1 } } else { $pr = @(Get-Process | Where-Object { $_.ProcessName -match 'TheLightingController|ShowXpress' }) | Select-Object -First 1; if ($pr) { $sp = $pr.Id } }
+        if ($TestRoot) { if (Test-Open) { $sp = 1 } } else { $pr = @(Get-SxProcess) | Select-Object -First 1; if ($pr) { $sp = $pr.Id } }
         if ($sp -ne $sxPid) {
           if ($sp) { $need = $true; $lastTry = -99999.0; $mine.Clear() } else { $S.applied = $false; $S.error = 'ShowXpress is closed - waiting for it (the looks keep counting).' }
           $sxPid = $sp

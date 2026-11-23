@@ -25,7 +25,8 @@ $buttons = @(@{ page = 'MOVER COLORS'; scene = $moverScene }, @{ page = 'UPLIGHT
 # colour wheels: name, DMX value (middle of its range), how it looks
 $wheel = @{
   $m140 = @(@('White',1,'ffffff'), @('Red',5,'ff0000'), @('Yellow',9,'ffee00'), @('Green',13,'00ff00'), @('Pastel sky blue',17,'7fd4ff'),
-            @('Purple',21,'8a2be2'), @('Dark yellow',26,'ffb000'), @('Blue',31,'0030ff'), @('Magenta',36,'ff00ff'), @('Light green',41,'90ff90'),
+            # 21 / 36: the fixture file says purple / magenta, but on the real heads 21 reads PINK and 36 reads PURPLE (user 2026-11-21)
+            @('Pink',21,'ff3fa4'), @('Dark yellow',26,'ffb000'), @('Blue',31,'0030ff'), @('Purple',36,'8a2be2'), @('Light green',41,'90ff90'),
             @('Natural white',46,'fff1dc'), @('Cold white',51,'e6f2ff'), @('UV',56,'5a00ff'))
   $m251 = @(@('White',1,'ffffff'), @('Red',5,'ff0000'), @('Orange',9,'ff7a00'), @('Yellow',13,'ffee00'), @('Green',17,'00ff00'),
             @('Blue',21,'0030ff'), @('CTO (warm)',26,'ffc27a'), @('Cyan',31,'00ffff'), @('Magenta',36,'ff00ff'), @('Green 2',41,'40ff70'),
@@ -69,11 +70,29 @@ function Get-Washes {
     if ($chs -contains 'red' -and $chs -contains 'green' -and $chs -contains 'blue') { $f | Add-Member -NotePropertyName Chs -NotePropertyValue $chs -PassThru }
   })
 }
+function Get-WashMix([string]$hex, [bool]$hasW) {
+  # the hue on R/G/B at FULL strength, the whiteness on the white LED, the brightness on the dimmer.
+  # Calibrated on the real uplight (user 2026-11-23): plain maths made blush f4a6b8 look WINE / RED - the red LED swamps a
+  # little blue and the white. The user's own BLUSH scene (tuned by eye) is R255 B150 W219, so pale colours get more white
+  # (1-(1-w)^1.8) and more blue (ratio^(1-0.85w)), w = whiteness; saturated colours (wine, emerald) stay as they are.
+  # Same rule as clWash() in the Helper window (live preview) - change both together.
+  $c = Get-Rgb $hex
+  $mx = ($c | Measure-Object -Maximum).Maximum; $mn = ($c | Measure-Object -Minimum).Minimum
+  $v = @{ dimmer = $mx; red = 0; green = 0; blue = 0; white = 0 }
+  if ($mx -gt 0) {
+    if (-not $hasW) { $v.red = [Math]::Round($c[0] * 255 / $mx); $v.green = [Math]::Round($c[1] * 255 / $mx); $v.blue = [Math]::Round($c[2] * 255 / $mx) }
+    elseif ($mx -eq $mn) { $v.white = 255 }
+    else {
+      $k = 1.0 / ($mx - $mn); $w = $mn / [double]$mx
+      $v.red = [Math]::Round(255 * ($c[0] - $mn) * $k); $v.green = [Math]::Round(255 * ($c[1] - $mn) * $k)
+      $v.blue = [Math]::Round(255 * [Math]::Pow(($c[2] - $mn) * $k, 1 - 0.85 * $w))
+      $v.white = [Math]::Round(255 * (1 - [Math]::Pow(1 - $w, 1.8)))
+    }
+  }
+  $v
+}
 function Get-WashValues([string]$hex, $chs) {
-  # exact colour: white = the common part of R/G/B (cleaner pastels), the rest on R/G/B; dimmer full
-  $c = Get-Rgb $hex; $hasW = $chs -contains 'white'
-  $w = if ($hasW) { ($c | Measure-Object -Minimum).Minimum } else { 0 }
-  $v = @{ dimmer = 255; red = $c[0] - $w; green = $c[1] - $w; blue = $c[2] - $w; white = $w }
+  $v = Get-WashMix $hex ($chs -contains 'white')
   @(for ($i = 0; $i -lt $chs.Count; $i++) { if ($v.ContainsKey($chs[$i])) { ,@($i, $chs[$i], [int]$v[$chs[$i]]) } elseif ($chs[$i] -match '^(amber|uv|strobe.*|.*macro.*|.*effect.*)$') { ,@($i, $chs[$i], 0) } })
 }
 
@@ -84,13 +103,25 @@ function Get-ButtonState {
 }
 
 if ($Action -eq 'Preview') {
-  $st = Get-State
+  $st = Get-State; $ws = @(Get-Washes)
+  # DMX start addresses of the uplights (for the live preview on the real lights)
+  $addr = @{}; $cur = $null
+  if (Test-Path -LiteralPath "$root/fixtures.ini") {
+    foreach ($l in [IO.File]::ReadAllLines("$root/fixtures.ini")) {
+      if ($l -match '^\[') { $cur = @{}; continue }
+      if ($null -eq $cur) { continue }
+      if ($l -match '^address = (\d+)') { $cur.a = [int]$matches[1] }
+      if ($l -match '^id = (\d+)') { $cur.id = $matches[1] }
+      if ($cur.id -and $cur.a) { $addr[$cur.id] = $cur.a }
+    }
+  }
   [pscustomobject]@{
     ok = $true; show = $root; hex = $(if ($st) { "$($st.hex)" } else { '' }); name = $(if ($st) { "$($st.name)" } else { '' }); saved = $(if ($st) { "$($st.saved)" } else { '' })
-    wheel140 = @($wheel[$m140] | ForEach-Object { [pscustomobject]@{ name = $_[0]; hex = $_[2] } })
-    wheel251 = @($wheel[$m251] | ForEach-Object { [pscustomobject]@{ name = $_[0]; hex = $_[2] } })
-    washes = @(Get-Washes | ForEach-Object { $_.Name }); buttons = Get-ButtonState
-  } | ConvertTo-Json -Depth 4 -Compress
+    wheel140 = @($wheel[$m140] | ForEach-Object { [pscustomobject]@{ name = $_[0]; value = $_[1]; hex = $_[2] } })
+    wheel251 = @($wheel[$m251] | ForEach-Object { [pscustomobject]@{ name = $_[0]; value = $_[1]; hex = $_[2] } })
+    washes = @($ws | ForEach-Object { $_.Name }); buttons = Get-ButtonState
+    washFix = @($ws | Where-Object { $addr.ContainsKey($_.Id) } | ForEach-Object { [pscustomobject]@{ name = $_.Name; addr = $addr[$_.Id]; chs = @($_.Chs) } })
+  } | ConvertTo-Json -Depth 5 -Compress
   return
 }
 

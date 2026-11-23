@@ -38,6 +38,7 @@ Source: "..\src\df_aim.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\df_aim_gui.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\skip_flash.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\rig.ps1";          DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\flip.ps1";         DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\apc.ps1";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\speed.ps1";        DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\health.ps1";       DestDir: "{app}"; Flags: ignoreversion

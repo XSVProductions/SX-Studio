@@ -88,6 +88,7 @@ function Test-OldScene {
   -not ($t -match "name=`"color`" value=`"41`"" -and $t -match "name=`"shutter`" value=`"$flashShutter`"")
 }
 function New-IdSceneText {
+  $flip = Get-FlipState $root
   $nl = "`n"; $sb = New-Object Text.StringBuilder
   [void]$sb.Append("<?xml version=`"1.0`" encoding=`"UTF-8`"?>$nl$nl<Scene>$nl  <Fixtures>$nl")
   foreach ($h in $heads) { [void]$sb.Append("    <Fixture id=`"$($h.Id)`" name=`"$($h.Name)`" model=`"$($h.Model)`"/>$nl") }
@@ -96,7 +97,8 @@ function New-IdSceneText {
     [void]$sb.Append("    <Step length=`"300`">$nl")
     foreach ($h in $heads) {
       $lk = Get-Look $h
-      $ch = @(@(0,'pan',88,1), @(1,'upan',72,1), @(2,'tilt',$idTilt[0],1), @(3,'utilt',$idTilt[1],1), @(4,'pantilt_speed',0,0), @(5,'color',$lk.look.v,0),
+      $sp = ConvertTo-SentPos $flip $h.Id @(22600, ($idTilt[0] * 256 + $idTilt[1]))   # a head the Helper reverses gets it reversed (flip.ps1)
+      $ch = @(@(0,'pan',[math]::Floor($sp[0] / 256),1), @(1,'upan',($sp[0] % 256),1), @(2,'tilt',[math]::Floor($sp[1] / 256),1), @(3,'utilt',($sp[1] % 256),1), @(4,'pantilt_speed',0,0), @(5,'color',$lk.look.v,0),
               @(6,'gobo',0,0), @(7,'gobo#2',0,0), @(8,'gobo_rotate',0,0), @(9,'8 facet prism',0,0), @(10,'linear prism',0,0),
               @(13,'zoom',243,0), @(14,'frost',0,0), @(15,'dimmer',255,0), @(16,'shutter',$(if ($lk.flash) { $flashShutter } else { 255 }),0))
       [void]$sb.Append("      <Fixture id=`"$($h.Id)`">$nl")

@@ -32,6 +32,9 @@
 #   the user aims the real heads with the mouse. -Action LiveInfo = heads + DMX addresses + current aims (JSON);
 #   -Action LiveSave -ChangesFile = the new step 1 / step 2 aims written into the aim scene (then Apply as usual).
 #
+#   REVERSE HEADS (flip.ps1): heads the Helper reverses are stored reversed in every file (= what goes out to the head);
+#   everything in here works "as if hung normally" - ConvertTo-SentPos on the way in and out, ReversePan/Tilt kept.
+#
 #   -Mode Room = the same thing for the AROUND ROOM movements (walls / ceiling): scene "ROOM AIM (ADJUST)" (step 1 = center
 #   of the area to cover, step 2 = the same corner of it), check "ROOM CHECK" (Generator), state room_aim_state.json.
 #   "Normal" for the room = the middle and size of the original AROUND ROOM shape.  -Action Install = ROOM AIM (ADJUST) +
@@ -147,7 +150,8 @@ function Write-AimScene($movers, $center, $corner) {
   foreach ($pos in @($center, $corner)) {
     $L.Add('    <Step length="300">')
     foreach ($m in $movers) {
-      $ch = Get-AimChannels $m ([int]$pos[$m.Id][0]) ([int]$pos[$m.Id][1])
+      $sp = ConvertTo-SentPos $flip $m.Id $pos[$m.Id]   # the file holds what goes out (a head reversed by the Helper = reversed)
+      $ch = Get-AimChannels $m $sp[0] $sp[1]
       $L.Add("      <Fixture id=`"$($m.Id)`">")
       foreach ($c in $ch) {
         $fade = if ($c[3]) { ' fade="1"' } else { '' }
@@ -176,9 +180,10 @@ function Read-AimScene($movers) {
   $steps = @($x.Scene.Steps.Step)
   $r = @{ center = @{}; corner = @{}; steps = $steps.Count; moved = 0 }
   foreach ($m in $movers) {
-    $r.center[$m.Id] = Read-Step $steps[0] $m $homePos[$m.Model]
+    # file = what goes out -> aims "as if hung normally" (ConvertTo-SentPos works both ways)
+    $r.center[$m.Id] = ConvertTo-SentPos $flip $m.Id (Read-Step $steps[0] $m (ConvertTo-SentPos $flip $m.Id $homePos[$m.Model]))
     $s2 = if ($steps.Count -ge 2) { $steps[1] } else { $null }
-    $r.corner[$m.Id] = Read-Step $s2 $m (Get-DefaultCorner $m)
+    $r.corner[$m.Id] = ConvertTo-SentPos $flip $m.Id (Read-Step $s2 $m (ConvertTo-SentPos $flip $m.Id (Get-DefaultCorner $m)))
     if ($roomPrev) {   # Room: AROUND ROOM was reshaped -> a head still on the OLD normal / default corner = untouched
       $c = $r.center[$m.Id]; $k = $r.corner[$m.Id]; $ph = $roomPrev[0]; $pr = $roomPrev[1]
       if ($c[0] -eq $ph[0] -and $c[1] -eq $ph[1]) { $r.center[$m.Id] = @($homePos[$m.Model]); $r.moved++ }
@@ -258,7 +263,8 @@ function New-CheckGpj($name, $model, $movers) {
     $s = $secs[$m.Id]; if (-not $s) { throw "No generator template found for $($m.Name)" }
     foreach ($l in $s) {
       if ($l -match '^\[Fixture_') { $l = "[Fixture_$k]" }
-      elseif ($l -match '^(Offset|Zoom|Reverse)(Pan|Tilt) = ') { $l = ($l -replace '= .*$', '= 0') }
+      elseif ($l -match '^(Offset|Zoom)(Pan|Tilt) = ') { $l = ($l -replace '= .*$', '= 0') }
+      elseif ($l -match '^Reverse(Pan|Tilt) = ') { $fl = $flip[$m.Id]; $l = "Reverse$($matches[1]) = $(if ($fl -and $fl[$matches[1].ToLower()]) { 1 } else { 0 })" }
       elseif ($l -match '^Channels = (.*)$' -and -not $chList) { $chList = $matches[1] -split ',' }
       $out.Add($l)
     }
@@ -372,7 +378,9 @@ function Update-Gpjs($fix, [double]$sx, [double]$sy, $st) {
       if ($ln -match '^ID = (\d+)$') { $id = $matches[1]; if (-not $firstId) { $firstId = $id }; continue }
       if ($id -and $fix.ContainsKey($id)) {
         $hf = $fix[$id]; $new = $null
-        if ($ln -match '^Reverse(Pan|Tilt) = 1$') { $warn += "$f : fixture $id has Reverse$($matches[1]) on - check that head by eye" }
+        if ($ln -match '^Reverse(Pan|Tilt) = (\d+)$') {   # should match Reverse heads (flip.ps1) - else it was changed in Generator
+          $fl = $flip[$id]; $on = [bool]($fl -and $fl[$matches[1].ToLower()])
+          if (($matches[2] -ne '0') -ne $on) { $warn += "$f : fixture $id has Reverse$($matches[1]) $(if ($on) { 'OFF but the Helper reverses that head' } else { 'on' }) - check that head by eye" } }
         if ($ln -match '^OffsetPan = ')  { $new = "OffsetPan = $($hf.op)" }
         if ($ln -match '^OffsetTilt = ') { $new = "OffsetTilt = $($hf.ot)" }
         if ($ln -match '^ZoomPan = ')    { $new = "ZoomPan = $(if ($useZoom) { $hf.zp } else { 0 })" }
@@ -438,7 +446,7 @@ function Update-CenterSpot($movers, $center) {
   foreach ($m in $movers) {
     $c = $center[$m.Id]; $h = $homePos[$m.Model]
     if ($c[0] -eq $h[0] -and $c[1] -eq $h[1]) { continue }   # not aimed in step 1
-    $p = [int]$c[0]; $t = [int]$c[1]
+    $sp = ConvertTo-SentPos $flip $m.Id $c; $p = $sp[0]; $t = $sp[1]   # what goes out (reversed heads reversed)
     $want[$m.Id] = @{ 0 = @('pan', [int][math]::Floor($p/256)); 1 = @('upan', ($p%256)); 2 = @('tilt', [int][math]::Floor($t/256)); 3 = @('utilt', ($t%256)) }
   }
   $bytes = [IO.File]::ReadAllBytes($cs)
@@ -660,6 +668,7 @@ function Install-RoomButtons {
 # ---------------------------------------------------------------- main
 $movers = @(Get-Movers)
 if ($movers.Count -eq 0) { throw "No 140SR/251SR fixtures found." }
+$flip = Get-FlipState $root   # heads the Helper reverses (flip.ps1): files = what goes out, all maths here = as if hung normally
 $st = Load-State
 
 if ($Action -eq 'Preview') {
@@ -710,7 +719,8 @@ if ($Action -eq 'LiveInfo') {
       c = $c; k = $k; home = $hp; dk = $dk; kSet = -not (& $same $k $dk)
       free = ((& $same $c $hp) -or ($cp -and (& $same $c $cp.c))); partner = $(if ($pairs.ContainsKey($m.Id)) { $pairs[$m.Id].partner } else { '' })
       tower = $(if ($se) { $se.tower } else { '' }); side = $(if ($se) { $se.side } else { '' }); order = $(if ($se) { $se.order } else { 99 })
-      hung = $(if ($null -eq $hung) { $true } else { $hung -contains $m.Id }); deg = $deg[$m.Model] } })
+      hung = $(if ($null -eq $hung) { $true } else { $hung -contains $m.Id }); deg = $deg[$m.Model]
+      rp = [bool]($flip[$m.Id] -and $flip[$m.Id].pan); rt = [bool]($flip[$m.Id] -and $flip[$m.Id].tilt) } })   # the Helper sends 65535 - v for these
   [pscustomobject]@{ ok = $true; show = $root; mode = $Mode; aimTitle = $aimTitle; heads = $heads } | ConvertTo-Json -Depth 5 -Compress
   return
 }

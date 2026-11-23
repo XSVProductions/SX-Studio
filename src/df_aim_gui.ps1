@@ -14,6 +14,7 @@ $here   = Split-Path -Parent $MyInvocation.MyCommand.Path
 $engine = Join-Path $here 'df_aim.ps1'
 $skipEngine   = Join-Path $here 'skip_flash.ps1'
 $rigEngine    = Join-Path $here 'rig.ps1'
+$flipEngine   = Join-Path $here 'flip.ps1'
 $apcEngine    = Join-Path $here 'apc.ps1'
 $speedEngine  = Join-Path $here 'speed.ps1'
 $healthEngine = Join-Path $here 'health.ps1'
@@ -284,8 +285,24 @@ function Invoke-Action([string]$path, $body) {
     '/api/rig/apply' {
       $ids = @($body.heads | ForEach-Object { "$_" })
       if (@($ids | Where-Object { $_ -notmatch '^\d+$' }).Count -or $ids.Count -lt 1) { return @{ ok = $false; error = 'Tick at least one head.'; out = '' } }
+      # REVERSE HEADS (flip.ps1) are saved from this tab too: always the FULL list, so a queued save that replaces an older one keeps it
+      $fo = ''
+      if ($null -ne $body.flip) {
+        $fl = [ordered]@{}
+        foreach ($pp in $body.flip.PSObject.Properties) {
+          if ($pp.Name -notmatch '^\d+$') { return @{ ok = $false; error = 'Unknown head.'; out = '' } }
+          if ($pp.Value.pan -or $pp.Value.tilt) { $fl[$pp.Name] = [ordered]@{ pan = [bool]$pp.Value.pan; tilt = [bool]$pp.Value.tilt } }
+        }
+        $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+        [IO.File]::WriteAllText($cf, (@{ flip = $fl } | ConvertTo-Json -Depth 4 -Compress), (New-Object Text.UTF8Encoding($false)))
+        try { $rf = Invoke-Engine "-Action Apply -ChangesFile `"$cf`"" $flipEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+        if (-not $rf.ok) { $rf.error = "Reversed heads NOT saved (nothing was changed): $($rf.error)"; return $rf }
+        if ($rf.out -notmatch 'nothing to change') { $fo = "  Reversed heads:`n" + $rf.out.TrimEnd() + "`n`n  Tonight's Rig:`n" }
+      }
       $r = Invoke-Engine "-Action Apply -Heads `"$($ids -join ',')`"" $rigEngine
+      $r.out = $fo + $r.out
       if ($r.ok) { $r.out += Update-SkipFlash $ids }
+      elseif ($fo) { $r.error = "The reversed heads WERE saved, but Tonight's Rig was not: $($r.error)" }
       return $r
     }
     '/api/apc/apply' {
@@ -722,6 +739,9 @@ details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12.5px
 .hd small{display:block;font-size:11px;font-weight:500;color:var(--mute);margin-top:2px}
 .hd:hover{border-color:var(--line2)}
 .hd.on{background:rgba(255,176,32,.13);border-color:var(--amber);color:var(--txt)}.hd.on small{color:var(--amber)}
+.fxg .hd{cursor:default;padding:10px 0 8px}.fxg .hd.on{background:rgba(80,150,255,.12);border-color:var(--blue)}
+.fx{display:inline-block;margin:7px 2px 0;padding:3px 7px;border-radius:8px;border:1px solid var(--line);font-size:11.5px;font-weight:600;cursor:pointer;color:var(--mute);user-select:none}
+.fx.on{background:rgba(80,150,255,.25);border-color:var(--blue);color:var(--txt)}
 .hd.chg::after{content:"";position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--blue)}
 .order{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}.order span{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px}.order i{color:var(--mute);font-style:normal;font-size:11px}
 .state{font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:99px;border:1px solid}.state.ok{color:var(--green);border-color:rgba(61,220,132,.35)}.state.chg{color:var(--blue);border-color:rgba(90,169,255,.45)}
@@ -794,6 +814,8 @@ select{background:var(--well);color:var(--txt);border:1px solid var(--line);bord
 .cp i{flex:none;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.25)}
 .wheel{position:relative;flex:none;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle closest-side,#fff,rgba(255,255,255,0)),conic-gradient(red,yellow,lime,cyan,blue,magenta,red);cursor:crosshair;touch-action:none}
 .wheel i{position:absolute;width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #000,0 2px 6px rgba(0,0,0,.6);transform:translate(-50%,-50%);pointer-events:none;display:none}
+.clpv{display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(61,220,132,.07);border:1px solid rgba(61,220,132,.45);font-size:12.5px}.clpv.on{display:flex}
+.clpv .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green);flex:none}
 .clbig{height:120px;border-radius:12px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:10px 12px;margin-bottom:10px}.clbig span{background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;font:12px ui-monospace,Consolas,monospace}
 input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--well);padding:2px;cursor:pointer}
 .qbar{display:none;margin:14px 22px 0;padding:12px 16px;border-radius:12px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.45);font-size:13px}
@@ -1027,7 +1049,11 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
       </div>
       <div><div id="clbig" class="clbig"></div>
         <input id="clname" class="srch" style="width:100%" maxlength="30" placeholder="Name (optional), e.g. Blush">
-        <div id="clmap" class="kv" style="grid-template-columns:86px 1fr"></div></div>
+        <div id="clmap" class="kv" style="grid-template-columns:86px 1fr"></div>
+        <button id="clprev" style="margin-top:12px;width:100%">&#128161; Show it on the lights</button>
+        <div id="clpv" class="clpv"><span class="dot"></span><b class="grow">Live on the lights</b><button id="clpvstop" class="mini">Stop</button>
+          <label style="flex-basis:100%;display:flex;gap:6px;align-items:center;color:var(--dim)"><input type="checkbox" id="clreo"> Open ShowXpress again when I stop</label>
+          <span style="flex-basis:100%;color:var(--dim)">ShowXpress is closed while this is on. Movers go to the dance-floor center on their nearest wheel colour.</span></div></div>
     </div>
   </section>
  </div>
@@ -1054,6 +1080,11 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
       <span id="rgstate" class="state ok" style="display:none"></span><button id="rgrefresh">&#8635; Refresh</button></div>
     <div id="rgerr" class="warnbox"></div>
     <div id="rggroups"></div>
+  </section>
+  <section class="card">
+    <div class="row"><div class="grow"><h2>Reversed heads</h2>
+      <p class="sub" style="margin-bottom:0">Use this instead of Pan / Tilt Reverse in a fixture&rsquo;s own menu. A head hung so it moves the same way as its partner? Tap <b>&harr; pan</b> (or <b>&varr; tilt</b>) on it: every scene and movement in the show is flipped for that head &mdash; exactly what the fixture&rsquo;s menu does. Tap again to put it back. Leave the fixture&rsquo;s own menu as it is, and set this <b>before</b> you aim the movers.</p></div></div>
+    <div id="rgflip"></div>
   </section>
   <section class="card">
     <div class="row"><h2 class="grow" style="margin:0">Chase scenes</h2><div id="rgsum" class="summary"></div></div>
@@ -1216,7 +1247,7 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
  const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto'];
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='clprev'?'Preview didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
@@ -1319,20 +1350,31 @@ async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':la
 function showErr(id,obj){const er=$(id);if(obj&&!obj.ok){er.style.display='block';er.innerHTML=esc(obj.error);return true;}er.style.display='none';return false;}
 
 // ---------------- Tonight's rig (same step rule as rig.ps1)
-let R=null,rsel=new Set();
+let R=null,rsel=new Set(),rflip={};
 const rSaved=()=>new Set(R&&R.ok?R.heads.filter(h=>h.on).map(h=>h.id):[]);
-function rgDirty(){if(!R||!R.ok)return false;const s=rSaved();return s.size!==rsel.size||[...rsel].some(i=>!s.has(i));}
-async function loadRig(){$('rgsum').textContent='Loading…';R=await getJ('/api/rig');rsel=rSaved();renderRig();}
+// Reversed heads (flip.ps1): id -> {pan,tilt}; saved with Tonight's Rig (always the full list)
+const fSaved=()=>{const o={};if(R&&R.ok)R.heads.forEach(h=>o[h.id]={pan:!!h.rp,tilt:!!h.rt});return o;};
+const fChg=id=>{const h=R.heads.find(x=>x.id===id),f=rflip[id]||{};return !!h&&(!!f.pan!==!!h.rp||!!f.tilt!==!!h.rt);};
+const fDirty=()=>!!(R&&R.ok&&R.heads.some(h=>fChg(h.id)));
+function rgDirty(){if(!R||!R.ok)return false;const s=rSaved();return s.size!==rsel.size||[...rsel].some(i=>!s.has(i))||fDirty();}
+async function loadRig(){$('rgsum').textContent='Loading…';R=await getJ('/api/rig');rsel=rSaved();rflip=fSaved();renderRig();}
 function rigDrop(sc,hung){const gs=sc.groups||[];let drop=[],kept=0;
  for(const g of gs){const s=sc.steps[g[0]];if(!s.other&&s.lit.length&&!s.lit.some(i=>hung.has(i)))drop.push(...g);else kept++;}
  return gs.length&&!kept?null:new Set(drop);}
 function renderRig(){if(!R)return;
- if(showErr('rgerr',R)){$('rggroups').innerHTML=$('rgscenes').innerHTML=$('rgsum').innerHTML='';$('rgstate').style.display='none';updRig();return;}
+ if(showErr('rgerr',R)){$('rggroups').innerHTML=$('rgflip').innerHTML=$('rgscenes').innerHTML=$('rgsum').innerHTML='';$('rgstate').style.display='none';updRig();return;}
  const s=rSaved();
  const grp=(is140,name)=>{const hs=R.heads.filter(h=>h.is140===is140);if(!hs.length)return'';const n=hs.filter(h=>rsel.has(h.id)).length;
   return `<div class="gh"><h3>${name}</h3><span class="cnt">${n} of ${hs.length} hung</span><div class="grow"></div><button class="mini" data-rall="${is140?1:0}">All</button><button class="mini" data-rnone="${is140?1:0}">None</button></div><div class="heads">`+
    hs.map(h=>{const on=rsel.has(h.id),chg=on!==s.has(h.id);return `<div class="hd${on?' on':''}${chg?' chg':''}" data-rid="${esc(h.id)}" title="${chg?'changed - not saved yet':''}">#${h.num}<small>${on?'hung':'not here'}</small></div>`;}).join('')+'</div>';};
  $('rggroups').innerHTML=grp(true,'140SR')+grp(false,'251SR');
+ const fgrp=(is140,name)=>{const hs=R.heads.filter(h=>h.is140===is140);if(!hs.length)return'';const n=hs.filter(h=>(rflip[h.id]||{}).pan||(rflip[h.id]||{}).tilt).length;
+  return `<div class="gh"><h3>${name}</h3><span class="cnt">${n?n+' reversed':'none reversed'}</span></div><div class="heads">`+
+   hs.map(h=>{const f=rflip[h.id]||{},on=f.pan||f.tilt,chg=fChg(h.id);return `<div class="hd${on?' on':''}${chg?' chg':''}" title="${chg?'changed - not saved yet':''}">#${h.num}<br><span class="fx${f.pan?' on':''}" data-fp="${esc(h.id)}" title="Reverse pan (left / right)">&harr; pan</span><span class="fx${f.tilt?' on':''}" data-ft="${esc(h.id)}" title="Reverse tilt (up / down)">&varr; tilt</span></div>`;}).join('')+'</div>';};
+ $('rgflip').innerHTML='<div class="fxg">'+fgrp(true,'140SR')+fgrp(false,'251SR')+'</div>';
+ const fset=(id,ax)=>{const f=rflip[id]=Object.assign({pan:false,tilt:false},rflip[id]);f[ax]=!f[ax];renderRig();};
+ document.querySelectorAll('[data-fp]').forEach(e=>e.onclick=()=>fset(e.dataset.fp,'pan'));
+ document.querySelectorAll('[data-ft]').forEach(e=>e.onclick=()=>fset(e.dataset.ft,'tilt'));
  document.querySelectorAll('[data-rid]').forEach(t=>t.onclick=()=>{const id=t.dataset.rid;rsel.has(id)?rsel.delete(id):rsel.add(id);renderRig();});
  const setG=(is140,on)=>{R.heads.filter(h=>h.is140===is140).forEach(h=>on?rsel.add(h.id):rsel.delete(h.id));renderRig();};
  document.querySelectorAll('[data-rall]').forEach(b=>b.onclick=()=>setG(b.dataset.rall==='1',true));
@@ -1348,10 +1390,11 @@ function renderRig(){if(!R)return;
  $('rgsum').innerHTML=`<b>${scs.length}</b> chase scenes &middot; <b>${nTrim}</b> trimmed for this rig`;
  stateTag('rgstate',rgDirty());$('foot').textContent='Show: '+R.show;updRig();}
 function updRig(){const ok=!!(R&&R.ok),d=rgDirty(),n=rsel.size;$('rgsave').disabled=!ok||!d||!n;$('rgundo').disabled=!ok||!d;$('rgall').disabled=!ok||R.heads.every(h=>rsel.has(h.id));
- $('rghint').innerHTML=!ok?'':sxHint('save')??(!n?'<span style="color:var(--amber)">Tick at least one head.</span>':d?'Only chase scenes change. The full scenes are kept, so ticking every head puts them back.':'The show already matches these heads.');}
-$('rgrefresh').onclick=loadRig;$('rgundo').onclick=()=>{rsel=rSaved();renderRig();};
+ const s=rSaved(),rd=s.size!==rsel.size||[...rsel].some(i=>!s.has(i));
+ $('rghint').innerHTML=!ok?'':sxHint('save')??(!n?'<span style="color:var(--amber)">Tick at least one head.</span>':d?[fDirty()?'Reversed heads: every scene and movement flips for those heads.':'',rd?'Only chase scenes change for the hung heads. The full scenes are kept, so ticking every head puts them back.':''].filter(Boolean).join(' '):'The show already matches these heads.');}
+$('rgrefresh').onclick=loadRig;$('rgundo').onclick=()=>{rsel=rSaved();rflip=fSaved();renderRig();};
 $('rgall').onclick=()=>{R.heads.forEach(h=>rsel.add(h.id));renderRig();};
-$('rgsave').onclick=()=>saveTo('/api/rig/apply',{heads:[...rsel]},'Saving tonight\'s rig…',async()=>{await loadRig();S=null;H=null;},'rig');
+$('rgsave').onclick=()=>saveTo('/api/rig/apply',{heads:[...rsel],flip:rflip},'Saving tonight\'s rig…',async()=>{await loadRig();S=null;H=null;},'rig');
 
 // ---------------- APC mini (pad colours = APC mini mk2 velocity palette)
 const PAL='000000 1E1E1E 7F7F7F FFFFFF FF4C4C FF0000 590000 190000 FFBD6C FF5400 591D00 271B00 FFFF4C FFFF00 595900 191900 88FF4C 54FF00 1D5900 142B00 4CFF4C 00FF00 005900 001900 4CFF5E 00FF19 00590D 001902 4CFF88 00FF55 00591D 001F12 4CFFB7 00FF99 005935 001912 4CC3FF 00A9FF 004152 001019 4C88FF 0055FF 001D59 000819 4C4CFF 0000FF 000059 000019 874CFF 5400FF 190064 0F0030 FF4CFF FF00FF 590059 190019 FF4C87 FF0054 59001D 220013 FF1500 993500 795100 436400 033900 005735 00547F 0000FF 00454F 2500CC 7F7F7F 202020 FF0000 BDFF2D AFED06 64FF09 108B00 00FF87 00A9FF 002AFF 3F00FF 7A00FF B21A7D 402100 FF4A00 88E106 72FF15 00FF00 3BFF26 59FF71 38FFCC 5B8AFF 3151C6 877FE9 D31DFF FF005D FF7F00 B9B000 90FF00 835D07 392B00 144C10 0D5038 15152A 16205A 693C1C A8000A DE513D D86A1C FFE126 9EE12F 67B50F 1E1E30 DCFF6B 80FFBD 9A99FF 8E66FF 404040 757575 E0FFFF A00000 350000 1AD000 074200 B9B000 3F3100 B35F00 4B1502'.split(' ');
@@ -1714,7 +1757,16 @@ setInterval(async()=>{if(curTab()!=='auto'||!AUS||!AUS.running)return;auDraw();
 // ---------------- Tonight's Color (color.ps1)
 const CPRE=[['Red','ff0000'],['Wine','8b0a2a'],['Rose','ff2a6d'],['Blush','f4a6b8'],['Hot pink','ff3fa4'],['Magenta','ff00ff'],['Purple','8a2be2'],['Lavender','b48cff'],['Royal blue','1f3fff'],['Navy','0a1a6e'],['Sky blue','6ec8ff'],
  ['Teal','00a8a8'],['Mint','7dffc4'],['Emerald','00b050'],['Lime','9aff00'],['Gold','ffb000'],['Yellow','ffee00'],['Peach','ffb38a'],['Orange','ff6a00'],['Warm white','ffd9a8'],['Cold white','e6f2ff']];
-let CL=null,clHex='',clV=100,clDrag=false;
+let CL=null,clHex='',clV=100,clDrag=false,CP=null;
+function clWash(hx,hasW){  // same rule as Get-WashMix in color.ps1: hue on R/G/B at full strength, whiteness on W, brightness on the dimmer
+ const c=[0,2,4].map(i=>parseInt(hx.substr(i,2),16)),mx=Math.max(...c),mn=Math.min(...c),v={dimmer:mx,red:0,green:0,blue:0,white:0};
+ if(mx>0){if(!hasW){v.red=Math.round(c[0]*255/mx);v.green=Math.round(c[1]*255/mx);v.blue=Math.round(c[2]*255/mx);}
+  else if(mx===mn)v.white=255;
+  else{const k=1/(mx-mn),w=mn/mx;v.red=Math.round(255*(c[0]-mn)*k);v.green=Math.round(255*(c[1]-mn)*k);v.blue=Math.round(255*((c[2]-mn)*k)**(1-0.85*w));v.white=Math.round(255*(1-(1-w)**1.8));}}
+ return v;}
+function clUpVals(chs){  // uplight channel index -> value, exactly what TONIGHTS COLOR UPLIGHT will hold
+ const v=clWash(clHex,chs.includes('white')),o=[];
+ chs.forEach((n,i)=>{if(Object.prototype.hasOwnProperty.call(v,n))o.push([i,+v[n]]);else if(/^(dimmer|red|green|blue|white|amber|uv|strobe.*|.*macro.*|.*effect.*)$/.test(n))o.push([i,0]);});return o;}
 function hsv2hex(h,s,v){const f=n=>{const k=(n+h/60)%6;return v-v*s*Math.max(0,Math.min(k,4-k,1));};return [f(5),f(3),f(1)].map(x=>Math.round(x*255).toString(16).padStart(2,'0')).join('');}
 function hex2hsv(hx){const r=parseInt(hx.slice(0,2),16)/255,g=parseInt(hx.slice(2,4),16)/255,b=parseInt(hx.slice(4,6),16)/255,mx=Math.max(r,g,b),mn=Math.min(r,g,b),d=mx-mn;let h=0;
  if(d){h=mx===r?((g-b)/d)%6:mx===g?(b-r)/d+2:(r-g)/d+4;h=(h*60+360)%360;}return [h,mx?d/mx:0,mx];}
@@ -1733,7 +1785,7 @@ function renderColor(){if(!CL)return;if(showErr('clerr',CL)){$('clstate').style.
  const n1=clHex&&nearest(CL.wheel140,clHex),n2=clHex&&nearest(CL.wheel251,clHex),sw=e=>e?`<span class="sw" style="background:#${e.hex}"></span>${esc(e.name)}`:'&mdash;',wa=CL.washes||[];
  $('clmap').innerHTML=`<span>140 movers</span><b>${sw(n1)}</b><span>251 movers</span><b>${sw(n2)}</b><span>Uplights</span><b>${clHex?'<span class="sw" style="background:#'+clHex+'"></span>exact colour':'&mdash;'}${wa.length?'<br><small style="color:var(--dim)">'+esc(wa.join(', '))+'</small>':' &middot; <span style="color:var(--amber)">none found</span>'}</b>`+
   (CL.hex?`<span>Saved</span><b><span class="sw" style="background:#${CL.hex}"></span>#${CL.hex}${CL.name?' '+esc(CL.name):''}${CL.saved?' &middot; '+fmtT(CL.saved):''}</b>`:'');
- stateTag('clstate',clDirty());if(!CL.hex&&!clHex)$('clstate').style.display='none';$('foot').textContent='Show: '+CL.show;updColor();}
+ stateTag('clstate',clDirty());if(!CL.hex&&!clHex)$('clstate').style.display='none';$('foot').textContent='Show: '+CL.show;updColor();cpUi();cpPush();}
 function updColor(){const ok=!!(CL&&CL.ok),d=clDirty();$('clsave').disabled=!ok||!d;$('clundo').disabled=!ok||!d;
  const miss=ok?(CL.buttons||[]).filter(b=>!b.there).map(b=>b.page):[];
  $('clhint').innerHTML=!ok?'':sxHint('save')??(!clHex?'Pick a colour.':d?'Writes the two TONIGHTS COLOR scenes'+(miss.length?' and adds the button to the '+esc(miss.join(' and '))+' page'+(miss.length>1?'s':''):'')+'.':'This is tonight\'s colour already.');}
@@ -1746,7 +1798,35 @@ $('clpick').oninput=e=>setColor(e.target.value.slice(1),'');
 $('clhex').onchange=e=>{const v=e.target.value.trim().replace(/^#/,'');if(/^[0-9a-f]{6}$/i.test(v))setColor(v,'');else renderColor();};
 $('clname').oninput=()=>{stateTag('clstate',clDirty());updColor();};
 $('clrefresh').onclick=loadColor;$('clundo').onclick=()=>{clHex=CL.hex||'';$('clname').value=CL.name||'';renderColor();};
-$('clsave').onclick=()=>saveTo('/api/color/apply',{hex:clHex,name:$('clname').value.trim()},'Saving tonight\'s color…',async()=>{await loadColor();H=null;},'color');
+$('clsave').onclick=async()=>{let reo=false;if(CP){reo=$('clreo').checked;await cpStop(false);}   // saving needs the show closed and the interface free: end the preview first
+ await saveTo('/api/color/apply',{hex:clHex,name:$('clname').value.trim()},'Saving tonight\'s color…',async()=>{await loadColor();H=null;},'color');
+ if(reo)sxLaunch();};
+// ---- live preview on the real lights (user 2026-11-23): ShowXpress closed, the Helper drives the DMX interface (same
+// output as Aim live). Movers: dance-floor center aim, look from LiveInfo, colour wheel = nearest. Uplights: clUpVals().
+function cpQ(k,s){if(CP.sent[k]===s)return;CP.sent[k]=s;CP.pend.set(k,s);}
+function cpPush(){if(!CP||!CP.on||!CL||!CL.ok)return;const on=!!clHex,n1=on&&nearest(CL.wheel140,clHex),n2=on&&nearest(CL.wheel251,clHex);
+ for(const h of CP.heads){cpQ('p'+h.addr,'s:'+h.addr+':'+(h.addr+1)+':'+Math.round(h.c[0]));cpQ('p'+(h.addr+2),'s:'+(h.addr+2)+':'+(h.addr+3)+':'+Math.round(h.c[1]));
+  const n=h.is140?n1:n2;for(const [i,v] of h.look){const x=i===5?(n?n.value:0):(!on&&(i===h.dimI||i===h.shutI))?0:v;cpQ('b'+(h.addr+i),'b:'+(h.addr+i)+':'+x);}}
+ for(const w of CP.wash){const vs=on?clUpVals(w.chs):w.chs.map((n,i)=>[i,0]);for(const [i,v] of vs)cpQ('b'+(w.addr+i),'b:'+(w.addr+i)+':'+Math.max(0,Math.min(255,Math.round(v))));}
+ cpKick();}
+function cpKick(){if(!CP||CP.tm||CP.fl)return;const d=30-(Date.now()-CP.last);if(d>0)CP.tm=setTimeout(()=>{if(CP){CP.tm=0;cpFlush();}},d);else cpFlush();}
+async function cpFlush(){if(!CP||!CP.on||CP.fl)return;let l=((CP.z?'z ':'')+[...CP.pend.values()].join(' ')).trim();if(!l){if(!CP.ka)return;l='k';}
+ const me=CP;CP.z=false;CP.ka=false;CP.pend.clear();CP.fl=true;CP.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,error:'Lost connection to the Helper.'};}
+ if(CP!==me||!CP.on)return;CP.fl=false;
+ if(!r.ok){const reo=$('clreo').checked;await cpStop(false);showResult({ok:false,error:'The preview on the lights stopped: '+(/^The DMX output stopped/.test(r.error||'')?'the DMX interface was unplugged, or the Helper lost it.':(r.error||'unknown error'))+(reo?' ShowXpress is opening again.':'')},'clprev');if(reo)sxLaunch();return;}
+ if(CP.pend.size)cpKick();}
+function cpUi(){const on=!!CP;$('clpv').classList.toggle('on',on);$('clprev').style.display=on?'none':'';$('clprev').disabled=!CL||!CL.ok;}
+async function cpGo(){if(CP||LV||!CL||!CL.ok)return;
+ const c=await sxCloseLive('Close ShowXpress to show the colour on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show it on the lights','clprev');
+ if(!c.go)return;
+ const r=await lvStart('floor');
+ if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(c.reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'clprev');return;}
+ CP={on:true,heads:r.info.heads||[],wash:CL.washFix||[],sent:{},pend:new Map(),z:true,ka:false,fl:false,tm:0,last:0};
+ CP.kat=setInterval(()=>{if(CP&&CP.on&&Date.now()-CP.last>1000){CP.ka=true;cpKick();}},1000);
+ $('clreo').checked=c.reo;cpUi();cpPush();}
+async function cpStop(reo){if(!CP)return;clearInterval(CP.kat);if(CP.tm)clearTimeout(CP.tm);CP.on=false;CP=null;cpUi();
+ busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)await sxLaunch();}
+$('clprev').onclick=cpGo;$('clpvstop').onclick=()=>cpStop($('clreo').checked);
 
 // ---------------- Home: Google Drive, ShowXpress launch / close, updates, brand
 let G=null,UPD=0;
@@ -1859,13 +1939,17 @@ function lvSide(){if(!LV)return;LV.raf=0;const h=LV.sel;if(!h)return;lvList();co
  const n=lvNav(),i=n.indexOf(h),nx=$('lvnext');$('lvprev').disabled=i<=0;
  if(i<n.length-1){nx.disabled=false;nx.innerHTML='Next head &rarr;';}else if(st==='c'){nx.disabled=false;nx.innerHTML='Corners &rarr;';}else{nx.disabled=true;nx.innerHTML='Last head';}}
 // ---- open / close
-async function lvGo(){if(LV)return;let reo=false;
- if(sxOpen){if(!await ask('Close ShowXpress to aim live?','Only one program can use the DMX interface, so ShowXpress closes while you aim. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It opens again when you finish.','Close and aim live'))return;
-  let r;try{r=await api('/api/sx/close',{live:true});}catch(e){r={ok:false,error:'Lost connection.'};}if(!r.ok){showResult(r,'live');return;}
-  busy(true,'Waiting for ShowXpress to close… (save it if it asks)');const t0=Date.now();let open=true;
-  while(Date.now()-t0<120000){await sleep(1000);try{open=(await api('/api/sx')).open;}catch(e){}if(!open)break;}
-  if(open){busy(false);try{await api('/api/live/stop',{});}catch(e){}showResult({ok:false,error:'ShowXpress is still open. Close it (save if it asks), then press Aim live again.'},'live');return;}
-  busy(true,'ShowXpress closed - waiting for it to let go of the interface…');await sleep(2500);reo=true;}
+// close ShowXpress so the Helper can use the DMX interface (Aim live, Tonight's Color preview) -> {go, reo: it was open}
+async function sxCloseLive(title,text,yes,again,what){if(!sxOpen)return {go:true,reo:false};
+ if(!await ask(title,text,yes))return {go:false};
+ let r;try{r=await api('/api/sx/close',{live:true});}catch(e){r={ok:false,error:'Lost connection.'};}if(!r.ok){showResult(r,what);return {go:false};}
+ busy(true,'Waiting for ShowXpress to close… (save it if it asks)');const t0=Date.now();let open=true;
+ while(Date.now()-t0<120000){await sleep(1000);try{open=(await api('/api/sx')).open;}catch(e){}if(!open)break;}
+ if(open){busy(false);try{await api('/api/live/stop',{});}catch(e){}showResult({ok:false,error:'ShowXpress is still open. Close it (save if it asks), then press '+again+' again.'},what);return {go:false};}
+ busy(true,'ShowXpress closed - waiting for it to let go of the interface…');await sleep(2500);return {go:true,reo:true};}
+async function lvGo(){if(LV||CP)return;
+ const c=await sxCloseLive('Close ShowXpress to aim live?','Only one program can use the DMX interface, so ShowXpress closes while you aim. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It opens again when you finish.','Close and aim live','Aim live','live');
+ if(!c.go)return;const reo=c.reo;
  const r=await lvStart(aimMode);
  if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'live');return;}
  lvOpen(r,reo);}
@@ -1926,8 +2010,8 @@ document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display
  if(k==='Tab'){e.preventDefault();lvStepTo(e.shiftKey?-1:1);return;}
  if(e.ctrlKey||e.altKey)return;
  if(k==='n'||k==='N')lvStepTo(1);else if(k==='p'||k==='P')lvStepTo(-1);else if(k==='1')lvSetStep('c');else if(k==='2')lvSetStep('k');});
-window.addEventListener('beforeunload',()=>{if(LV)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
-window.addEventListener('pagehide',()=>{if(LV&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('beforeunload',()=>{if(LV||CP)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('pagehide',()=>{if((LV||CP)&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
 // ---------------- SETTINGS (cogwheel, user 2026-11-22): look (per device), tab order / hidden tabs (shared, settings.json
 // on the computer), Google Drive, phone & iPad, ShowXpress, updates
@@ -2140,6 +2224,10 @@ try {
           $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
           if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }); out = '' }; break }
           $script:liveHold = Get-Date
+          # REVERSE HEADS: the screen works "as if hung normally"; heads the Helper reverses get 65535 - v here (like the fixture's menu)
+          $script:liveInv = @{}
+          try { foreach ($h in @(($j | ConvertFrom-Json).heads)) { $ad = [int]$h.addr
+            if ($h.rp) { $script:liveInv[$ad] = 1; $script:liveInv[$ad + 1] = 1 }; if ($h.rt) { $script:liveInv[$ad + 2] = 1; $script:liveInv[$ad + 3] = 1 } } } catch {}
           # NovaStar NovaLCT (LED screens) has a USB scanner that grabs the D512S (found 2026-11-21). Paused only when the user says so.
           if ($body.stopNova -and -not $onMac) { Get-Process MarsServerProvider -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 }
           $s = Start-Live
@@ -2153,6 +2241,12 @@ try {
           $ln = "$($body.l)"
           if ($ln.Length -gt 60000 -or @($ln -split ' ' | Where-Object { $_ -and $_ -notmatch '^(z|k|b:\d{1,4}:\d{1,3}|[ps]:\d{1,4}:\d{1,4}:\d{1,5})$' }).Count) { Send-Json $ctx @{ ok = $false; error = 'Bad output command.' }; break }
           if (-not (Test-Live)) { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The DMX output stopped.' }; break }
+          if ($script:liveInv -and $script:liveInv.Count) {
+            $ln = (@($ln -split ' ') | ForEach-Object {
+              if ($_ -match '^([ps]):(\d+):(\d+):(\d+)$' -and $script:liveInv[[int]$matches[2]]) { "$($matches[1]):$($matches[2]):$($matches[3]):$(65535 - [int]$matches[4])" }
+              elseif ($_ -match '^b:(\d+):(\d+)$' -and $script:liveInv[[int]$matches[1]]) { "b:$($matches[1]):$(255 - [int]$matches[2])" }
+              else { $_ } }) -join ' '
+          }
           try { $script:liveP.StandardInput.WriteLine($ln); Send-Json $ctx @{ ok = $true } } catch { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The DMX output stopped.' } }
         }
         '/api/live/stop' { Stop-Live; $script:liveHold = [datetime]::MinValue; Send-Json $ctx @{ ok = $true } }

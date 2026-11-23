@@ -109,9 +109,11 @@ if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir }
 
 if ($Action -eq 'Preview') {
   $hung = if ($state.hung) { $state.hung } else { @($movers | ForEach-Object Id) }
+  $flip = Get-FlipState $root   # REVERSE HEADS (flip.ps1) - shown + saved on this tab too
   [pscustomobject]@{
     ok = $true; show = $root
-    heads = @(foreach ($m in $movers) { [pscustomobject]@{ id = $m.Id; label = (Get-Label $m); num = $m.Num; is140 = $m.Is140; on = ($hung -contains $m.Id) } })
+    heads = @(foreach ($m in $movers) { [pscustomobject]@{ id = $m.Id; label = (Get-Label $m); num = $m.Num; is140 = $m.Is140; on = ($hung -contains $m.Id)
+      rp = [bool]($flip[$m.Id] -and $flip[$m.Id].pan); rt = [bool]($flip[$m.Id] -and $flip[$m.Id].tilt) } })
     scenes = @(foreach ($s in $scenes) {
       [pscustomobject]@{
         file = $s.File; name = ($s.File -replace '\.scex$', ''); titles = $s.Titles; trimmed = $s.Trimmed; edited = $s.Edited

@@ -61,6 +61,27 @@ function Get-ShowMovers($root) {
 
 function Get-Label($m) { if ($m.Is140) { "140 #$($m.Num)" } else { "251 #$($m.Num)" } }
 
+# ---------------------------------------------------------------- REVERSE HEADS (flip.ps1, user 2026-11-23)
+# The Helper's own pan / tilt reverse = what the setting in the fixture's own menu does (DMX v -> 65535 - v), so a head
+# hung the "wrong" way round doesn't need its menu changed. Rule: the show files ALWAYS hold what goes out to the heads
+# (reversed heads already reversed); the Helper's own maths (aims, home, RIG ID...) is "as if hung normally".
+# ConvertTo-SentPos turns one into the other (it's the same both ways).
+function Get-FlipState($root) {
+  # id -> @{ pan = bool; tilt = bool } for every head reversed by the Helper
+  $r = @{}; $p = "$root/flip_state.json"
+  if (-not (Test-Path -LiteralPath $p)) { return $r }
+  try { $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json } catch { throw "flip_state.json in the show folder can't be read - NOTHING was changed. (It says which heads the Helper reverses.)" }
+  if ($j.heads) { foreach ($q in $j.heads.PSObject.Properties) {
+    $pn = [bool]$q.Value.pan; $tl = [bool]$q.Value.tilt
+    if ($pn -or $tl) { $r["$($q.Name)"] = @{ pan = $pn; tilt = $tl } } } }
+  $r
+}
+function ConvertTo-SentPos($flip, [string]$id, $pos) {
+  $f = $flip[$id]; $p = [int]$pos[0]; $t = [int]$pos[1]
+  if ($f) { if ($f.pan) { $p = 65535 - $p }; if ($f.tilt) { $t = 65535 - $t } }
+  ,@($p, $t)
+}
+
 # ---------------------------------------------------------------- truss T-bars in the 2D view (Rig Test writes them)
 # Spots = top-left corner of the fixture icon (pixels). Each tower = one T-bar: [left head, right head], right = x + gap.
 $trussSpots = @(

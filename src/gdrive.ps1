@@ -1,7 +1,7 @@
 # SYNC TO / IMPORT FROM GOOGLE DRIVE - the show's copy in Google Drive > AWAAZ > Lighting > <show folder name>.
 #   Uses the Google Drive app's own folder on this computer (Windows: the Google Drive drive letter, "My Drive";
 #   Mac: ~/Library/CloudStorage/GoogleDrive-*/My Drive), so Google Drive uploads/downloads it by itself.
-#   -Action Preview -> JSON { ok, show, here, target, found, last, srcFound, srcTime, lastImport }
+#   -Action Preview -> JSON { ok, show, here, target, found, last, srcFound, srcTime, lastImport, my, override, account, appFound }
 #   -Action Sync    -> one way, never deletes: new and changed files are copied; a file that is NEWER on Google Drive
 #                      is left alone. Prints a summary.
 #   -Action Import  -> (user 2026-11-22) the show on Google Drive REPLACES the show on this computer (files that aren't
@@ -17,7 +17,13 @@ param(
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'show_common.ps1')
 
+# Settings (cogwheel) can name the My Drive folder by hand (driveFolder) - used first if it still exists
+$setF = if ($TestRoot) { Join-Path $TestRoot 'settings.json' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/settings.json' } else { Join-Path $env:APPDATA 'ShowXpress Helper/settings.json' }
+$override = ''
+if (Test-Path -LiteralPath $setF) { try { $override = "$(([IO.File]::ReadAllText($setF) | ConvertFrom-Json).driveFolder)" } catch {} }
+$appFound = if ($onMac) { Test-Path -LiteralPath '/Applications/Google Drive.app' } else { Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Google/Drive File Stream/launch.bat') }
 function Find-MyDrive {
+  if ($override -and (Test-Path -LiteralPath $override -PathType Container)) { return $override }
   if ($onMac) {
     $c = @(Get-ChildItem -LiteralPath (Join-Path $HOME 'Library/CloudStorage') -Directory -Filter 'GoogleDrive-*' -ErrorAction SilentlyContinue)
     foreach ($d in $c) { $p = Join-Path $d.FullName 'My Drive'; if (Test-Path -LiteralPath $p) { return $p } }
@@ -31,6 +37,8 @@ function Find-MyDrive {
   $null
 }
 $my = if ($Target -or $TestRoot) { $null } else { Find-MyDrive }
+# the signed-in account: the Mac folder is GoogleDrive-<email>; Windows doesn't show it in the path
+$account = if ("$my" -match 'GoogleDrive-([^\\/]+)') { $Matches[1] } else { '' }
 $root = if ($TestRoot) { $TestRoot } else {
   try { Find-Show } catch {
     # no show on this computer yet (new Mac): the show on Google Drive goes into the normal ShowXpress folder
@@ -55,7 +63,8 @@ if ($Action -eq 'Preview') {
   $sf = [bool]($srcLive -and (Test-Path -LiteralPath $srcLive))
   [pscustomobject]@{ ok = $true; show = $root; here = (Test-Path -LiteralPath (Join-Path $root 'Live/live.ini')); found = [bool]$dest; target = $dest; last = $last
     srcFound = $sf; srcTime = $(if ($sf) { (Get-Item -LiteralPath $srcLive).LastWriteTime.ToString('s') } else { '' })
-    lastImport = $(if (Test-Path -LiteralPath $impF) { "$(([IO.File]::ReadAllText($impF) | ConvertFrom-Json).imported)" } else { '' }) } | ConvertTo-Json -Compress
+    lastImport = $(if (Test-Path -LiteralPath $impF) { "$(([IO.File]::ReadAllText($impF) | ConvertFrom-Json).imported)" } else { '' })
+    my = "$my"; override = $override; account = $account; appFound = [bool]$appFound } | ConvertTo-Json -Compress
   return
 }
 if (-not $dest) { throw "Google Drive not found on this computer - is the Google Drive app installed and signed in? NOTHING was $(if ($Action -eq 'Import') { 'changed' } else { 'copied' })." }

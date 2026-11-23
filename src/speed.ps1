@@ -1,6 +1,6 @@
 # SPEED FADERS - which master speed fader (MOVEMENTS, COLORS, STROBES, CHASES...) each live button follows.
 #
-#   -Action Preview                     -> JSON for the ShowXpress Helper window (writes nothing)
+#   -Action Preview                     -> JSON for the SX Helper window (writes nothing)
 #   -Action Apply -ChangesFile <json>   -> [{ sec: "page3_button1", title: "...", fader: 0-based master fader }]
 #
 #   live.ini key: masterspeedfader = K (0 = first fader). A button without the key follows fader 0.

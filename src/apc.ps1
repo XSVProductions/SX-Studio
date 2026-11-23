@@ -1,6 +1,6 @@
 # APC MINI - shows which live button each APC mini mk2 pad plays, and moves / swaps / clears pad mappings.
 #
-#   -Action Preview                     -> JSON for the ShowXpress Helper window (writes nothing)
+#   -Action Preview                     -> JSON for the SX Helper window (writes nothing)
 #   -Action Apply -ChangesFile <json>   -> [{ sec: "page3_button1", title: "...", note: 0-63 | -1 (take it off the pads),
 #                                             on: 0-127, off: 0-127 (optional: pad colour while playing / idle, mk2 palette) }]
 #

@@ -1,4 +1,4 @@
-# ShowXpress Helper - shared bits, dot-sourced by df_aim.ps1 (aim movers) and skip_flash.ps1 (skip flash heads).
+# SX Helper - shared bits, dot-sourced by df_aim.ps1 (aim movers) and skip_flash.ps1 (skip flash heads).
 # Runs on Windows (PowerShell 5.1, Boot Camp side) and macOS (PowerShell 7 "pwsh").
 $onMac = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $m140  = 'Intimidator Hybrid 140SR (19ch)'
@@ -28,15 +28,19 @@ function Find-Show {
 }
 
 # ShowXpress itself = TheLightingController (Windows), TheLightingController.app (Mac; pwsh on Mac cuts process names
-# to 16 letters, "TheLightingContr"). NOT our own Mac app "ShowXpressHelper" - matching it made the Helper think
+# to 16 letters, "TheLightingContr"). NOT our own Mac app "SXHelper" - matching it made the Helper think
 # ShowXpress was always open on the Mac (user 2026-11-22).
 function Get-SxProcess {
-  $ps = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh' })
   if ($onMac) {
-    $ps = @($ps | Where-Object { "$($_.Path)" -notmatch 'ShowXpress Helper\.app' })
-    if (-not $ps.Count) { $ps = @(& pgrep -f 'TheLightingController\.app/Contents/MacOS/' 2>$null | ForEach-Object { Get-Process -Id ([int]$_) -ErrorAction SilentlyContinue }) }
+    # only ShowXpress's own main program counts (user 2026-11-22: a leftover part of it made the Helper say "open"
+    # after ShowXpress had closed, so Launch did nothing): ps gives the full program path; finished (zombie) ones are skipped
+    return @(& ps -axo 'pid=,stat=,comm=' 2>$null | ForEach-Object {
+      if ($_ -match '^\s*(\d+)\s+(\S+)\s+(.+)$') {
+        $id = [int]$Matches[1]; $stat = $Matches[2]; $exe = $Matches[3].Trim()
+        if ($stat -notmatch '^Z' -and $exe -match '\.app/Contents/MacOS/(TheLightingController|ShowXpress)[^/]*$' -and $exe -notmatch 'Helper|sxh') { Get-Process -Id $id -ErrorAction SilentlyContinue }
+      } })
   }
-  $ps
+  @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh|setup|unins|updat' })
 }
 function Test-SxRunning { [bool]@(Get-SxProcess).Count }
 

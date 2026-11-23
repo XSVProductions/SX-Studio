@@ -1,7 +1,7 @@
 # RIG TEST - which 140 is hanging where tonight, without wiggling dimmers.
 #
 #   The RIG ID button (SETUP page) lights every 140SR in its own look: #1-#8 solid colours, #9-#16 the same colours
-#   flashing. In the ShowXpress Helper you tap each truss spot and pick the look you see there. Save moves every head
+#   flashing. In the SX Helper you tap each truss spot and pick the look you see there. Save moves every head
 #   to its spot in the Editor 2D view (Editor/2DView/fixtures.ini); heads that aren't hung go in a neat block in the middle.
 #
 #   2D page = the room seen from the DJ booth (bottom of the page). The 4 corners are the 4 towers, 2 heads per T-bar:

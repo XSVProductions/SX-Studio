@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Builds the ShowXpress Helper DEMO (no laptop needed) into _site/demo/ for GitHub Pages.
+"""Builds the SX Helper DEMO (no laptop needed) into _site/demo/ for GitHub Pages.
 
 It is the Helper's real phone page (the $html block in src/df_aim_gui.ps1) with demo/demo_api.js in front of it:
 a pretend laptop that answers every /api/ call with a made-up show, so nothing reaches ShowXpress or the lights.
@@ -29,29 +29,32 @@ def main():
     rep('/icon.png?t=__TOKEN__', 'icon.png')
     rep('src="/icon.png"', 'src="icon.png"')
     rep('href="/icon.png"', 'href="icon.png"')
-    rep('<title>ShowXpress Helper</title>', '<title>ShowXpress Helper – Demo</title>', 1)
+    rep('<title>SX Helper</title>', '<title>SX Helper – Demo</title>', 1)
     rep('content="SX Helper"', 'content="SX Demo"', 1)
     rep('<link rel="apple-touch-icon" href="icon.png">', '<link rel="apple-touch-icon" href="icon.png"><link rel="manifest" href="manifest.webmanifest">', 1)
-    rep("if(__PHONE__){try{T=localStorage.getItem('sxh_phone_key')||'';}catch(e){T='';}}", "T='demo';", 1)
+    rep("if(__PHONE__){let ls='';try{ls=localStorage.getItem('sxh_phone_key')||'';}catch(e){}\n"
+        " const uk=new URLSearchParams(location.search).get('k')||'',ck='__PHONEKEY__';\n"
+        " T=ck||uk||ls;   // the server only fills ck with the CURRENT key, so it wins over an old one\n"
+        " if(T){phKeep(T);}}", "T='demo';", 1)
     rep('__PHONE__', 'true')
     rep("'__TOKEN__'", "''")
-    rep('<h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>',
-        '<h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper <span class="tag amber" style="font-size:11px;vertical-align:2px">DEMO</span></h1>', 1)
+    rep('<h1 id="ttl" style="cursor:pointer" title="Home">SX Helper</h1>',
+        '<h1 id="ttl" style="cursor:pointer" title="Home">SX Helper <span class="tag amber" style="font-size:11px;vertical-align:2px">DEMO</span></h1>', 1)
     rep(' <div class="view" id="v-home">\n  <section class="card">',
         ' <div class="view" id="v-home">\n  <section class="card" style="border-color:rgba(255,176,32,.45);background:rgba(255,176,32,.06)">'
         '<h2>&#9888; Demo &mdash; not connected to a laptop</h2><p class="sub" style="margin:0">A pretend show with 10 movers, so you can try every screen: '
         'tap heads, save, aim live with your finger, start the Auto Show. Nothing is sent to ShowXpress or the lights, and it works without internet. '
         'The APC mini and Speed Faders tabs only work on the real laptop. For the real thing, open the address the Helper shows on the laptop '
-        '(Home &rarr; Phone &amp; iPad).</p></section>\n  <section class="card">', 1)
+        '(&#9881; Settings &rarr; Phone &amp; iPad).</p></section>\n  <section class="card">', 1)
     rep('<script>\n', '<script>\n' + api + "\ntry{if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js');}catch(e){}\n</script>\n<script>\n", 1)
-    if re.search(r'__PHONE__|__TOKEN__', h):
+    if re.search(r'__PHONE__|__PHONEKEY__|__TOKEN__', h):
         sys.exit('build_demo: a placeholder is left in the page')
 
     shutil.rmtree(OUT, ignore_errors=True)
     os.makedirs(OUT)
     open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(h)
     shutil.copy(os.path.join(ROOT, 'assets', 'aim_movers_1024.png'), os.path.join(OUT, 'icon.png'))
-    json.dump({'name': 'ShowXpress Helper Demo', 'short_name': 'SX Demo', 'start_url': './', 'scope': './', 'display': 'standalone',
+    json.dump({'name': 'SX Helper Demo', 'short_name': 'SX Demo', 'start_url': './', 'scope': './', 'display': 'standalone',
                'background_color': '#0e1014', 'theme_color': '#0e1014',
                'icons': [{'src': 'icon.png', 'sizes': '1024x1024', 'type': 'image/png', 'purpose': 'any'}]},
               open(os.path.join(OUT, 'manifest.webmanifest'), 'w'), indent=1)
@@ -65,7 +68,7 @@ self.addEventListener('fetch',e=>{{if(e.request.method!=='GET')return;
 """)
     # a landing page at the site root that sends people to the demo
     open(os.path.join(ROOT, '_site', 'index.html'), 'w').write('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=demo/">'
-                                                              '<title>ShowXpress Helper</title><a href="demo/">ShowXpress Helper demo</a>')
+                                                              '<title>SX Helper</title><a href="demo/">SX Helper demo</a>')
     print('built', OUT, tag)
 
 

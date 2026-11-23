@@ -4,7 +4,7 @@
 #   heads of a step aren't hung at the venue, that step is a dark gap and the chase stutters. This takes those steps
 #   out (plus any all-dark "gap" steps that follow them, so the rhythm stays the same) and puts them back later.
 #
-#   -Action Preview                   -> JSON for the ShowXpress Helper window (writes nothing)
+#   -Action Preview                   -> JSON for the SX Helper window (writes nothing)
 #   -Action Apply -Heads "id,id,..."  -> trims / restores every chase scene on a live button
 #
 #   The full scenes are kept in <show>/rig_state.json while they are trimmed, so ticking every head puts them back

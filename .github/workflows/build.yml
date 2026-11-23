@@ -59,15 +59,15 @@ jobs:
       - name: Smoke test (install the pkg, start the app's server, call it)
         run: |
           sudo installer -pkg build/mac/*.pkg -target /
-          A="/Applications/ShowXpress Helper.app/Contents"
+          A="/Applications/SX Helper.app/Contents"
           ls -l "$A/MacOS" "$A/Resources"
-          test -x "$A/MacOS/ShowXpressHelper" && test -f "$A/Resources/launch.sh" && test -x "$A/MacOS/sxh_dmx" && lipo "$A/MacOS/ShowXpressHelper" -verify_arch x86_64 arm64 && test -f "$A/Resources/AppIcon.icns" && test -f "$A/Resources/color.ps1" && test -f "$A/Resources/gdrive.ps1" && test -f "$A/Resources/sx_remote.ps1" && test -f "$A/Resources/version.txt"
+          test -x "$A/MacOS/SXHelper" && test -f "$A/Resources/launch.sh" && test -x "$A/MacOS/sxh_dmx" && lipo "$A/MacOS/SXHelper" -verify_arch x86_64 arm64 && test -f "$A/Resources/AppIcon.icns" && test -f "$A/Resources/color.ps1" && test -f "$A/Resources/gdrive.ps1" && test -f "$A/Resources/sx_remote.ps1" && test -f "$A/Resources/version.txt"
           test ! -e "$A/Resources/sync_from_windows.sh"
           pwsh -NoProfile -File "$A/Resources/df_aim_gui.ps1" -NoBrowser -Port 47390 > /tmp/gui.log 2>&1 &
           sleep 8
-          URL="$(pwsh -NoProfile -c '(Get-Content (Join-Path ([IO.Path]::GetTempPath()) "showxpress_helper_gui.json") -Raw | ConvertFrom-Json).url')"
+          URL="$(pwsh -NoProfile -c '(Get-Content (Join-Path ([IO.Path]::GetTempPath()) "showxpress_helper_gui_47390.json") -Raw | ConvertFrom-Json).url')"
           TOK="${URL##*t=}"
-          curl -fsS "http://localhost:47390/?t=$TOK" | grep -q "ShowXpress Helper"
+          curl -fsS "http://localhost:47390/?t=$TOK" | grep -q "SX Helper"
           curl -fsS "http://localhost:47390/api/sx?t=$TOK"; echo
           # no show on the build machine -> expect the friendly "show folder not found" message from every engine
           for EP in preview "preview?mode=room" skip rig apc speed health color gdrive; do
@@ -78,17 +78,17 @@ jobs:
       - name: Smoke test (open the app itself, it starts its server and shows it)
         run: |
           pkill -f "df_aim_gui.ps1 -NoBrowser -Port 47390" || true
-          open "/Applications/ShowXpress Helper.app"
+          open "/Applications/SX Helper.app"
           L="$HOME/AwaazTools/showxpress_helper_app.log"
           for i in $(seq 90); do grep -q "loaded http://localhost:47321" "$L" 2>/dev/null && break; sleep 1; done
           cat "$L" || true; cat "$HOME/AwaazTools/showxpress_helper_error.log" 2>/dev/null || true
           grep -q "loaded http://localhost:47321" "$L"
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:47321/)" = 403
-          pgrep -f "ShowXpress Helper.app/Contents/MacOS/ShowXpressHelper"
+          pgrep -f "SX Helper.app/Contents/MacOS/SXHelper"
           osascript -e 'quit app id "io.github.aimmovers.app"' || true
       - name: Smoke test (phone / iPad over the Wi-Fi relay)
         run: |
-          A="/Applications/ShowXpress Helper.app/Contents"
+          A="/Applications/SX Helper.app/Contents"
           T="$(mktemp -d)"; printf '{"on":true,"key":"ci0key0ci0key"}' > "$T/phone.json"
           pwsh -NoProfile -File "$A/Resources/df_aim_gui.ps1" -NoBrowser -Port 47392 -PhonePort 47393 -TestRoot "$T" > /tmp/gui2.log 2>&1 &
           for i in $(seq 40); do curl -s -o /dev/null "http://127.0.0.1:47393/" && break; sleep 1; done
@@ -152,6 +152,6 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "ShowXpress Helper $GITHUB_REF_NAME" \
+            gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "SX Helper $GITHUB_REF_NAME" \
               --notes "Windows: download the .exe and run it. Mac: download the .pkg and open it. See the README for first-run notes."
           fi

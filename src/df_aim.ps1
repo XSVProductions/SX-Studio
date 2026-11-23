@@ -4,7 +4,7 @@
 #     STEP 1 = CENTER : aim every head at the center of tonight's dancefloor.
 #     STEP 2 = CORNER : (optional per head) aim the head at the SAME corner of the floor every time
 #                       (front-left as seen from the DJ). Heads left untouched in step 2 keep normal size.
-#   Close ShowXpress, open ShowXpress Helper (df_aim_gui.ps1 = the window; this file does the work), set size, Apply.
+#   Close ShowXpress, open SX Helper (df_aim_gui.ps1 = the window; this file does the work), set size, Apply.
 #   (Run on its own = old text menu: pick 1, type overall size, Enter = 100.)
 #     - center  -> per head OffsetPan/OffsetTilt   (aim - home)
 #     - corner  -> per head ZoomPan/ZoomTilt so that head's patterns reach the corner you showed it

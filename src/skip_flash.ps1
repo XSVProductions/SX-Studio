@@ -4,7 +4,7 @@
 #   not set up at the venue still gets its step, so the chase has a dark gap and looks like it stutters. So the scene
 #   should only contain the heads that are actually hung tonight.
 #
-#   -Action Preview                  -> JSON for the ShowXpress Helper window (writes nothing)
+#   -Action Preview                  -> JSON for the SX Helper window (writes nothing)
 #   -Action Apply -Heads "id,id,..." -> rebuilds the SKIP FLASH scene with just those heads
 #
 #   What's kept from the current scene: the step time and the lit / dark channel values per model (so a colour or

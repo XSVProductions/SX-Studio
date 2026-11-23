@@ -1,4 +1,4 @@
-﻿# ShowXpress Helper (was AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
+﻿# SX Helper (was AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
 # Runs a private web page on this computer only (localhost + random key) and opens it as an app window
 # (Edge/Chrome "app" mode, else the normal browser). Each tab is backed by a script that does the work:
 #   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
@@ -29,7 +29,8 @@ $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Tr
 $updInfo = $null
 $onMac  = [bool](Get-Variable IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
 $psExe  = (Get-Process -Id $PID).Path
-$infoF  = Join-Path ([IO.Path]::GetTempPath()) 'showxpress_helper_gui.json'
+# a copy on other ports (testing) keeps its own info file, so the real Helper never opens the test copy's window
+$infoF  = Join-Path ([IO.Path]::GetTempPath()) $(if ($Port -eq 47321) { 'showxpress_helper_gui.json' } else { "showxpress_helper_gui_$Port.json" })
 $idleMax = 300   # seconds without the window checking in -> quit
 
 function Open-AppWindow($url) {
@@ -68,7 +69,7 @@ catch {
   }
   if (-not $up) {
     if ($i) { Open-AppWindow $i.url; return }
-    throw "Port $Port is busy and no running ShowXpress Helper was found."
+    throw "Port $Port is busy and no running SX Helper was found."
   }
 }
 $url = "http://localhost:$Port/?t=$token"
@@ -79,15 +80,19 @@ function Test-SxOpen {
   [bool]@(Get-SxProcess).Count
 }
 # ShowXpress itself = TheLightingController (Windows), TheLightingController.app (Mac; pwsh on Mac cuts process names
-# to 16 letters, "TheLightingContr"). NOT our own Mac app "ShowXpressHelper" - matching it made the Helper think
+# to 16 letters, "TheLightingContr"). NOT our own Mac app "SXHelper" - matching it made the Helper think
 # ShowXpress was always open on the Mac (user 2026-11-22).
 function Get-SxProcess {
-  $ps = @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh' })
   if ($onMac) {
-    $ps = @($ps | Where-Object { "$($_.Path)" -notmatch 'ShowXpress Helper\.app' })
-    if (-not $ps.Count) { $ps = @(& pgrep -f 'TheLightingController\.app/Contents/MacOS/' 2>$null | ForEach-Object { Get-Process -Id ([int]$_) -ErrorAction SilentlyContinue }) }
+    # only ShowXpress's own main program counts (user 2026-11-22: a leftover part of it made the Helper say "open"
+    # after ShowXpress had closed, so Launch did nothing): ps gives the full program path; finished (zombie) ones are skipped
+    return @(& ps -axo 'pid=,stat=,comm=' 2>$null | ForEach-Object {
+      if ($_ -match '^\s*(\d+)\s+(\S+)\s+(.+)$') {
+        $id = [int]$Matches[1]; $stat = $Matches[2]; $exe = $Matches[3].Trim()
+        if ($stat -notmatch '^Z' -and $exe -match '\.app/Contents/MacOS/(TheLightingController|ShowXpress)[^/]*$' -and $exe -notmatch 'Helper|sxh') { Get-Process -Id $id -ErrorAction SilentlyContinue }
+      } })
   }
-  $ps
+  @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh|setup|unins|updat' })
 }
 function Get-SxExe {
   foreach ($p in "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
@@ -98,7 +103,7 @@ function Get-Update {
   if ($script:updInfo) { return $script:updInfo }
   try {
     if (-not $onMac) { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 }
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'ShowXpress-Helper'; Accept = 'application/vnd.github+json' } -TimeoutSec 10 -UseBasicParsing
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ 'User-Agent' = 'SX-Helper'; Accept = 'application/vnd.github+json' } -TimeoutSec 10 -UseBasicParsing
     $lat = "$($rel.tag_name)".TrimStart('v')
     $as = @($rel.assets | Where-Object { $_.name -match $(if ($onMac) { '\.pkg$' } else { '\.exe$' }) }) | Select-Object -First 1
     $newer = $false; try { $newer = [version]$lat -gt [version]$appVer } catch {}
@@ -154,6 +159,11 @@ function Send-Text($ctx, [int]$code, [string]$type, [string]$text) {
   $r.StatusCode = $code; $r.ContentType = $type; $r.Headers.Add('Cache-Control', 'no-store'); $r.ContentLength64 = $b.Length
   $r.OutputStream.Write($b, 0, $b.Length); $r.Close()
 }
+# PAIRED PHONES STAY PAIRED (user 2026-11-22): the key is kept in 3 places on the phone - localStorage, a 10-year
+# HttpOnly cookie set here, and the page address (/?k=...), so a Home Screen icon (own storage on iOS) carries it too.
+# Only "Unpair all phones" (new key) makes a phone pair again.
+function Set-PhoneCookie($ctx) { $ctx.Response.AppendHeader('Set-Cookie', "sxh_k=$($script:ph.key); Max-Age=315360000; Path=/; HttpOnly; SameSite=Lax") }
+function Get-PhoneCookieKey($req) { $c = $req.Cookies['sxh_k']; if ($c -and $script:ph.key -and $c.Value -ceq $script:ph.key) { $c.Value } else { '' } }
 function Send-Json($ctx, $obj) { Send-Text $ctx 200 'application/json; charset=utf-8' ($obj | ConvertTo-Json -Depth 6 -Compress) }
 function Send-EngineJson($ctx, $r) {
   # engine printed one line of JSON (Preview / Check) -> pass it straight on
@@ -187,7 +197,7 @@ function Find-SxMacApp {
 }
 function Start-Sx {
   if ($TestRoot) { [IO.File]::WriteAllText((Join-Path $TestRoot '_sx_open'), 'test'); return @{ ok = $true; out = '  (test) ShowXpress would open now'; error = '' } }
-  if (Test-SxOpen) { return @{ ok = $true; out = '  ShowXpress is already open'; error = '' } }
+  if (Test-SxOpen) { return @{ ok = $true; already = $true; out = '  ShowXpress is already open'; error = '' } }
   if ($onMac) {
     $a = Find-SxMacApp
     if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications.'; out = '' } }
@@ -455,6 +465,47 @@ function Save-Phone {
   [IO.File]::WriteAllText($phoneF, ($script:ph | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 if (-not $script:ph.key) { $script:ph.key = New-PhoneKey }
+
+# ---- SETTINGS (user 2026-11-22: the cogwheel). settings.json next to phone.json. Light/dark is per device (browser);
+# the tab layout is shared by the window, phones and iPads. driveFolder = Google Drive's My Drive (gdrive.ps1 reads it).
+$setF = Join-Path $cfgDir 'settings.json'
+$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto')
+function Get-Settings {
+  $s = [ordered]@{ tabOrder = $tabIds; tabHidden = @(); reopen = $true; autoUpd = $true; driveFolder = '' }
+  if (Test-Path -LiteralPath $setF) {
+    try { $j = [IO.File]::ReadAllText($setF) | ConvertFrom-Json; foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } } } catch {}
+  }
+  $o = @(@($s.tabOrder) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
+  $s.tabOrder = @($o + @($tabIds | Where-Object { $o -notcontains $_ }))
+  $s.tabHidden = @(@($s.tabHidden) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
+  $s.reopen = [bool]$s.reopen; $s.autoUpd = [bool]$s.autoUpd; $s.driveFolder = "$($s.driveFolder)"
+  $s
+}
+function Save-Settings($s) {
+  if (-not (Test-Path -LiteralPath $cfgDir)) { [void](New-Item -ItemType Directory -Path $cfgDir -Force) }
+  [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+}
+function Get-BackupDir { if ($TestRoot) { Join-Path (Split-Path (Split-Path $TestRoot)) 'HelperBackups' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/backups' } else { Join-Path $env:APPDATA 'ShowXpress Helper/backups' } }
+function Open-OnComputer([string]$what) {
+  $t = switch ($what) {
+    'show'    { $j = (Invoke-Engine '-Action Preview' $gdEngine).out -split "`r?`n" | Where-Object { $_ -match '^\{' } | Select-Object -Last 1; if ($j) { ($j | ConvertFrom-Json).show } else { '' } }
+    'backups' { Get-BackupDir }
+    'gddl'    { 'https://www.google.com/drive/download/' }
+    'gdapp'   { if ($onMac) { '/Applications/Google Drive.app' } else { Join-Path $env:ProgramFiles 'Google/Drive File Stream/launch.bat' } }
+    default   { '' }
+  }
+  if (-not $t) { return @{ ok = $false; error = 'Nothing to open.'; out = '' } }
+  if ($t -notmatch '^https://' -and -not (Test-Path -LiteralPath $t)) {
+    return @{ ok = $false; out = ''; error = $(switch ($what) { 'backups' { 'No import backups yet - one is made each time you import from Google Drive.' } 'gdapp' { "Google Drive for desktop isn't installed - press Get Google Drive." } default { "Not found: $t" } }) }
+  }
+  if ($TestRoot) { return @{ ok = $true; out = "  (test) would open $t"; error = '' } }
+  if ($onMac) { & open $t }
+  elseif ($what -eq 'gdapp') { Start-Process -FilePath $t -WindowStyle Hidden }
+  elseif ($t -match '^https://') { Start-Process $t }
+  else { Start-Process explorer.exe -ArgumentList "`"$t`"" }
+  @{ ok = $true; out = ''; error = '' }
+}
+$script:qReopen = (Get-Settings).reopen
 $script:pin = ''; $script:pinUntil = [datetime]::MinValue; $script:pinFails = 0; $script:pinLock = [datetime]::MinValue
 $script:relay = $null; $script:relayErr = ''
 $relayCs = @'
@@ -607,19 +658,21 @@ function Get-PhoneInfo {
 }
 # routes a phone may use without its key, and routes only the computer itself may use
 $phoneOpen = @('/', '/icon.png', '/brand.png', '/api/phone/pair')
-$phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair')
+$phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open')
 if ($script:ph.on) { Start-PhoneRelay }
 
 $html = @'
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>ShowXpress Helper</title>
+<html lang="en"><head><meta charset="utf-8"><title>SX Helper</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/icon.png?t=__TOKEN__">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="SX Helper"><meta name="theme-color" content="#0e1014"><link rel="apple-touch-icon" href="/icon.png">
 <style>
-:root{--bg:#0e1014;--card:#171a21;--line:#262b36;--txt:#e9ecf1;--dim:#8b93a3;--amber:#ffb020;--green:#3ddc84;--red:#ff5c5c;--blue:#5aa9ff}
+:root{--bg:#0e1014;--card:#171a21;--line:#262b36;--txt:#e9ecf1;--dim:#8b93a3;--amber:#ffb020;--green:#3ddc84;--red:#ff5c5c;--blue:#5aa9ff;--panel:#12151b;--well:#0f1217;--hover:#1d212a;--line2:#3a4150;--txt2:#c7cdd8;--mute:#5d6574;--redtxt:#ffc9c9;--hdr:rgba(14,16,20,.95);--veil:rgba(14,16,20,.7);--tabon:#262b36}
+html.light{color-scheme:light;--bg:#eef0f4;--card:#ffffff;--panel:#f4f6f9;--well:#e8ebf0;--hover:#e6e9ef;--line:#d3d8e1;--line2:#aab2bf;--txt:#141821;--txt2:#2b313d;--dim:#566070;--mute:#7d8696;--redtxt:#b3261e;--hdr:rgba(238,240,244,.95);--veil:rgba(238,240,244,.75);--tabon:#ffffff;--amber:#d98200;--green:#13994b;--red:#d63333;--blue:#1d6ad0}
+html.light .primary{box-shadow:0 3px 12px rgba(217,130,0,.25)}html.light .card,html.light .modal .box{box-shadow:0 1px 3px rgba(20,24,33,.06)}html.light .modal{background:rgba(20,24,33,.35)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-header{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:rgba(14,16,20,.95);backdrop-filter:blur(6px);z-index:5}
+header{display:flex;align-items:center;gap:12px;padding:16px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--hdr);backdrop-filter:blur(6px);z-index:5}
 .logo{width:36px;height:36px;filter:drop-shadow(0 0 10px rgba(255,176,32,.3))}
 h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.3px}h1 span{color:var(--dim);font-weight:400;font-size:13px;margin-left:8px}
 .pill{margin-left:auto;padding:6px 12px;border-radius:99px;font-size:12.5px;font-weight:600;border:1px solid}
@@ -627,173 +680,173 @@ h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.3px}h1 span{color:var
 main{max-width:1080px;margin:0 auto;padding:20px 22px 120px;display:grid;gap:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
 .card h2{margin:0 0 4px;font-size:15px;font-weight:650}.sub{color:var(--dim);font-size:13px;margin:0 0 14px}
-.how{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.how div{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:#c7cdd8}.how b:first-child{display:block;color:var(--amber);font-size:12px;letter-spacing:.6px;margin-bottom:2px}.how b:not(:first-child){color:var(--txt)}
+.how{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}.how div{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--txt2)}.how b:first-child{display:block;color:var(--amber);font-size:12px;letter-spacing:.6px;margin-bottom:2px}.how b:not(:first-child){color:var(--txt)}
 .row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.grow{flex:1}
 .group{margin-top:10px}.group h3{font-size:12px;letter-spacing:1px;color:var(--dim);margin:12px 0 8px;font-weight:600}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:8px}
-.tile{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:12.5px}
 .tile .n{font-weight:650;font-size:13px;margin-bottom:3px}.tile .l{color:var(--dim)}.tile .v{color:var(--txt)}
 .tile.moved{border-color:rgba(90,169,255,.45)}.tile.copied{border-style:dashed}.tile .cf{margin-top:3px;font-size:11px;color:var(--blue)}.tile.sized .sz{color:var(--amber)}.tile.warn{border-color:var(--red);background:rgba(255,92,92,.07)}.tile.warn .n::after{content:" !";color:var(--red)}
 .summary{font-size:13px;color:var(--dim)}.summary b{color:var(--txt)}
-.warnbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.35);color:#ffc9c9;font-size:13px;display:none}
+.warnbox{margin-top:12px;padding:10px 12px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.35);color:var(--redtxt);font-size:13px;display:none}
 .sizegrid{display:grid;grid-template-columns:1fr 300px;gap:22px;align-items:center}
 .slider{margin:10px 0 16px}.slider .top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}.slider label{font-weight:600}
 input[type=range]{width:100%;accent-color:var(--amber);height:22px}
-.num{width:76px;background:#0f1217;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:15px;text-align:right}
-.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{background:#12151b;border:1px solid var(--line);color:var(--txt);border-radius:99px;padding:5px 12px;font-size:12.5px;cursor:pointer}.chip:hover{border-color:var(--amber)}
+.num{width:76px;background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:15px;text-align:right}
+.chips{display:flex;gap:6px;flex-wrap:wrap}.chip{background:var(--panel);border:1px solid var(--line);color:var(--txt);border-radius:99px;padding:5px 12px;font-size:12.5px;cursor:pointer}.chip:hover{border-color:var(--amber)}
 .link{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:13px;cursor:pointer;user-select:none}
-svg{width:100%;height:auto;background:#101318;border:1px solid var(--line);border-radius:12px}
-button{font:inherit;border-radius:10px;border:1px solid var(--line);background:#1d212a;color:var(--txt);padding:9px 16px;cursor:pointer;font-weight:600}
-button:hover{border-color:#3a4150}button:disabled{opacity:.45;cursor:not-allowed}
+svg{width:100%;height:auto;background:var(--well);border:1px solid var(--line);border-radius:12px}
+button{font:inherit;border-radius:10px;border:1px solid var(--line);background:var(--hover);color:var(--txt);padding:9px 16px;cursor:pointer;font-weight:600}
+button:hover{border-color:var(--line2)}button:disabled{opacity:.45;cursor:not-allowed}
 .primary{background:linear-gradient(180deg,#ffbe3d,#ff9d00);color:#1a1200;border:none;padding:12px 26px;font-size:15px;box-shadow:0 4px 18px rgba(255,157,0,.25)}
-.bar{position:fixed;left:0;right:0;bottom:0;background:rgba(14,16,20,.96);border-top:1px solid var(--line);padding:14px 22px}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--hdr);border-top:1px solid var(--line);padding:14px 22px}
 .bar .in{max-width:1080px;margin:0 auto;display:flex;align-items:center;gap:12px}
 .bar .hint{color:var(--dim);font-size:13px}
 .result{display:none}.result.ok{display:block;border-color:rgba(61,220,132,.4)}.result.err{display:block;border-color:rgba(255,92,92,.5)}
-.result h2{display:flex;gap:8px;align-items:center}.result ul{margin:8px 0 0;padding-left:18px;color:#c7cdd8;font-size:13px}
-details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12.5px}pre{white-space:pre-wrap;font:12px/1.4 ui-monospace,Consolas,Menlo,monospace;color:#aeb6c4;background:#101318;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto}
+.result h2{display:flex;gap:8px;align-items:center}.result ul{margin:8px 0 0;padding-left:18px;color:var(--txt2);font-size:13px}
+details{margin-top:10px}summary{cursor:pointer;color:var(--dim);font-size:12.5px}pre{white-space:pre-wrap;font:12px/1.4 ui-monospace,Consolas,Menlo,monospace;color:var(--txt2);background:var(--well);border:1px solid var(--line);border-radius:8px;padding:10px;max-height:300px;overflow:auto}
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:20}
-.modal .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:440px}.modal h2{margin:0 0 8px;font-size:16px}.modal p{color:#c7cdd8;margin:0 0 16px}
-.busy{position:fixed;inset:0;background:rgba(14,16,20,.7);display:none;align-items:center;justify-content:center;z-index:30;font-weight:600}
+.modal .box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:440px}.modal h2{margin:0 0 8px;font-size:16px}.modal p{color:var(--txt2);margin:0 0 16px}
+.busy{position:fixed;inset:0;background:var(--veil);display:none;align-items:center;justify-content:center;z-index:30;font-weight:600}
 .spin{width:22px;height:22px;border:3px solid #3a3f4b;border-top-color:var(--amber);border-radius:50%;animation:s 0.8s linear infinite;margin-right:10px}@keyframes s{to{transform:rotate(360deg)}}
-.foot{color:#5d6574;font-size:12px;text-align:center}
+.foot{color:var(--mute);font-size:12px;text-align:center}
 .gone{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:40;color:var(--dim)}
-.tabs{display:flex;gap:3px;background:#12151b;border:1px solid var(--line);border-radius:11px;padding:3px;margin-left:14px}
+.tabs{display:flex;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:3px;margin-left:14px}
 .tabs button{border:none;background:transparent;color:var(--dim);padding:7px 16px;border-radius:8px;font-size:13.5px}
-.tabs button:hover{color:var(--txt)}.tabs button.on{background:#262b36;color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
+.tabs button:hover{color:var(--txt)}.tabs button.on{background:var(--tabon);color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
 .view{display:none;gap:18px}.view.on{display:grid}.bar .in{display:none}.bar .in.on{display:flex}
-.gh{display:flex;align-items:center;gap:8px;margin:14px 0 8px}.gh h3{margin:0;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}.gh .cnt{color:#5d6574;font-size:12px}
+.gh{display:flex;align-items:center;gap:8px;margin:14px 0 8px}.gh h3{margin:0;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}.gh .cnt{color:var(--mute);font-size:12px}
 .mini{padding:3px 11px;font-size:12px;border-radius:99px;font-weight:600}
 .heads{display:grid;grid-template-columns:repeat(8,1fr);gap:8px}
-.hd{position:relative;background:#12151b;border:1px solid var(--line);border-radius:12px;padding:12px 0 10px;text-align:center;cursor:pointer;user-select:none;font-weight:700;font-size:17px;color:#6b7383;transition:background .12s,border-color .12s,color .12s}
-.hd small{display:block;font-size:11px;font-weight:500;color:#4f5665;margin-top:2px}
-.hd:hover{border-color:#3a4150}
+.hd{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 0 10px;text-align:center;cursor:pointer;user-select:none;font-weight:700;font-size:17px;color:var(--mute);transition:background .12s,border-color .12s,color .12s}
+.hd small{display:block;font-size:11px;font-weight:500;color:var(--mute);margin-top:2px}
+.hd:hover{border-color:var(--line2)}
 .hd.on{background:rgba(255,176,32,.13);border-color:var(--amber);color:var(--txt)}.hd.on small{color:var(--amber)}
 .hd.chg::after{content:"";position:absolute;top:7px;right:8px;width:7px;height:7px;border-radius:50%;background:var(--blue)}
-.order{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}.order span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px}.order i{color:#4f5665;font-style:normal;font-size:11px}
+.order{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:6px}.order span{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px}.order i{color:var(--mute);font-style:normal;font-size:11px}
 .state{font-size:12.5px;font-weight:600;padding:4px 10px;border-radius:99px;border:1px solid}.state.ok{color:var(--green);border-color:rgba(61,220,132,.35)}.state.chg{color:var(--blue);border-color:rgba(90,169,255,.45)}
 header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .scenes{display:grid;gap:6px;margin-top:10px}
-.sc{display:grid;grid-template-columns:minmax(150px,250px) 1fr auto;gap:12px;align-items:center;background:#12151b;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+.sc{display:grid;grid-template-columns:minmax(150px,250px) 1fr auto;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
 .sc.chg{border-color:rgba(90,169,255,.45)}.sc .nm{font-weight:650;font-size:13px}.sc .nm small{display:block;color:var(--dim);font-weight:400;font-size:11.5px}
-.dots{display:flex;flex-wrap:wrap;gap:3px}.dots i{width:14px;height:14px;border-radius:3px;background:#262b36;display:inline-block}
+.dots{display:flex;flex-wrap:wrap;gap:3px}.dots i{width:14px;height:14px;border-radius:3px;background:var(--tabon);display:inline-block}
 .dots i.l{background:var(--amber)}.dots i.o{background:var(--blue)}.dots i.x{background:transparent;border:1px dashed var(--red)}
 .sc .st{font-size:12px;color:var(--dim);text-align:right;white-space:nowrap}.sc .st b{color:var(--txt)}
 .tag{font-size:11px;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim);margin-left:6px;font-weight:600}
 .tag.blue{color:var(--blue);border-color:rgba(90,169,255,.45)}.tag.amber{color:var(--amber);border-color:rgba(255,176,32,.4)}.tag.red{color:var(--red);border-color:rgba(255,92,92,.45)}
 .apcwrap{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:18px;margin-top:14px;align-items:start}
 .apc{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:10px}
-.pad{position:relative;aspect-ratio:1/1;border-radius:7px;border:1px solid #2a2f3a;background:#151820;cursor:pointer;overflow:hidden;padding:5px 5px 4px;display:flex;flex-direction:column;justify-content:flex-end;user-select:none}
+.pad{position:relative;aspect-ratio:1/1;border-radius:7px;border:1px solid var(--line);background:var(--panel);cursor:pointer;overflow:hidden;padding:5px 5px 4px;display:flex;flex-direction:column;justify-content:flex-end;user-select:none}
 .pad .t{font-size:10px;line-height:1.15;font-weight:650;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.9);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .pad .p{font-size:8.5px;color:rgba(255,255,255,.7);text-shadow:0 1px 2px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pad .on{position:absolute;left:0;right:0;top:0;height:5px}
-.pad.empty{background:transparent;border-style:dashed;border-color:#262b36}.pad.empty .t{color:#3a4150;text-shadow:none;font-weight:500}
+.pad.empty{background:transparent;border-style:dashed;border-color:var(--line)}.pad.empty .t{color:var(--line2);text-shadow:none;font-weight:500}
 .pad.sel{outline:2px solid var(--amber);outline-offset:1px}.pad.tgt:hover{outline:2px dashed var(--amber);outline-offset:1px}
 .pad.mv::after{content:"";position:absolute;top:9px;right:5px;width:7px;height:7px;border-radius:50%;background:var(--blue);box-shadow:0 0 0 2px #0b0d11}
-.pad.dup{border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}.pad.miss .t{color:#ffb3b3}
+.pad.dup{border-color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}.pad.miss .t{color:var(--redtxt)}
 .pad .badge{position:absolute;top:8px;left:5px;background:var(--red);color:#fff;font-size:9px;font-weight:700;border-radius:99px;padding:0 5px}
-.apside{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:14px;font-size:13px}
+.apside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:13px}
 .apside h3{margin:0 0 6px;font-size:14px}.kv{display:grid;grid-template-columns:72px 1fr;gap:3px 8px;color:var(--dim);font-size:12.5px;margin:8px 0 12px}.kv b{color:var(--txt);font-weight:500}
 .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:4px;border:1px solid rgba(255,255,255,.2)}
 .faders{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-top:14px}
-.fd{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px}.fd b{display:block;font-size:13px}.fd span{color:var(--dim)}
+.fd{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px}.fd b{display:block;font-size:13px}.fd span{color:var(--dim)}
 .iss{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:13px}.iss:first-child{border-top:none}
 .iss .ic{flex:none;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
 .iss.error .ic{background:rgba(255,92,92,.16);color:var(--red)}.iss.warn .ic{background:rgba(255,176,32,.14);color:var(--amber)}.iss.info .ic{background:rgba(90,169,255,.14);color:var(--blue)}
 .iss .d{color:var(--dim);font-size:12.5px;margin-top:1px}.iss b{font-weight:650}.iss .act{flex:none;display:flex;gap:6px;align-items:center}
 .iss .fx{margin-top:5px;font-size:12.5px;color:var(--txt);background:rgba(61,220,132,.06);border-left:2px solid rgba(61,220,132,.55);padding:4px 9px;border-radius:0 6px 6px 0}.iss .fx b{color:var(--green);font-weight:650}
 .iss .act button{white-space:nowrap}.iss.done .ic{background:rgba(61,220,132,.14);color:var(--green)}
-.applied{background:#12151b;border:1px solid rgba(61,220,132,.35);border-radius:12px;padding:6px 14px;margin:12px 0 4px}.applied h3{margin:6px 0 2px;font-size:13.5px;color:var(--green)}
+.applied{background:var(--panel);border:1px solid rgba(61,220,132,.35);border-radius:12px;padding:6px 14px;margin:12px 0 4px}.applied h3{margin:6px 0 2px;font-size:13.5px;color:var(--green)}
 .legend{display:flex;gap:8px;flex-wrap:wrap}
-.lg{background:#12151b;border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:12.5px;cursor:pointer;user-select:none}.lg b{font-size:15px;margin-right:6px}.lg.on{border-color:var(--amber);background:rgba(255,176,32,.08)}
-.srch{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;width:230px}
+.lg{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:12.5px;cursor:pointer;user-select:none}.lg b{font-size:15px;margin-right:6px}.lg.on{border-color:var(--amber);background:rgba(255,176,32,.08)}
+.srch{background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;width:230px}
 .spg{margin-top:16px}.spg .gh{margin:0 0 6px}.spg .gh select{width:170px}
 .sp{display:grid;grid-template-columns:1fr 210px 170px;gap:10px;align-items:center;padding:5px 10px;border-radius:8px;border:1px solid transparent}
-.sp:nth-child(odd){background:#12151b}.sp.chg{border-color:rgba(90,169,255,.45);background:rgba(90,169,255,.06)}
-.sp .i{color:var(--dim);font-size:12px}.sp .i.no{color:#5d6574}
-select{background:#0f1217;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;width:100%}
+.sp:nth-child(odd){background:var(--panel)}.sp.chg{border-color:rgba(90,169,255,.45);background:rgba(90,169,255,.06)}
+.sp .i{color:var(--dim);font-size:12px}.sp .i.no{color:var(--mute)}
+select{background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px;width:100%}
 .iss.ok .ic{background:rgba(61,220,132,.14);color:var(--green)}
 .rtmap{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}
-.tw{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:8px 10px 10px}.tw h4{margin:0 0 6px;font-size:11.5px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
+.tw{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 10px 10px}.tw h4{margin:0 0 6px;font-size:11.5px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
 .tw .pr{display:grid;grid-template-columns:1fr 1fr;gap:6px}
-.slot{background:#0f1217;border:1px dashed #3a4150;border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;min-height:66px;user-select:none}
-.slot:hover{border-color:var(--amber)}.slot.set{border-style:solid;border-color:#3a4150}.slot.chg{box-shadow:inset 0 0 0 1px var(--blue)}
-.slot .sd{font-size:10.5px;color:#5d6574;display:block}.slot b{font-size:15px}.slot small{color:var(--dim);font-size:11px}
+.slot{background:var(--well);border:1px dashed var(--line2);border-radius:10px;padding:8px 6px;text-align:center;cursor:pointer;min-height:66px;user-select:none}
+.slot:hover{border-color:var(--amber)}.slot.set{border-style:solid;border-color:var(--line2)}.slot.chg{box-shadow:inset 0 0 0 1px var(--blue)}
+.slot .sd{font-size:10.5px;color:var(--mute);display:block}.slot b{font-size:15px}.slot small{color:var(--dim);font-size:11px}
 .dot{display:inline-block;width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.25);vertical-align:-4px;margin-right:5px}
 .dot.fl{animation:bl .7s linear infinite}@keyframes bl{0%{opacity:1}100%{opacity:.1}}
-.mid{grid-row:2;grid-column:1/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed #262b36;border-radius:12px;padding:10px}
-.mid .sp2{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}.mid .sp2 span{background:#12151b;border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:var(--txt)}
+.mid{grid-row:2;grid-column:1/4;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--dim);font-size:12px;text-align:center;border:1px dashed var(--line);border-radius:12px;padding:10px}
+.mid .sp2{display:flex;flex-wrap:wrap;gap:4px;justify-content:center}.mid .sp2 span{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;color:var(--txt)}
 .dj{grid-row:4;grid-column:1/4;align-self:end;text-align:center;color:var(--amber);font-size:12px;font-weight:600;letter-spacing:1px;border-top:2px solid rgba(255,176,32,.5);padding-top:6px}
 .tw.off{visibility:hidden}
-.pick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 12px}.pick div{background:#12151b;border:1px solid var(--line);border-radius:9px;padding:7px 6px;cursor:pointer;font-size:12px;text-align:center}
-.pick div:hover{border-color:var(--amber)}.pick div small{display:block;color:#5d6574;font-size:10.5px}.pick div.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
-.legend2{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:12px}.legend2 div{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;font-size:11.5px}.legend2 div b{display:block;font-size:13px}
+.pick{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:6px 0 12px}.pick div{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:7px 6px;cursor:pointer;font-size:12px;text-align:center}
+.pick div:hover{border-color:var(--amber)}.pick div small{display:block;color:var(--mute);font-size:10.5px}.pick div.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
+.legend2{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:12px}.legend2 div{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 4px;text-align:center;font-size:11.5px}.legend2 div b{display:block;font-size:13px}
 .pgrp h3{font-size:12px;letter-spacing:1px;color:var(--dim);margin:14px 0 4px;font-weight:600}
 .hero{display:flex;align-items:center;gap:18px}.hlogo{width:84px;height:84px;filter:drop-shadow(0 0 22px rgba(255,176,32,.35))}.hname{font-size:26px;font-weight:700}.hver{color:var(--dim);font-size:13px}
 .brand img{max-height:96px;max-width:320px;display:block}.brandtxt{font-weight:800;font-size:32px;letter-spacing:7px;color:#fff;text-align:right;line-height:1}.brandtxt span{display:block;font-size:11px;letter-spacing:7.6px;color:var(--amber);font-weight:600;margin-top:5px}
-.htiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.ht{text-align:left;background:#12151b;padding:12px 14px;border-radius:12px}.ht b{display:block;font-size:14px;margin-bottom:2px}.ht span{color:var(--dim);font-size:12.5px;font-weight:400}.ht:hover{border-color:var(--amber)}
-.seg{display:flex;gap:3px;background:#12151b;border:1px solid var(--line);border-radius:11px;padding:3px;width:max-content}.seg button{border:none;background:transparent;color:var(--dim);padding:8px 24px;border-radius:8px}.seg button:hover{color:var(--txt)}.seg button.on{background:#262b36;color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
+.htiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.ht{text-align:left;background:var(--panel);padding:12px 14px;border-radius:12px}.ht b{display:block;font-size:14px;margin-bottom:2px}.ht span{color:var(--dim);font-size:12.5px;font-weight:400}.ht:hover{border-color:var(--amber)}
+.seg{display:flex;gap:3px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:3px;width:max-content}.seg button{border:none;background:transparent;color:var(--dim);padding:8px 24px;border-radius:8px}.seg button:hover{color:var(--txt)}.seg button.on{background:var(--tabon);color:var(--txt);box-shadow:inset 0 -2px 0 var(--amber)}
 .hright{margin-left:auto;display:flex;gap:8px;align-items:center}.hright .pill{margin-left:0}
 .psw{display:inline-block;width:17px;height:17px;border-radius:4px;margin:0 3px 3px 0;cursor:pointer;border:1px solid rgba(255,255,255,.15)}.psw.cur{outline:2px solid var(--amber);outline-offset:1px}.pcl{font-size:12px;color:var(--dim);margin:2px 0 10px}.pcl .pals{margin:3px 0 7px;line-height:0}
 .clwrap{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;margin-top:6px;align-items:start}
 .clpal{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:6px}
-.cp{display:flex;align-items:center;gap:7px;background:#12151b;border:1px solid var(--line);border-radius:9px;padding:6px 8px;font-size:12.5px;cursor:pointer;user-select:none}.cp:hover{border-color:#3a4150}.cp.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
+.cp{display:flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:6px 8px;font-size:12.5px;cursor:pointer;user-select:none}.cp:hover{border-color:var(--line2)}.cp.cur{border-color:var(--amber);background:rgba(255,176,32,.08)}
 .cp i{flex:none;width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,.25)}
 .wheel{position:relative;flex:none;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle closest-side,#fff,rgba(255,255,255,0)),conic-gradient(red,yellow,lime,cyan,blue,magenta,red);cursor:crosshair;touch-action:none}
 .wheel i{position:absolute;width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px #000,0 2px 6px rgba(0,0,0,.6);transform:translate(-50%,-50%);pointer-events:none;display:none}
 .clbig{height:120px;border-radius:12px;border:1px solid var(--line);display:flex;align-items:flex-end;padding:10px 12px;margin-bottom:10px}.clbig span{background:rgba(0,0,0,.55);padding:2px 8px;border-radius:6px;font:12px ui-monospace,Consolas,monospace}
-input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:#0f1217;padding:2px;cursor:pointer}
+input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--well);padding:2px;cursor:pointer}
 .qbar{display:none;margin:14px 22px 0;padding:12px 16px;border-radius:12px;background:rgba(255,176,32,.08);border:1px solid rgba(255,176,32,.45);font-size:13px}
 .qbar.on{display:block}.qbar.done{background:rgba(61,220,132,.07);border-color:rgba(61,220,132,.4)}.qbar.bad{background:rgba(255,92,92,.07);border-color:rgba(255,92,92,.45)}
-.qbar h3{margin:0 0 6px;font-size:14px}.qbar .qi{display:inline-flex;align-items:center;gap:6px;background:#12151b;border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 11px;margin:0 6px 6px 0}
+.qbar h3{margin:0 0 6px;font-size:14px}.qbar .qi{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:99px;padding:3px 6px 3px 11px;margin:0 6px 6px 0}
 .qbar .qi button{border:none;background:transparent;color:var(--dim);padding:0 4px;font-size:13px;cursor:pointer}.qbar .qi button:hover{color:var(--red)}
-.qbar ul{margin:4px 0 6px;padding-left:18px}.qbar li.no{color:#ffb3b3}
-.lvcall{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(90,169,255,.07);border:1px solid rgba(90,169,255,.4);font-size:13px;color:#c7cdd8}.lvcall b{color:var(--txt)}
+.qbar ul{margin:4px 0 6px;padding-left:18px}.qbar li.no{color:var(--redtxt)}
+.lvcall{display:flex;align-items:center;gap:14px;margin:0 0 14px;padding:12px 14px;border-radius:12px;background:rgba(90,169,255,.07);border:1px solid rgba(90,169,255,.4);font-size:13px;color:var(--txt2)}.lvcall b{color:var(--txt)}
 .live{position:fixed;inset:0;background:var(--bg);z-index:15;display:none;flex-direction:column}.live.on{display:flex}
 .lvtop{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line)}.lvt{color:var(--amber);letter-spacing:1px;font-size:15px}
-.lvgone{display:none;margin:10px 18px 0;padding:10px 14px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.45);color:#ffc9c9;font-size:13px}.lvgone.on{display:flex;align-items:center;gap:12px}
+.lvgone{display:none;margin:10px 18px 0;padding:10px 14px;border-radius:10px;background:rgba(255,92,92,.08);border:1px solid rgba(255,92,92,.45);color:var(--redtxt);font-size:13px}.lvgone.on{display:flex;align-items:center;gap:12px}
 .lvbody{flex:1;display:grid;grid-template-columns:220px minmax(0,1fr) 280px;min-height:0}
 .lvlist{overflow:auto;border-right:1px solid var(--line);padding:4px 10px 20px}
 .lvlist h4{margin:12px 0 5px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
 .lvh{display:flex;align-items:center;gap:6px;padding:6px 9px;border-radius:8px;cursor:pointer;border:1px solid transparent;font-size:13px;font-weight:600;user-select:none}
-.lvh:hover{background:#171a21}.lvh.on{border-color:var(--amber);background:rgba(255,176,32,.1)}.lvh.dim{color:#5d6574}
-.lvh small{margin-left:auto;font-weight:500;font-size:11px;color:#5d6574;white-space:nowrap}.lvh small.a{color:var(--blue)}.lvh small.cp{color:#9aa3b5}.lvh small.b{color:var(--dim)}
-.lvh .sd{font-size:10px;color:#5d6574;width:10px}
+.lvh:hover{background:var(--card)}.lvh.on{border-color:var(--amber);background:rgba(255,176,32,.1)}.lvh.dim{color:var(--mute)}
+.lvh small{margin-left:auto;font-weight:500;font-size:11px;color:var(--mute);white-space:nowrap}.lvh small.a{color:var(--blue)}.lvh small.cp{color:var(--txt2)}.lvh small.b{color:var(--dim)}
+.lvh .sd{font-size:10px;color:var(--mute);width:10px}
 .lvmain{display:flex;flex-direction:column;gap:12px;padding:14px 18px;min-height:0}
-.seg button small{font-size:10.5px;color:#5d6574;font-weight:500}
-.lvpad{flex:1;min-height:220px;touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none;border:2px dashed #3a4150;border-radius:16px;background:radial-gradient(circle at 50% 50%,rgba(255,176,32,.07),transparent 60%),#0b0d11;display:flex;align-items:center;justify-content:center;text-align:center;cursor:grab;user-select:none;color:var(--dim);padding:20px}
-.lvpad:hover{border-color:#566070}.lvpad.drag{cursor:none;border-color:var(--amber);border-style:solid}
+.seg button small{font-size:10.5px;color:var(--mute);font-weight:500}
+.lvpad{flex:1;min-height:220px;touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none;border:2px dashed var(--line2);border-radius:16px;background:radial-gradient(circle at 50% 50%,rgba(255,176,32,.07),transparent 60%),#0b0d11;display:flex;align-items:center;justify-content:center;text-align:center;cursor:grab;user-select:none;color:var(--dim);padding:20px}
+.lvpad:hover{border-color:var(--mute)}.lvpad.drag{cursor:none;border-color:var(--amber);border-style:solid}
 .lvbig{font-size:30px;font-weight:700;color:var(--txt);margin-bottom:6px}.lvbig span{color:var(--amber)}
 .lvkeys{color:var(--dim);font-size:12.5px}.lvkeys b{color:var(--txt);font-weight:600}
 .lvside{border-left:1px solid var(--line);padding:14px 16px;overflow:auto}.lvside h3{margin:0;font-size:17px}.lvside .sub{margin:2px 0 6px}
 .lvside .kv{grid-template-columns:40px 1fr;margin:6px 0 8px}.lvside .kv small{color:var(--dim)}
 .lvflip{display:grid;gap:4px;margin:10px 0}
 .lvbtns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px}.lvbtns button{padding:8px 10px;font-size:13px}.lvbtns .w2{grid-column:span 2}
-.remrow{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;background:rgba(61,220,132,.05);border:1px solid rgba(61,220,132,.3);font-size:13px;color:#c7cdd8}.remrow.on{display:flex}.remrow b{color:var(--txt)}
+.remrow{display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px;padding:10px 14px;border-radius:12px;background:rgba(61,220,132,.05);border:1px solid rgba(61,220,132,.3);font-size:13px;color:var(--txt2)}.remrow.on{display:flex}.remrow b{color:var(--txt)}
 .mini.son{border-color:var(--green);color:var(--green);background:rgba(61,220,132,.1)}
-.aulook{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}.aulook.off{opacity:.55}.aulook.cur{border-color:var(--green);box-shadow:0 0 0 1px rgba(61,220,132,.4)}
-.aun{flex:none;width:24px;height:24px;border-radius:50%;background:#262b36;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}.aulook.cur .aun{background:var(--green);color:#06210f}
-.auchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}.auchips .none{color:#5d6574;font-size:12.5px}
-.auchip{display:inline-flex;align-items:center;gap:2px;background:#0f1217;border:1px solid #3a4150;border-radius:99px;padding:3px 4px 3px 11px;font-size:12.5px}.auchip.bad{border-color:var(--red);color:#ffb3b3}
+.aulook{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-top:8px}.aulook.off{opacity:.55}.aulook.cur{border-color:var(--green);box-shadow:0 0 0 1px rgba(61,220,132,.4)}
+.aun{flex:none;width:24px;height:24px;border-radius:50%;background:var(--tabon);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}.aulook.cur .aun{background:var(--green);color:#06210f}
+.auchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center}.auchips .none{color:var(--mute);font-size:12.5px}
+.auchip{display:inline-flex;align-items:center;gap:2px;background:var(--well);border:1px solid var(--line2);border-radius:99px;padding:3px 4px 3px 11px;font-size:12.5px}.auchip.bad{border-color:var(--red);color:var(--redtxt)}
 .auchip button{border:none;background:transparent;color:var(--dim);padding:0 5px;font-size:12px}.auchip button:hover{color:var(--red)}
 .auplay{background:#0b0d11;border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:14px}.auplay.on{border-color:rgba(61,220,132,.5)}
 .aubig{font-size:28px;font-weight:700;line-height:1.15}.aubig small{font-size:14px;color:var(--amber);font-weight:600;margin-left:6px}
-.auprog{height:8px;border-radius:99px;background:#1d212a;margin:12px 0;overflow:hidden}.auprog i{display:block;height:100%;background:linear-gradient(90deg,#3ddc84,#ffb020);width:0;transition:width .25s linear}
-.aubeats{display:flex;gap:8px}.aubeats i{width:18px;height:18px;border-radius:50%;background:#262b36}.aubeats i.on{background:var(--amber);box-shadow:0 0 12px rgba(255,176,32,.6)}.aubeats i.on.one{background:var(--green);box-shadow:0 0 12px rgba(61,220,132,.6)}
+.auprog{height:8px;border-radius:99px;background:var(--hover);margin:12px 0;overflow:hidden}.auprog i{display:block;height:100%;background:linear-gradient(90deg,#3ddc84,#ffb020);width:0;transition:width .25s linear}
+.aubeats{display:flex;gap:8px}.aubeats i{width:18px;height:18px;border-radius:50%;background:var(--tabon)}.aubeats i.on{background:var(--amber);box-shadow:0 0 12px rgba(255,176,32,.6)}.aubeats i.on.one{background:var(--green);box-shadow:0 0 12px rgba(61,220,132,.6)}
 .pkl{max-height:52vh;overflow:auto;margin:8px 0 12px}.pkl h4{margin:10px 0 5px;font-size:11px;letter-spacing:.8px;color:var(--dim);font-weight:600;text-transform:uppercase}
-.pks{display:flex;flex-wrap:wrap;gap:5px}.pkb{background:#12151b;border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;cursor:pointer;user-select:none}.pkb:hover{border-color:var(--amber)}.pkb.on{border-color:var(--amber);background:rgba(255,176,32,.12)}.pkb.no{opacity:.4;cursor:not-allowed}
+.pks{display:flex;flex-wrap:wrap;gap:5px}.pkb{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px;font-size:12.5px;cursor:pointer;user-select:none}.pkb:hover{border-color:var(--amber)}.pkb.on{border-color:var(--amber);background:rgba(255,176,32,.12)}.pkb.no{opacity:.4;cursor:not-allowed}
 #aupill{background:rgba(61,220,132,.1);border-color:rgba(61,220,132,.45);color:var(--green)}
 .pair{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:50;padding:24px}.pair.on{display:flex}
 .pair .box{max-width:380px;width:100%;text-align:center;display:grid;gap:12px;justify-items:center}.pair h2{margin:0;font-size:21px}.pair .sub{margin:0}
-.pair input{font:600 30px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:10px;text-align:center;width:100%;max-width:280px;padding:12px;border-radius:12px;border:1px solid var(--line);background:#0f1217;color:var(--txt)}
+.pair input{font:600 30px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:10px;text-align:center;width:100%;max-width:280px;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--well);color:var(--txt)}
 .pair .primary{width:100%;max-width:280px}
 .offl{position:fixed;left:0;right:0;top:0;z-index:45;display:none;padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;background:rgba(200,60,60,.96);color:#fff;font-weight:600;font-size:13px;text-align:center}.offl.on{display:block}
-.phaddr{font:600 16px ui-monospace,Menlo,Consolas,monospace;background:#0f1217;border:1px solid var(--line);border-radius:10px;padding:7px 12px;display:inline-block;margin:4px 8px 4px 0;user-select:all;color:var(--txt)}
+.phaddr{font:600 16px ui-monospace,Menlo,Consolas,monospace;background:var(--well);border:1px solid var(--line);border-radius:10px;padding:7px 12px;display:inline-block;margin:4px 8px 4px 0;user-select:all;color:var(--txt)}
 .phaddr small{font:500 11.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--dim);margin-left:8px}
 .phrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.phrow .phaddr{margin-right:0}
 .phcopy{flex:none}.phcopy.done{background:var(--green);border-color:var(--green);color:#0b0d11}
 .phpin{font:700 34px ui-monospace,Menlo,Consolas,monospace;letter-spacing:8px;color:var(--amber);line-height:1.1}
-.phgrid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;margin-top:12px;align-items:start}.phbox{background:#12151b;border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.phgrid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:18px;margin-top:12px;align-items:start}.phbox{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .phbox h3{margin:0 0 6px;font-size:12px;letter-spacing:1px;color:var(--dim);font-weight:600}
 .ph #phcard,.ph #upd{display:none!important}
 .ph header{padding-top:calc(10px + env(safe-area-inset-top));padding-left:calc(12px + env(safe-area-inset-left));padding-right:calc(12px + env(safe-area-inset-right))}
@@ -827,22 +880,34 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
  .lvtop{flex-wrap:wrap;padding:8px 10px;gap:8px}.lvtop .link{order:5;flex-basis:100%}
  .lvbody{display:flex;flex-direction:column;overflow:auto;-webkit-overflow-scrolling:touch}
  .lvlist{display:flex;gap:6px;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;flex:none}
- .lvlist h4{display:none}.lvh{flex:none;border-color:var(--line);background:#12151b}.lvh small{margin-left:6px}
+ .lvlist h4{display:none}.lvh{flex:none;border-color:var(--line);background:var(--panel)}.lvh small{margin-left:6px}
  .lvmain{padding:10px;flex:none}.lvmain>.row{gap:8px}
  .lvpad{flex:none;min-height:38vh;touch-action:none}
  .lvside{display:flex;flex-direction:column;border-left:none;border-top:1px solid var(--line);overflow:visible;padding:12px 12px calc(16px + env(safe-area-inset-bottom))}
  .lvbtns{order:-1;margin:0 0 12px}.lvbtns button{padding:11px 10px}
  #lvmap{max-width:320px;display:block;margin:0 auto}
 }
-</style></head><body>
-<header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">ShowXpress Helper</h1>
+
+.cog{font-size:17px;line-height:1;padding:6px 9px;border-radius:99px}.cog.on{border-color:var(--amber);color:var(--amber)}
+.txt{background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}
+.tablist{display:grid;gap:6px;margin-top:12px;max-width:520px}
+.tabrow{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
+.tabrow.drag{border-color:var(--amber);box-shadow:0 4px 14px rgba(0,0,0,.25);position:relative;z-index:2}.tabrow.off .link{opacity:.5}
+.tabrow .hdl{cursor:grab;color:var(--mute);font-size:17px;padding:2px 6px;touch-action:none;user-select:none}.tabrow.drag .hdl{cursor:grabbing}
+.tabrow .mini{padding:3px 9px}
+.setsec h2{display:flex;align-items:center;gap:8px}
+.ph .pc-only{display:none!important}
+.ph .ht[data-go=settings]{order:11}
+</style>
+<script>(function(){try{var m=localStorage.getItem('sxh_theme')||'dark';if(m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches))document.documentElement.classList.add('light');}catch(e){}})();</script></head><body>
+<header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">SX Helper</h1>
   <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button></nav>
-  <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button></div></header>
+  <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
  <div class="view" id="v-home">
   <section class="card">
-   <div class="hero"><img class="hlogo" src="/icon.png?t=__TOKEN__" alt=""><div><div class="hname">ShowXpress Helper</div><div class="hver" id="hver">&nbsp;</div></div><div class="grow"></div>
+   <div class="hero"><img class="hlogo" src="/icon.png?t=__TOKEN__" alt=""><div><div class="hname">SX Helper</div><div class="hver" id="hver">&nbsp;</div></div><div class="grow"></div>
     <div id="brand" class="brand"><div class="brandtxt">XSV<span>PRODUCTIONS</span></div></div></div>
    <div class="htiles">
     <button class="ht" data-go="rt"><b>1 &middot; Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Skip Flash</span></button>
@@ -855,11 +920,31 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
     <button class="ht" data-go="speed"><b>Speed Faders</b><span>Which fader drives which button</span></button>
     <button class="ht" data-go="health"><b>Health Check</b><span>Find and fix problems in the show</span></button>
     <button class="ht" data-go="auto"><b>Auto Show</b><span>The Helper changes your looks every few bars while you mix</span></button>
+    <button class="ht" data-go="settings"><b>&#9881; Settings</b><span>Google Drive sync &amp; import, phone &amp; iPad, tabs, light mode</span></button>
    </div>
   </section>
-  <section class="card"><div class="row"><div class="grow"><h2>Google Drive backup</h2><p class="sub" id="gdsub" style="margin:0">Looking for Google Drive&hellip;</p><div id="gdhint" class="summary"></div></div><div style="display:flex;flex-direction:column;gap:6px"><button id="gdsync" class="primary" disabled>Sync to Google Drive</button><button id="gdimp" disabled>Import from Google Drive</button></div></div></section>
-  <section class="card" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use the Helper from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
+ </div>
+
+ <div class="view" id="v-settings">
+  <section class="card"><h2>&#9881; Settings</h2><p class="sub" style="margin:0">Light or dark is set for each device. The tab order is the same on this computer, the phone and the iPad.</p></section>
+  <section class="card setsec"><h2>Look</h2><p class="sub">Light is easier to read in daylight; dark is kinder in a dark venue.</p>
+   <div class="seg" id="stheme"><button data-v="dark">&#127769; Dark</button><button data-v="light">&#9728;&#65039; Light</button><button data-v="auto">Same as this device</button></div></section>
+  <section class="card setsec"><div class="row"><div class="grow"><h2>Tabs</h2><p class="sub" style="margin:0">Drag &#9776; or use the arrows to change the order. Untick a tab to hide it (it leaves the Home page too).</p></div><button id="stabreset" class="mini">Reset</button></div><div id="stabs" class="tablist"></div></section>
+  <section class="card setsec" id="gdcard"><div class="row"><div class="grow"><h2>Google Drive</h2><p class="sub" id="gdacct" style="margin:0">Looking for Google Drive&hellip;</p></div>
+   <div class="pc-only" style="display:flex;gap:6px;flex-wrap:wrap"><button id="gdapp" class="mini" style="display:none">Open Google Drive</button><button id="gddl" class="mini">Get Google Drive</button></div></div>
+   <div class="row" style="margin-top:14px;align-items:flex-start"><div class="grow"><p class="sub" id="gdsub" style="margin:0">&nbsp;</p><div id="gdhint" class="summary"></div></div>
+    <div style="display:flex;flex-direction:column;gap:6px"><button id="gdsync" class="primary" disabled>Sync to Google Drive</button><button id="gdimp" disabled>Import from Google Drive</button></div></div>
+   <details class="pc-only"><summary>Google Drive folder and import backups</summary>
+    <div class="row" style="margin-top:10px"><input id="gdfold" class="txt" style="flex:1;min-width:220px" placeholder="Found automatically"><button id="gdfoldset" class="mini">Use this folder</button><button id="gdfoldauto" class="mini">Find automatically</button></div>
+    <p class="sub" style="margin:6px 0 0">Google Drive&rsquo;s <b>My Drive</b> folder (the one with AWAAZ in it). Only needed if the Helper can&rsquo;t find Google Drive by itself.</p>
+    <div class="row" style="margin-top:10px"><button id="gdbk" class="mini">Open import backups</button><span class="summary">The show as it was before each import (newest 3).</span></div></details></section>
+  <section class="card setsec" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use the Helper from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
    <label class="link"><input type="checkbox" id="phon"> Let my phone and iPad connect</label></div><div id="phbody"></div></section>
+  <section class="card setsec pc-only"><h2>ShowXpress</h2>
+   <label class="link"><input type="checkbox" id="sreopen"> After queued changes are done, open ShowXpress again</label>
+   <div class="row" style="margin-top:12px"><button id="sopenshow" class="mini">Open the show folder</button><span class="summary" id="sshow"></span></div></section>
+  <section class="card setsec pc-only"><h2>Updates</h2><div class="row"><div class="grow summary" id="supd">&nbsp;</div><button id="supdchk" class="mini">Check now</button></div>
+   <label class="link" style="margin-top:10px"><input type="checkbox" id="sautoupd"> Check for a new version when the Helper opens</label></section>
  </div>
 
  <div class="view" id="v-aim">
@@ -1070,16 +1155,21 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
 <div class="pair" id="pair"><div class="box"><img src="/icon.png" alt="" class="hlogo" style="width:64px;height:64px"><h2>Connect to the laptop</h2>
- <p class="sub">On the laptop, open <b>ShowXpress Helper</b>: on <b>Home</b>, in <b>Phone &amp; iPad</b>, press <b>Pair a phone</b>. Type the 6-digit code here.</p>
+ <p class="sub">On the laptop, open <b>SX Helper</b>: press <b>&#9881;</b> (top right), and in <b>Phone &amp; iPad</b> press <b>Pair a phone</b>. Type the 6-digit code here.</p>
  <input id="pairpin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="------">
  <button id="pairgo" class="primary">Connect</button><div id="pairmsg" class="sub"></div>
  <p class="sub" style="font-size:12px;margin-top:8px">Tip: first add this page to your Home Screen (Share &rarr; <b>Add to Home Screen</b>), then open it from there and pair &mdash; the Home Screen icon keeps its own pairing.</p></div></div>
 <div class="offl" id="offl">Can&rsquo;t reach the laptop &mdash; trying again&hellip; (same Wi-Fi? Helper still open?)</div>
-<div class="gone" id="gone"><h2 style="color:var(--txt)">ShowXpress Helper has closed</h2><p>Open it again from its icon.</p></div>
+<div class="gone" id="gone"><h2 style="color:var(--txt)">SX Helper has closed</h2><p>Open it again from its icon.</p></div>
 <script>
 const PH=__PHONE__||/[?&]phone=1/.test(location.search);   // phone / iPad over the Wi-Fi (phone=1: try the phone layout on the computer)
 let T='__TOKEN__';const $=id=>document.getElementById(id);
-if(__PHONE__){try{T=localStorage.getItem('sxh_phone_key')||'';}catch(e){T='';}}
+if(__PHONE__){let ls='';try{ls=localStorage.getItem('sxh_phone_key')||'';}catch(e){}
+ const uk=new URLSearchParams(location.search).get('k')||'',ck='__PHONEKEY__';
+ T=ck||uk||ls;   // the server only fills ck with the CURRENT key, so it wins over an old one
+ if(T){phKeep(T);}}
+function phKeep(k){try{localStorage.setItem('sxh_phone_key',k);}catch(e){}
+ try{const u=new URL(location.href);if(u.searchParams.get('k')!==k){u.searchParams.set('k',k);history.replaceState(null,'',u.pathname+u.search+location.hash);}}catch(e){}}
 if(PH)document.documentElement.classList.add('ph');
 let P=null,sxOpen=false,linked=true;
 function wq(b){return sxOpen?Object.assign({},b||{},{queue:true}):b;}
@@ -1164,8 +1254,8 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
  const qc=$('qclose');if(qc)qc.onclick=sxClose;}
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
 function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
- LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');loadGd();}
-async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');}
+async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
@@ -1175,16 +1265,16 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto'];
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='home')loadGd();
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-$('logo').onclick=$('ttl').onclick=()=>setTab('home');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
+$('logo').onclick=$('ttl').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
 // ---------------- Skip Flash heads
 let S=null,sel=new Set();
@@ -1667,16 +1757,27 @@ function updGd(){if(!G)return;
  $('gdsub').innerHTML=!G.ok?'<span style="color:var(--red)">'+esc(G.error)+'</span>':!G.found?'Google Drive isn&rsquo;t on this computer &mdash; install <b>Google Drive for desktop</b> and sign in.':
   'Copies the show to <b>'+esc(G.target)+'</b> &mdash; only new and changed files, nothing is deleted. '+(G.last?'Last sync: <b>'+fmtT(G.last)+'</b>.':'Not synced yet.')+
   '<br><b>Import</b> copies the show from Google Drive into <b>'+esc(G.show)+'</b> and replaces the one on this computer'+(G.srcFound?' (Google Drive copy saved '+fmtT(G.srcTime)+')':' &mdash; <span style="color:var(--amber)">no show on Google Drive yet</span>')+'.'+(G.lastImport?' Last import: <b>'+fmtT(G.lastImport)+'</b>.':'');
- $('gdsync').disabled=!G.ok||!G.found||!G.here;$('gdimp').disabled=!G.ok||!G.found||!G.srcFound;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?QH:'';}
+ updGdAcct();$('gdsync').disabled=!G.ok||!G.found||!G.here;$('gdimp').disabled=!G.ok||!G.found||!G.srcFound;$('gdhint').innerHTML=G.ok&&G.found&&sxOpen?QH:'';}
 async function gdSync(){await saveTo('/api/gdrive/sync',{},'Copying the show to Google Drive…',async()=>{await loadGd();if($('v-pre').classList.contains('on'))loadPre();},'gsync');}
 $('gdsync').onclick=()=>gdSync();
 async function gdImport(){if(!G||!G.srcFound)return;
  if(!await ask('Import the show from Google Drive?','The show on this computer is <b>replaced</b> by the Google Drive copy'+(G.srcTime?' (saved '+fmtT(G.srcTime)+')':'')+' &mdash; anything changed here since then is lost. The old show is kept as a backup.'+(sxOpen?'<br><br>ShowXpress is open: this waits until you close it.':''),'Import'))return;
  await saveTo('/api/gdrive/import',{},'Copying the show from Google Drive…',async()=>{reloadAll();},'gimport');}
 $('gdimp').onclick=()=>gdImport();
-async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
-async function sxClose(){if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
- let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok)showResult(r,'sx');}
+async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
+ if(r.ok&&r.already){busy(false);
+  if(!await ask('ShowXpress is still running','The Helper sees ShowXpress running on the laptop. If you can see its window there, just use it.<br><br>If you <b>can&rsquo;t</b> see it, it got stuck while closing: <b>Force close</b> stops it and opens it again (anything not saved is lost).','Force close and open'))return;
+  if(!await sxForce())return;busy(true,'Starting ShowXpress…');try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}}
+ setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
+async function sxForce(){busy(true,'Force closing ShowXpress…');let r;try{r=await api('/api/sx/close',{force:true});}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);
+ if(!r.ok){showResult(r,'sx');return false;}sxOpen=false;await new Promise(r=>setTimeout(r,2500));return true;}
+let sxCloseT=0;
+async function sxClose(){
+ if(sxCloseT&&Date.now()-sxCloseT>8000){   // asked before and it's still running
+  if(!await ask('ShowXpress didn&rsquo;t close','If ShowXpress is asking whether to save, answer it on the laptop.<br><br>If it has no window or is stuck, <b>Force close</b> stops it &mdash; anything not saved is lost.','Force close'))return;
+  sxCloseT=0;await sxForce();return;}
+ if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
+ let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok){showResult(r,'sx');return;}sxCloseT=r.none?0:Date.now();}
 $('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
 async function chkUpd(){const u=await getJ('/api/update');$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
  if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
@@ -1828,15 +1929,70 @@ document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display
 window.addEventListener('beforeunload',()=>{if(LV)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 window.addEventListener('pagehide',()=>{if(LV&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
+// ---------------- SETTINGS (cogwheel, user 2026-11-22): look (per device), tab order / hidden tabs (shared, settings.json
+// on the computer), Google Drive, phone & iPad, ShowXpress, updates
+const TABDEF=[...document.querySelectorAll('.tabs button')].map(b=>({id:b.dataset.tab,name:b.textContent}));
+let SET=null,SETV='';
+function themeMode(){try{return localStorage.getItem('sxh_theme')||'dark';}catch(e){return 'dark';}}
+function applyTheme(){const m=themeMode(),l=m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches);
+ document.documentElement.classList.toggle('light',l);const mt=document.querySelector('meta[name=theme-color]');if(mt)mt.content=l?'#eef0f4':'#0e1014';
+ document.querySelectorAll('#stheme button').forEach(b=>b.classList.toggle('on',b.dataset.v===m));if(typeof draw==='function')try{draw();}catch(e){}}
+try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);}catch(e){}
+document.querySelectorAll('#stheme button').forEach(b=>b.onclick=()=>{try{localStorage.setItem('sxh_theme',b.dataset.v);}catch(e){}applyTheme();});
+function tabOrder(){const o=((SET&&SET.tabOrder)||[]).filter(id=>TABDEF.some(t=>t.id===id));TABDEF.forEach(t=>{if(!o.includes(t.id))o.push(t.id);});return o;}
+function applyTabs(){const nav=document.querySelector('.tabs'),hid=new Set((SET&&SET.tabHidden)||[]);
+ tabOrder().forEach(id=>{const b=nav.querySelector('[data-tab="'+id+'"]');if(b){nav.appendChild(b);b.style.display=hid.has(id)?'none':'';}
+  document.querySelectorAll('.ht[data-go="'+id+'"]').forEach(x=>x.style.display=hid.has(id)?'none':'');});}
+function renderTabs(){const o=tabOrder(),hid=new Set((SET&&SET.tabHidden)||[]),n=o.length;
+ $('stabs').innerHTML=o.map((id,i)=>'<div class="tabrow'+(hid.has(id)?' off':'')+'" data-id="'+id+'"><span class="hdl" title="Drag to move">&#9776;</span>'+
+  '<label class="link grow" style="color:var(--txt)"><input type="checkbox" data-show="'+id+'"'+(hid.has(id)?'':' checked')+'> '+esc(TABDEF.find(t=>t.id===id).name)+'</label>'+
+  '<button class="mini" data-mv="-1" title="Move up"'+(i?'':' disabled')+'>&#9650;</button><button class="mini" data-mv="1" title="Move down"'+(i<n-1?'':' disabled')+'>&#9660;</button></div>').join('');}
+async function saveTabs(order,hidden){SET=Object.assign(SET||{},{tabOrder:order,tabHidden:hidden});applyTabs();renderTabs();
+ try{const r=await api('/api/settings/set',{tabOrder:order,tabHidden:hidden});if(r.ok){SET=r.settings;applyTabs();}}catch(e){}}
+const rowsNow=()=>[...$('stabs').children].map(r=>r.dataset.id),hidNow=()=>[...$('stabs').querySelectorAll('[data-show]')].filter(c=>!c.checked).map(c=>c.dataset.show);
+$('stabs').addEventListener('click',e=>{const b=e.target.closest('[data-mv]');if(!b)return;const o=rowsNow(),i=o.indexOf(b.closest('.tabrow').dataset.id),j=i+(+b.dataset.mv);
+ if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];saveTabs(o,hidNow());});
+$('stabs').addEventListener('change',e=>{if(e.target.dataset.show)saveTabs(rowsNow(),hidNow());});
+$('stabs').addEventListener('pointerdown',e=>{const h=e.target.closest('.hdl');if(!h)return;e.preventDefault();const row=h.closest('.tabrow'),box=$('stabs'),start=rowsNow().join();
+ row.classList.add('drag');
+ const mv=ev=>{let before=null;for(const r of box.children){if(r===row)continue;const bb=r.getBoundingClientRect();if(ev.clientY<bb.top+bb.height/2){before=r;break;}}
+  if(before!==row.nextSibling||(!before&&box.lastChild!==row))box.insertBefore(row,before);};
+ const up=()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);row.classList.remove('drag');
+  if(rowsNow().join()!==start)saveTabs(rowsNow(),hidNow());};
+ window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up);});
+$('stabreset').onclick=()=>saveTabs(TABDEF.map(t=>t.id),[]);
+async function loadSet(){const r=await getJ('/api/settings');if(!r.ok)return;SET=r.settings;SETV=r.ver||'';applyTabs();renderSet();}
+function renderSet(){if(!SET)return;applyTheme();renderTabs();$('sreopen').checked=SET.reopen!==false;$('sautoupd').checked=SET.autoUpd!==false;
+ if(G&&G.show)$('sshow').textContent=G.show;if(!$('supd').dataset.done)$('supd').innerHTML='Version <b>'+esc(SETV)+'</b>';}
+async function setOne(o,what){let r;try{r=await api('/api/settings/set',o);}catch(e){r={ok:false,error:'Lost connection.'};}
+ if(r.ok){SET=r.settings;renderSet();if(what==='gd')loadGd();}else showResult({ok:false,error:r.error||'Not saved.'},'sx');return r;}
+$('sreopen').onchange=e=>setOne({reopen:e.target.checked});$('sautoupd').onchange=e=>setOne({autoUpd:e.target.checked});
+async function openOn(what){let r;try{r=await api('/api/open',{what});}catch(e){r={ok:false,error:'Lost connection.'};}if(!r.ok)showResult(r,'sx');}
+$('sopenshow').onclick=()=>openOn('show');$('gdbk').onclick=()=>openOn('backups');$('gdapp').onclick=()=>openOn('gdapp');$('gddl').onclick=()=>openOn('gddl');
+$('gdfoldset').onclick=async()=>{const v=$('gdfold').value.trim();if(!v)return;const r=await setOne({driveFolder:v},'gd');if(r.ok)$('gdfold').value=SET.driveFolder;};
+$('gdfoldauto').onclick=async()=>{$('gdfold').value='';await setOne({driveFolder:''},'gd');};
+$('supdchk').onclick=async()=>{$('supd').dataset.done='1';$('supd').textContent='Checking GitHub…';const u=await getJ('/api/update?fresh=1');
+ $('supd').innerHTML='Version <b>'+esc(u.current||SETV)+'</b>'+(u.ok?(u.newer?' &mdash; version <b>'+esc(u.latest)+'</b> is ready: press <b>&#11014; Update</b> at the top.':' &mdash; up to date.'):' &mdash; couldn&rsquo;t reach GitHub.');
+ if(u.ok)chkUpd();};
+function updGdAcct(){if(!G||!$('gdacct'))return;
+ $('gdacct').innerHTML=!G.ok?'':G.found?'&#10003; Google Drive is signed in'+(G.account?' as <b>'+esc(G.account)+'</b>':'')+' &mdash; it uploads and downloads the show by itself.':
+  G.appFound?'<span style="color:var(--amber)">Google Drive is installed but not signed in.</span> Press <b>Open Google Drive</b> and sign in with the AWAAZ Google account.':
+  '<span style="color:var(--amber)">Google Drive for desktop isn&rsquo;t on this computer.</span> Press <b>Get Google Drive</b>, install it and sign in.';
+ $('gdapp').style.display=G.appFound?'':'none';$('gdapp').textContent=G.found?'Open Google Drive':'Sign in to Google Drive';
+ if(document.activeElement!==$('gdfold'))$('gdfold').value=G.override||'';$('gdfold').placeholder=G.my&&!G.override?'Found: '+G.my:'Found automatically';
+ if(G.show)$('sshow').textContent=G.show;}
+applyTheme();
+
 // ---------------- PHONE / iPAD: pairing (on the phone) and the Phone & iPad card (on the computer)
-function phUnpaired(msg){try{localStorage.removeItem('sxh_phone_key');}catch(e){}T='';
- $('pairmsg').innerHTML=/turned off/.test(msg||'')?'<span style="color:var(--amber)">Phone access is turned off on the laptop (Home &rarr; Phone &amp; iPad).</span>':'';$('pair').classList.add('on');}
+function phUnpaired(msg){const off=/turned off/.test(msg||'');
+ if(!off){try{localStorage.removeItem('sxh_phone_key');}catch(e){}try{const u=new URL(location.href);if(u.searchParams.has('k')){u.searchParams.delete('k');history.replaceState(null,'',u.pathname+u.search+location.hash);}}catch(e){}T='';}
+ $('pairmsg').innerHTML=/turned off/.test(msg||'')?'<span style="color:var(--amber)">Phone access is turned off on the laptop (&#9881; Settings &rarr; Phone &amp; iPad).</span>':'';$('pair').classList.add('on');}
 async function phPair(){const v=$('pairpin').value.replace(/\D/g,'');if(v.length!==6){$('pairmsg').textContent='Type the 6 digits from the laptop.';return;}
  $('pairgo').disabled=true;let r;
  try{const x=await fetch('/api/phone/pair',{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({pin:v})});r=x.ok?await x.json():{ok:false,error:await x.text()};}
  catch(e){r={ok:false,error:'Can’t reach the laptop. Is this phone on the same Wi-Fi?'};}
  $('pairgo').disabled=false;if(!r.ok){$('pairmsg').innerHTML='<span style="color:var(--red)">'+esc(r.error)+'</span>';return;}
- try{localStorage.setItem('sxh_phone_key',r.key);}catch(e){}location.reload();}
+ phKeep(r.key);location.reload();}
 $('pairgo').onclick=phPair;$('pairpin').addEventListener('keydown',e=>{if(e.key==='Enter')phPair();});
 $('pairpin').addEventListener('input',e=>{const v=e.target.value.replace(/\D/g,'').slice(0,6);e.target.value=v;if(v.length===6)phPair();});
 let PHI=null,phT=0;
@@ -1865,10 +2021,10 @@ function renderPhone(){const p=PHI,b=$('phbody');if(!p)return;$('phon').checked=
  const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await getJ('/api/phone/pin');renderPhone();};
  $('phunp').onclick=async()=>{if(!await ask('Unpair all phones?','Every paired phone and iPad has to be paired again with a new code.','Unpair'))return;PHI=await api('/api/phone/unpair',{});renderPhone();};}
 $('phon').onchange=async e=>{busy(true,e.target.checked?'Turning on phone access…':'Turning off phone access…');try{PHI=await api('/api/phone/set',{on:e.target.checked});}catch(x){PHI={ok:false,error:'Lost connection.'};}busy(false);renderPhone();};
-if(!PH){loadPhone();setInterval(()=>{if(PHI&&PHI.on&&$('v-home').classList.contains('on')&&!document.hidden)loadPhone();},5000);}
+if(!PH){loadPhone();setInterval(()=>{if(PHI&&PHI.on&&$('v-settings').classList.contains('on')&&!document.hidden)loadPhone();},5000);}
 
 if(__PHONE__&&!T){phUnpaired('');}
-else{setTab(location.hash.slice(1)||'home');draw();load();poll();loadGd();chkUpd();}
+else{setTab(location.hash.slice(1)||'home');draw();load();poll();loadSet().then(()=>{if(!PH&&(!SET||SET.autoUpd!==false))chkUpd();});}
 </script></body></html>
 '@
 
@@ -1889,10 +2045,10 @@ try {
       # a phone (through the Wi-Fi relay) needs the phone key; everything else needs this window's key
       $fromPhone = [bool]"$($req.Headers['X-SXH-Phone'])"
       if ($fromPhone) {
-        if (-not $script:ph.on) { Send-Text $ctx 403 'text/plain' 'Phone access is turned off in ShowXpress Helper.'; continue }
+        if (-not $script:ph.on) { Send-Text $ctx 403 'text/plain' 'Phone access is turned off in SX Helper.'; continue }
         if ($phoneNever -contains $path) { Send-Text $ctx 403 'text/plain' 'Only on the computer.'; continue }
-        if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and $req.QueryString['t'] -ceq $script:ph.key)) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
-      } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open ShowXpress Helper from its icon.'; continue }
+        if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and ($req.QueryString['t'] -ceq $script:ph.key -or (Get-PhoneCookieKey $req)))) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
+      } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open SX Helper from its icon.'; continue }
       $last = Get-Date
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
@@ -1903,8 +2059,14 @@ try {
       }
       switch ($path) {
         '/'            {
-          if ($fromPhone) { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', '').Replace('__PHONE__', 'true')) }
-          else { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token).Replace('__PHONE__', 'false')) }
+          if ($fromPhone) {
+            # a paired phone gets its key back from the cookie (or from ?k= in the address) even if its storage was cleared
+            $ck = Get-PhoneCookieKey $req; $uk = "$($req.QueryString['k'])"
+            if (-not $ck -and $script:ph.key -and $uk -ceq $script:ph.key) { $ck = $uk }
+            if ($ck) { Set-PhoneCookie $ctx }
+            Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', '').Replace('__PHONEKEY__', $ck).Replace('__PHONE__', 'true'))
+          }
+          else { Send-Text $ctx 200 'text/html; charset=utf-8' ($html.Replace('__TOKEN__', $token).Replace('__PHONEKEY__', '').Replace('__PHONE__', 'false')) }
         }
         '/api/phone'   { Send-Json $ctx (Get-PhoneInfo) }
         '/api/phone/set' {
@@ -1922,8 +2084,8 @@ try {
           $now = Get-Date
           if (-not $fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Pairing is for phones.' }; break }
           if ($now -lt $script:pinLock) { Send-Json $ctx @{ ok = $false; error = 'Too many wrong codes. On the laptop, press "Pair a phone" again for a new code.' }; break }
-          if (-not $script:pin -or $now -gt $script:pinUntil) { Send-Json $ctx @{ ok = $false; error = 'No code is showing on the laptop. In ShowXpress Helper on the laptop, open Home and press "Pair a phone".' }; break }
-          if ("$($body.pin)".Trim() -ceq $script:pin) { $script:pinFails = 0; Save-Phone; Send-Json $ctx @{ ok = $true; key = $script:ph.key }; break }
+          if (-not $script:pin -or $now -gt $script:pinUntil) { Send-Json $ctx @{ ok = $false; error = 'No code is showing on the laptop. In SX Helper on the laptop, press the cogwheel (top right) and press "Pair a phone".' }; break }
+          if ("$($body.pin)".Trim() -ceq $script:pin) { $script:pinFails = 0; Save-Phone; Set-PhoneCookie $ctx; Send-Json $ctx @{ ok = $true; key = $script:ph.key }; break }
           $script:pinFails++
           if ($script:pinFails -ge 5) { $script:pin = ''; $script:pinLock = $now.AddSeconds(60) }
           Start-Sleep -Milliseconds 600
@@ -2012,12 +2174,37 @@ try {
           Send-Json $ctx $res
         }
         '/api/queue/cancel' { $k = "$($body.key)"; foreach ($o in @($queue | Where-Object { $_.key -eq $k -or $k -eq '*' })) { [void]$queue.Remove($o) }; Send-Json $ctx @{ ok = $true; q = (Get-QueueInfo) } }
-        '/api/queue/reopen' { $script:qReopen = [bool]$body.on; Send-Json $ctx @{ ok = $true; q = (Get-QueueInfo) } }
+        '/api/queue/reopen' { $script:qReopen = [bool]$body.on; $st = Get-Settings; $st.reopen = $script:qReopen; Save-Settings $st; Send-Json $ctx @{ ok = $true; q = (Get-QueueInfo) } }
+        '/api/settings' { Send-Json $ctx @{ ok = $true; settings = (Get-Settings); ver = $appVer } }
+        '/api/settings/set' {
+          $st = Get-Settings
+          if ($null -ne $body.tabOrder) { $st.tabOrder = @($body.tabOrder | ForEach-Object { "$_" }) }
+          if ($null -ne $body.tabHidden) { $st.tabHidden = @($body.tabHidden | ForEach-Object { "$_" }) }
+          if (-not $fromPhone) {
+            if ($null -ne $body.reopen) { $st.reopen = [bool]$body.reopen; $script:qReopen = $st.reopen }
+            if ($null -ne $body.autoUpd) { $st.autoUpd = [bool]$body.autoUpd }
+            if ($null -ne $body.driveFolder) {
+              $d = "$($body.driveFolder)".Trim().Trim('"').TrimEnd('\', '/')
+              if ($d -and -not (Test-Path -LiteralPath $d -PathType Container)) { Send-Json $ctx @{ ok = $false; error = "That folder doesn't exist: $d" }; break }
+              $st.driveFolder = $d
+            }
+          }
+          Save-Settings $st
+          Send-Json $ctx @{ ok = $true; settings = (Get-Settings) }
+        }
+        '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }
         '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }
         '/api/sx/launch' { Send-Json $ctx (Start-Sx) }
         '/api/sx/close' {
           if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
           $ps = @(Get-SxProcess)
+          if (-not $ps.Count) { Send-Json $ctx @{ ok = $true; out = "  ShowXpress isn't open"; error = ''; none = $true }; break }
+          if ($body -and $body.force) {
+            # stuck (no window, or it never finished closing): stop it - anything not saved is lost
+            foreach ($p in $ps) { try { $p.Kill() } catch {} }
+            Start-Sleep -Milliseconds 800
+            Send-Json $ctx @{ ok = -not @(Get-SxProcess).Count; out = '  ShowXpress was force closed'; error = 'ShowXpress could not be stopped - restart the computer.' }; break
+          }
           if ($onMac) {
             $apps = @($ps | ForEach-Object { if ("$($_.Path)" -match '^(.+?\.app)/') { $Matches[1] } } | Select-Object -Unique)
             if ($ps.Count -and -not $apps.Count) { $a = Find-SxMacApp; if ($a) { $apps = @($a.FullName) } }
@@ -2025,19 +2212,19 @@ try {
           } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
           Send-Json $ctx @{ ok = $true; out = '  ShowXpress was asked to close'; error = '' }
         }
-        '/api/update'  { Send-Json $ctx (Get-Update) }
+        '/api/update'  { if ($req.QueryString['fresh']) { $script:updInfo = $null }; Send-Json $ctx (Get-Update) }
         '/api/update/install' {
           $u = Get-Update
           if (-not $u.ok -or -not $u.newer -or $u.asset -notmatch '^https://github\.com/') { Send-Json $ctx @{ ok = $false; error = 'No newer version found on GitHub.'; out = '' }; break }
           $dl = Join-Path ([IO.Path]::GetTempPath()) ($u.name -replace '[^\w\.-]', '_')
-          try { Invoke-WebRequest -Uri $u.asset -OutFile $dl -UseBasicParsing -Headers @{ 'User-Agent' = 'ShowXpress-Helper' } -TimeoutSec 300 }
+          try { Invoke-WebRequest -Uri $u.asset -OutFile $dl -UseBasicParsing -Headers @{ 'User-Agent' = 'SX-Helper' } -TimeoutSec 300 }
           catch { Send-Json $ctx @{ ok = $false; error = "Download failed: $($_.Exception.Message)"; out = '' }; break }
           if ($onMac) {
             # this server stops and the app quits (it sees the flag); a small script opens the installer, waits for it, then opens the new version
             $tmp = [IO.Path]::GetTempPath()
             $flag = Join-Path $tmp 'sxh_updating'; $us = Join-Path $tmp 'sxh_update.sh'
             [IO.File]::WriteAllText($flag, "$($u.latest)")
-            [IO.File]::WriteAllText($us, "sleep 2`nopen -W '$dl'`nsleep 1`nrm -f '$flag'`nopen '/Applications/ShowXpress Helper.app'`n")
+            [IO.File]::WriteAllText($us, "sleep 2`nopen -W '$dl'`nsleep 1`nrm -f '$flag'`nopen '/Applications/SX Helper.app'`n")
             & /bin/bash -c "nohup /bin/bash '$us' >/dev/null 2>&1 &"
             Send-Json $ctx @{ ok = $true; restarting = $true; out = ''; error = '' }
             $l.Stop(); break

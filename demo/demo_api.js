@@ -1,10 +1,10 @@
-// ShowXpress Helper DEMO: a pretend laptop inside the page. Every call the phone page makes is answered here,
+// SX Helper DEMO: a pretend laptop inside the page. Every call the phone page makes is answered here,
 // with a made-up show (10 movers), so every tab can be tried with no laptop, no ShowXpress and no lights.
 (function(){
 const nowS=()=>new Date().toISOString().slice(0,19);
 const heads=[];for(let i=1;i<=10;i++)heads.push({id:String(i),num:i<=8?i:i-8,is140:i<=8,label:i<=8?'140 #'+i:'251 #'+(i-8)});
 const st={sxOpen:false,hung:new Set(['1','2','3','4','5','6','9','10']),skip:new Set(['1','2','3','4','5','6','9','10']),
- color:{hex:'f4a6b8',name:'Blush'},assign:{'tl-l':'1','tl-r':'2','tr-l':'3','tr-r':'4','bl-l':'5','bl-r':'6'},extra:false,gd:nowS(),
+ color:{hex:'f4a6b8',name:'Blush'},assign:{'tl-l':'1','tl-r':'2','tr-l':'3','tr-r':'4','bl-l':'5','bl-r':'6'},extra:false,gd:nowS(),gi:'',
  auto:{bpm:124,order:'order',stop:'keep',clean:false,looks:[
   {id:'a1b2c3d4',name:'Floor sweep',bars:8,on:true,titles:['DF SWEEP','TONIGHTS COLOR','UPLIGHTS SLOW']},
   {id:'b1b2c3d4',name:'Around room',bars:16,on:true,titles:['AROUND ROOM','COLOR CHASE']},
@@ -23,6 +23,7 @@ function autoStatus(){const r=st.run;if(!r)return null;const L=st.auto.looks.fil
   msLeft:Math.max(0,len-el),at:new Date().toISOString(),held:!!r.held,missing:[],error:''};}
 const liveHeads=heads.slice(0,8).map((h,i)=>({id:h.id,label:h.label,is140:true,c:(st.aims[h.id]||[32768,20000]).slice(),k:[30000,18000],kSet:false,home:[32768,20000],dk:[-3000,-2500],
  deg:[540,270],addr:1+20*i,look:[[5,255]],dimI:5,shutI:6,order:i,tower:['Top left','Top right','Bottom left','Bottom right'][i>>1],side:'LR'[i%2],partner:heads[i^1].id,free:true,hung:true}));
+const sets=()=>{let v={};try{v=JSON.parse(localStorage.getItem('sxh_demo_set')||'{}');}catch(e){}return Object.assign({tabOrder:[],tabHidden:[],reopen:true,autoUpd:true,driveFolder:''},v);};
 const ok=(out,extra)=>Object.assign({ok:true,out:'  (demo) '+out,error:''},extra||{});
 function route(p,b){b=b||{};
  switch(p){
@@ -30,8 +31,11 @@ function route(p,b){b=b||{};
  case '/api/sx/launch':st.sxOpen=true;return ok('ShowXpress is starting');
  case '/api/sx/close':st.sxOpen=false;return ok('ShowXpress was asked to close');
  case '/api/update':return {ok:true,current:'1.6.0 (demo)',latest:'1.6.0',newer:false};
- case '/api/gdrive':return {ok:true,found:true,target:'Google Drive > AWAAZ > Lighting > Demo Show',last:st.gd};
+ case '/api/gdrive':return {ok:true,found:true,here:true,show:'Demo Show',target:'Google Drive > AWAAZ > Lighting > Demo Show',last:st.gd,srcFound:true,srcTime:st.gd,lastImport:st.gi,appFound:true,account:'',my:'',override:''};
  case '/api/gdrive/sync':st.gd=nowS();return ok('Copied 3 changed files to Google Drive');
+ case '/api/gdrive/import':st.gi=nowS();return ok('Imported the show from Google Drive (the old one is kept as a backup)');
+ case '/api/settings':return {ok:true,settings:sets(),ver:'demo'};
+ case '/api/settings/set':{const v=sets();if(b.tabOrder)v.tabOrder=b.tabOrder;if(b.tabHidden)v.tabHidden=b.tabHidden;try{localStorage.setItem('sxh_demo_set',JSON.stringify(v));}catch(e){}return {ok:true,settings:v};}
  case '/api/remote':return {ok:true,ready:true,open:st.sxOpen,connected:st.sxOpen,pressed:st.pressed.map(t=>({title:t,page:page(t)})),titles:btns,setup:{}};
  case '/api/remote/press':st.pressed=b.solo?(b.titles||[]).slice():[...new Set(st.pressed.concat(b.titles||[]))];return {ok:true,ready:true,open:true,connected:true,pressed:st.pressed.map(t=>({title:t,page:page(t)}))};
  case '/api/remote/off':st.pressed=[];return {ok:true,ready:true,open:true,connected:true,pressed:[]};

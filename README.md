@@ -1,8 +1,8 @@
 <p align="center"><img src="assets/aim_movers_1024.png" width="120" alt=""></p>
 
-# ShowXpress Helper
+# SX Helper
 
-A small Windows + Mac app for **ShowXpress** that gets the moving heads ready for each new venue. It used to be called AIM MOVERS.
+A small Windows + Mac app for **ShowXpress** that gets the moving heads ready for each new venue. It used to be called ShowXpress Helper (and before that AIM MOVERS).
 
 Its main tabs:
 
@@ -23,16 +23,16 @@ Get the latest installer from **[Releases](../../releases/latest)**:
 
 | | File | First run |
 |---|---|---|
-| **Windows** | `ShowXpress-Helper-windows-setup-x.y.z.exe` | If Windows SmartScreen appears: **More info -> Run anyway**. |
-| **Mac** | `ShowXpress-Helper-mac-x.y.z.pkg` | If macOS blocks it: **System Settings -> Privacy & Security -> Open Anyway** (or right-click the file -> Open). When ShowXpress Helper opens for the first time, it offers to install PowerShell 7 (free, from Microsoft). |
+| **Windows** | `SX-Helper-windows-setup-x.y.z.exe` | If Windows SmartScreen appears: **More info -> Run anyway**. |
+| **Mac** | `SX-Helper-mac-x.y.z.pkg` | If macOS blocks it: **System Settings -> Privacy & Security -> Open Anyway** (or right-click the file -> Open). When SX Helper opens for the first time, it offers to install PowerShell 7 (free, from Microsoft). |
 
 The installers aren't code-signed, which is why Windows and macOS ask the first time. Installing over AIM MOVERS replaces it, including its shortcuts.
 
 **What gets installed**
-- **Windows:** "ShowXpress Helper" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
-- **Mac:** *ShowXpress Helper* in Applications, plus a *ShowXpress Helper* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
+- **Windows:** "SX Helper" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
+- **Mac:** *SX Helper* in Applications, plus an *SX Helper* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
 
-The Helper always opens on its **Home** page: the tabs, a Google Drive backup button, **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to the Helper's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
+The Helper always opens on its **Home** page: the tabs, a **⚙ Settings** button (top right), **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to the Helper's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
 
 ## Weekly use
 
@@ -48,7 +48,7 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
    - **Step 1:** aim every head at the center of the dancefloor.
    - **Step 2 (optional):** aim a head at the same corner (front-left as seen from the DJ) to set its size.
 2. Save, and close ShowXpress.
-3. Open **ShowXpress Helper**, check the heads, set the overall size, and press **Apply to show**.
+3. Open **SX Helper**, check the heads, set the overall size, and press **Apply to show**.
 4. Open ShowXpress again. **DF CHECK 140 + 251** come on by themselves (with the remote on, see below). The beams should trace the floor corners.
 
 **Aim live** - the quicker way (Windows and Mac). Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and the Helper drives the DMX interface itself, so the real head follows your mouse as you drag:
@@ -76,7 +76,7 @@ Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save t
 **Pre-show Check** - one list of what to look at before the guests arrive. Where the Helper can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
 
 **Skip Flash**
-1. Close ShowXpress, open **ShowXpress Helper** and go to the **Skip Flash** tab.
+1. Close ShowXpress, open **SX Helper** and go to the **Skip Flash** tab.
 2. Tap the heads you have tonight (amber = in use). **All** / **None** work per model.
 3. Press **Save to SKIP FLASH**.
 
@@ -100,16 +100,16 @@ ShowXpress doesn't send its beat to other apps, so the Auto Show counts bars fro
 
 **ShowXpress remote:** RIG ID, DF CHECK, ROOM CHECK and the Auto Show use ShowXpress's *External App* remote (on this computer only). The first time, press **Turn on remote control** in any of those tabs; the Helper switches it on in the show with a password only it uses. The Helper never presses anything while something outside the SETUP page is playing, so a running show isn't cut.
 
-ShowXpress Helper never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, the Helper does them and opens ShowXpress again.
+SX Helper never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, the Helper does them and opens ShowXpress again.
 
 ## Phone & iPad
 
 The Helper also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Skip Flash), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so the Helper has to be open on it.
 
-1. On the laptop, go to **Home -> Phone & iPad** and tick **Let my phone and iPad connect**. The first time, Windows asks whether PowerShell may use the network: tick **Private networks** and press **Allow**. On a Mac, allow **pwsh** to accept incoming connections if macOS asks.
+1. On the laptop, press **⚙** (top right) and go to **Phone & iPad** and tick **Let my phone and iPad connect**. The first time, Windows asks whether PowerShell may use the network: tick **Private networks** and press **Allow**. On a Mac, allow **pwsh** to accept incoming connections if macOS asks.
 2. On the iPhone or iPad, open **Safari** and go to the address shown there, e.g. `http://DJ-LAPTOP.local:47322`. The `.local` address stays the same at every venue; the number address changes with the network.
 3. **Share -> Add to Home Screen**, then open it from the Home Screen icon.
-4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once. **Unpair all phones** locks them all out again.
+4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once and stays paired: after a restart of the phone, the laptop or the Helper it connects straight away. **Unpair all phones** locks them all out again.
 
 **Demo (no laptop needed):** https://xsvproductions.github.io/showxpress-helper/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever the Helper's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
 
@@ -119,15 +119,30 @@ The Helper also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, To
 
 Phones get no updates or phone settings (those stay on the laptop). Anything a phone saves while ShowXpress is open is queued, the same as on the laptop. If ShowXpress asks whether to save when it closes, answer it on the laptop.
 
+## Settings
+
+Press **⚙** at the top right (or the **Settings** tile on Home):
+
+- **Look:** Dark, Light or *Same as this device*. Each computer, phone and iPad keeps its own.
+- **Tabs:** drag ☰ or use the arrows to change the tab order, and untick a tab to hide it (from Home too). The order is the same on the laptop, the phone and the iPad. **Reset** brings back the normal order.
+- **Google Drive:** whether Google Drive for desktop is installed and signed in, **Open Google Drive** / **Get Google Drive** to sign in or install it, Sync and Import, the My Drive folder if the Helper can't find it by itself, and the import backups.
+- **Phone & iPad:** turn phone access on, pair, unpair.
+- **ShowXpress:** open ShowXpress again after queued changes, and open the show folder.
+- **Updates:** the version, **Check now**, and whether to check when the Helper opens.
+
+They're kept in `%APPDATA%\ShowXpress Helper\settings.json` (Mac: `~/AwaazTools/settings.json`). The Helper can't sign in to Google itself: signing in is done in the Google Drive app.
+
 ## Google Drive
 
-**Sync to Google Drive** (Home page, and Pre-show Check when it's due) copies the show into **Google Drive > AWAAZ > Lighting > *show folder name*** through the Google Drive for desktop app, which uploads it. One way only: new and changed files are copied, nothing is deleted, and a file that is newer on Google Drive is left alone. Close ShowXpress first so the saved show is copied.
+**Sync to Google Drive** (⚙ Settings, and Pre-show Check when it's due) copies the show into **Google Drive > AWAAZ > Lighting > *show folder name*** through the Google Drive for desktop app, which uploads it. One way only: new and changed files are copied, nothing is deleted, and a file that is newer on Google Drive is left alone. Close ShowXpress first so the saved show is copied.
+
+**Import from Google Drive** (⚙ Settings) does the opposite: the Google Drive copy replaces the show on this computer. The old show is kept as a backup (newest 3, **Open import backups**), and if any file can't be read nothing is changed.
 
 On the Mac, copy the show from Google Drive into `~/TheLightingController/LightShows` (or write its folder into `~/AwaazTools/show_path.txt`). SYNC FROM WINDOWS is gone; installing this version removes its Desktop shortcut.
 
 ## Show folder
 
-ShowXpress Helper looks for the show in this order:
+SX Helper looks for the show in this order:
 1. The folder written in `show_path.txt`:
    - **Windows:** `%APPDATA%\ShowXpress Helper\show_path.txt` (optional; the old `%APPDATA%\AIM MOVERS\show_path.txt` still works)
    - **Mac:** `~/AwaazTools/show_path.txt` (optional)

@@ -77,7 +77,7 @@ Name: "{autoprograms}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """
 Name: "{autodesktop}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\sx_studio.ico"; AppUserModelID: "XSVProductions.SXStudio"; Comment: "Lighting control for ShowXpress - XSV Productions"; Tasks: desktopicon
 
 [Run]
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent 64bit
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "{#StopGui}"; Flags: runhidden; RunOnceId: "StopGui"

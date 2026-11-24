@@ -161,8 +161,15 @@ function Get-SxProcess {
   }
   @(Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match '^(TheLightingContr|ShowXpress)' -and $_.ProcessName -notmatch 'Helper|sxh|setup|unins|updat' })
 }
+function Get-SxDllArg {
+  # the folder with ShowXpress's interface driver, for dmx_out.ps1 / player.ps1 (2026-11-24: a 32-bit SX Studio, started
+  # by the installer's "Open SX Studio now", looked in Program Files (x86) - its own %ProgramFiles%)
+  if ($onMac -or $TestRoot) { return '' }
+  $x = Get-SxExe; if (-not $x) { return '' }
+  " -DllDir `"$(Split-Path $x)`""
+}
 function Get-SxExe {
-  foreach ($p in "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
+  foreach ($p in "$env:ProgramW6432\ShowXpress\TheLightingController.exe", "$env:ProgramFiles\ShowXpress\TheLightingController.exe", "${env:ProgramFiles(x86)}\ShowXpress\TheLightingController.exe") { if ($p -and (Test-Path -LiteralPath $p)) { return $p } }
   $null
 }
 function Get-Update {
@@ -289,7 +296,7 @@ function Stop-Live {
 }
 function Start-Live {
   Stop-Live
-  $exe = $psExe; $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`""
+  $exe = $psExe; $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$liveEngine`"$(Get-SxDllArg)"
   if ($TestRoot) { $ea += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
   elseif ($onMac) {
     # Mac: a small tool inside the app (Contents/MacOS/sxh_dmx) drives the interface through ShowXpress's own driver
@@ -340,7 +347,7 @@ function Stop-Player {
 function Start-Player([string]$root) {
   Stop-Player
   if ($onMac) { return @{ ok = $false; error = 'The SX Player only runs on Windows for now - the Mac part comes in a later stage.'; out = '' } }
-  $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$playerEngine`" -Show `"$root`" -StatusFile `"$($script:labStat)`" -Pipe sxh_player_$PID"
+  $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$playerEngine`" -Show `"$root`" -StatusFile `"$($script:labStat)`" -Pipe sxh_player_$PID$(Get-SxDllArg)"
   if ($TestRoot) { $ea += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
   $r = Open-DmxChild $psExe $ea
   if ($r.ok) {

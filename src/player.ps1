@@ -50,13 +50,18 @@
 #     fader <k> <0..1>         set speed fader k          key <c>   a keyboard trigger
 #     mi <status> <d1> <d2>    a MIDI message as if it came from the APC (tests)
 #     bpm <40..250>   tap   sync      seton <sec> / setoff <sec>   ton <title> / toff <title>  (on/off, not toggle)
+#     addb <sec>|<group>|<swap 0/1>|<fader>|<bpm 0/1>|<flash 0/1>|<beats>|<file path>|<title>   add (or replace) a button
+#       that isn't in live.ini: a button on one of the SX Player's own pages (user 2026-11-24). group = the page it swaps
+#       with (1000 + the player page's number, so it never meets a ShowXpress page). No pad, no key.
+#     delb <sec>    take such a button away again (it stops if it was playing)
 #   Status (-StatusFile, rewritten 5x a second): {"ok":true,"bo":false,"on":[{"slot":..,"step":1,"of":4}],"err":"",
 #     "fd":[0.5,..],"midi":"APC mini mk2" or "","led":{"note":value,..},"bpm":124,"beat":37.25,"src":"manual|tap|VirtualDJ",
 #     "os2l":"<VirtualDJ's address, when connected>","os2lPort":7350,"os2lErr":"","iface":"ok|lost","reconn":0,"warn":[..]}
 #   Safety: no command for 30 s (Helper gone) or stdin closed -> all channels 0, interface closed, exit.
 #   -Fake = no hardware (testing): the frame goes to -FakeLog as "ch=value" lines for channels above 0.
 #   -DefineOnly = just load the player code (tests dot-source this file and drive [SxPlayer] with their own clock).
-#   -List = (no DMX) JSON of the show's live pages + buttons for the Lab tab: {ok, show, pages:[{n,name,buttons:[..]}]}
+#   -List = (no DMX) JSON of the show's live pages + buttons for the Lab tab: {ok, show, pages:[{n,name,buttons:[..]}],
+#     files:[scene / movement file names the SX Player's own pages can use]}
 param([string]$Show = '', [string]$DllDir = "$env:ProgramFiles\ShowXpress", [switch]$Fake, [string]$FakeLog = '',
       [string]$StatusFile = '', [switch]$DefineOnly, [switch]$List, [string]$TestRoot = '', [switch]$NoMidi, [string]$Pipe = '')
 $ErrorActionPreference = 'Stop'
@@ -76,11 +81,16 @@ if ($List) {
       $c = -1; if ("$($b.Keys['color'])" -match '^\d+$') { $c = [int64]$b.Keys['color'] }
       [pscustomobject]@{ sec = $b.Sec; title = $(if ($b.Title) { $b.Title } else { $b.Name -replace '\.(scex|gpj)$', '' }); file = $b.Name; path = "$p"; kind = $kind; steps = $steps
         line = [int]"0$($b.Keys['line'])"; col = [int]"0$($b.Keys['column'])"; color = $c; bpm = ("$($b.Keys['speed'])" -eq 'auto_bpm')
-        fader = [int]"0$($b.Keys['masterspeedfader'])"; key = "$($b.Keys['trigger_keyboard'])"; flash = ("$($b.Keys['bpm_trigger'])" -eq 'flash_mode'); pad = $(if ("$($b.Keys['trigger_midi_note'])" -match '^\d+$') { [int]$b.Keys['trigger_midi_note'] } else { -1 }) }
+        fader = [int]"0$($b.Keys['masterspeedfader'])"; key = "$($b.Keys['trigger_keyboard'])"; flash = ("$($b.Keys['bpm_trigger'])" -eq 'flash_mode')
+        beats = $(& { $bt = 1.0; [void][double]::TryParse("$($b.Keys['beats'])", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bt); $bt }); pad = $(if ("$($b.Keys['trigger_midi_note'])" -match '^\d+$') { [int]$b.Keys['trigger_midi_note'] } else { -1 }) }
     }
     [pscustomobject]@{ n = $pg; name = $info.Pages[$pg]; swap = (Get-PageSwap $info $pg); buttons = @($bs) }
   }
-  [pscustomobject]@{ ok = $true; show = $root; pages = @($pages); faders = @($info.Faders) } | ConvertTo-Json -Depth 5 -Compress
+  # every scene + movement a button on one of the player's own pages can play (only read, never changed)
+  $files = @(@(if (Test-Path -LiteralPath "$root/scenes") { Get-ChildItem -LiteralPath "$root/scenes" -File | Where-Object { $_.Extension -in '.scex', '.gpj' } }) +
+             @(if (Test-Path -LiteralPath "$root/Editor/Generator/projects") { Get-ChildItem -LiteralPath "$root/Editor/Generator/projects" -File -Filter '*.gpj' }) |
+             ForEach-Object { $_.Name } | Sort-Object -Unique)
+  [pscustomobject]@{ ok = $true; show = $root; pages = @($pages); faders = @($info.Faders); files = @($files) } | ConvertTo-Json -Depth 5 -Compress
   return
 }
 if (-not ('SxPlayer' -as [type])) {
@@ -389,6 +399,10 @@ public static class SxPlayer {
   public static void AddFader(int k, bool speed, int ch, int cc) {
     if (k < 0 || k >= fv.Length) return;
     lock (lk) { isSpeed[k] = speed; if (cc >= 0) faderCc[(Math.Max(1, ch) << 8) | cc] = k; }
+  }
+  public static void RemoveButton(string sec) {   // only the player's own buttons (live.ini ones stay for the whole run)
+    lock (lk) { Btn b; if (!btns.TryGetValue(sec, out b)) return; btns.Remove(sec); plays.RemoveAll(p => p.Slot == sec);
+      if (!string.IsNullOrEmpty(b.Title)) { Btn t; if (byTitle.TryGetValue(b.Title, out t) && t == b) byTitle.Remove(b.Title); } }
   }
   public static void SetFader(int k, double v) { if (k >= 0 && k < fv.Length) lock (lk) fv[k] = Math.Max(0, Math.Min(1, v)); }
   public static double Speed(double v) { return Math.Pow(2, (v - 0.5) * 4); }   // GUESS: middle 1x, top 4x, bottom 1/4x
@@ -766,6 +780,18 @@ public static class SxPlayer {
         case "setoff": if (a.Length >= 2) Off(a[1]); break;
         case "ton": if (line.Length > 4) { LastError = ""; SetOn(SecOf(line.Substring(4)), Now()); } break;
         case "toff": if (line.Length > 5) Off(SecOf(line.Substring(5))); break;
+        case "addb": {   // a button on one of the SX Player's own pages (see the top of player.ps1)
+          string[] q = line.Substring(5).Split(new char[] { '|' }, 9); int g, sw, fd, bp, fl; double bt;
+          if (q.Length == 9 && q[0].StartsWith("x") && int.TryParse(q[1], out g) && int.TryParse(q[2], out sw) && int.TryParse(q[3], out fd) &&
+              int.TryParse(q[4], out bp) && int.TryParse(q[5], out fl) &&
+              double.TryParse(q[6], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out bt)) {
+            bool was = IsOn(q[0]);
+            lock (lk) { Btn o; if (btns.TryGetValue(q[0], out o)) { Btn t; if (byTitle.TryGetValue(o.Title ?? "", out t) && t == o) byTitle.Remove(o.Title); } }
+            AddButton(q[0], q[7], q[8], g, sw == 1, fd, "", 1, -1, 1, -1, 0, 0);
+            if (bp == 1) SetBeat(q[0], fl == 1, bt);
+            if (was && q[7] != "") On(q[0], q[7], Now());   // edited while playing: carries on with the new settings
+          } } break;
+        case "delb": if (a.Length >= 2 && a[1].StartsWith("x")) RemoveButton(a[1]); break;
         case "q": run = false; break;
       }
     } catch (Exception e) { LastError = (a[0] == "on" && a.Length == 3 ? Path.GetFileNameWithoutExtension(a[2]) + ": " : "") + e.Message; }

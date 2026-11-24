@@ -192,6 +192,7 @@ public class SxsScene {
   }
 }
 "@
+$sxsRefs = @{}; if ($PSVersionTable.PSEdition -ne 'Core') { $sxsRefs.ReferencedAssemblies = @('System.Xml') }   # Windows PowerShell 5.1
 if (-not ('SxsScene' -as [type])) {
   try {
     $h = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($sxsCs))).Replace('-', '').Substring(0, 16)
@@ -200,13 +201,13 @@ if (-not ('SxsScene' -as [type])) {
     if (-not (Test-Path -LiteralPath $dll)) {
       New-Item -ItemType Directory -Force $cd | Out-Null
       $tmpDll = Join-Path $cd "sxscene_$h.$PID.dll"
-      Add-Type -TypeDefinition $sxsCs -OutputAssembly $tmpDll -OutputType Library
+      Add-Type -TypeDefinition $sxsCs -OutputAssembly $tmpDll -OutputType Library @sxsRefs
       try { Move-Item -LiteralPath $tmpDll $dll -ErrorAction Stop } catch { Remove-Item -LiteralPath $tmpDll -ErrorAction SilentlyContinue }
       Get-ChildItem -LiteralPath $cd -Filter 'sxscene_*.dll' | Where-Object { $_.FullName -ne $dll } | Remove-Item -ErrorAction SilentlyContinue
     }
     try { Add-Type -Path $dll } catch { Remove-Item -LiteralPath $dll -ErrorAction SilentlyContinue }   # damaged: built again next time
   } catch {}
-  if (-not ('SxsScene' -as [type])) { Add-Type -TypeDefinition $sxsCs }
+  if (-not ('SxsScene' -as [type])) { Add-Type -TypeDefinition $sxsCs @sxsRefs }
 }
 function Read-SceneText([string]$t) { [SxsScene]::Read($t) }
 
@@ -445,7 +446,7 @@ function Add-Backup([string]$name, [byte[]]$bytes, [string]$what) {
   New-Item -ItemType Directory -Force $d | Out-Null
   $id = (Get-Date).ToString('yyyyMMdd-HHmmss-fff')
   [IO.File]::WriteAllBytes((Join-Path $d "$id.scex"), $bytes)
-  $o = [pscustomobject]@{ id = $id; dir = $d; json = (Join-Path $d "$id.json"); at = (Get-Date).ToString('s'); what = $what }
+  $o = [pscustomobject]@{ id = $id; dir = $d; json = (Join-Path $d "$id.json"); at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'); what = $what }
   $o
 }
 function Save-BackupInfo($bk, [string]$written) {
@@ -540,7 +541,7 @@ if ($Action -eq 'Revert') {
   $nb = Add-Backup $Scene $cur "before going back to $($bk.at)"
   Write-SceneBytes $path $old
   Save-BackupInfo $nb (Get-BytesSha $old)
-  "  CHANGED  $($Scene -replace '\.scex$', ''): back to the version from before $($bk.at -replace 'T', ' ')"
+  "  CHANGED  $($Scene -replace '\.scex$', ''): back to the version from before $($bk.at)"
   return
 }
 

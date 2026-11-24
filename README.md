@@ -12,6 +12,7 @@ Its main tabs:
 - **APC mini:** shows the 8x8 pad grid in each pad's own colours, with the scene and page each pad plays and what the four faders do. Tap a pad, then tap another one to move it there (or swap the two). It flags pads that fire two buttons, mappings outside the 64 pads, and pads whose scene is missing.
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
 - **Auto Show:** SX Studio presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
+- **Scene Editor:** open any scene, change its steps (values, step times, fades; copy, move or delete steps; add or take out a channel) and see it on the lights as you go, then save. Only what you changed is written into the scene file; everything else stays exactly as ShowXpress wrote it.
 - **Phone & iPad:** the same SX Studio on your iPhone or iPad over the Wi-Fi, with touch-friendly screens and Aim live by finger. See [Phone & iPad](#phone--ipad).
 - **Health Check:** a scan for problems that have caused trouble before. It looks for buttons whose scene is missing, scenes that use deleted fixtures, `beats = 0`, speed faders that don't exist, APC pads that fire two buttons, buttons stacked on the same spot, and colour chases that jump back across the colour wheel when they loop. Each problem comes with a recommended fix, and many can be fixed with one click. Every fix can be reverted.
 
@@ -91,6 +92,17 @@ The flash order follows the original 16-head skip order, with any 251s spread in
 
 The backups are kept in `health_fixes.json` in the show folder. If you change the same thing again in ShowXpress after a fix, Revert asks before it puts the old version back.
 
+**Scene Editor**
+1. Go to the **Scene Editor** tab and tap a scene (search by scene or button name).
+2. Pick a step at the top (or a square in the grid: rows are heads, columns are steps, amber = lit), and one or more heads. Change the values with the sliders, the number, or the named ranges from the fixture (colours, shutter...). **fade** = the channel glides from the step before over this step's time.
+3. **Copy step**, **Move**, **Delete step** and **Step time** work on the step you're on. **Add channel** / **×** add or take out a channel of the picked heads in every step.
+4. **Show on the lights** (ShowXpress closes; save it first) sends the step you're on to the rig as you change it. **Play the scene** runs it with its step times and fades. Nothing is saved yet.
+5. Press **Save scene**. While ShowXpress is open the save is queued, like the other tabs.
+
+What's safe: saving changes only the values, steps and channels you changed. The rest of the file (things SX Studio doesn't know, spacing, line endings) is kept byte for byte, and SX Studio checks the result two ways before writing it. If the scene was changed in ShowXpress after you opened it, the save is refused (press Reload). Every save keeps the scene as it was before; **Earlier versions** puts one back. Backups are kept outside the show folder (`%APPDATA%\ShowXpress Helper\scene_backups`, Mac `~/AwaazTools/scene_backups`), so they don't go to Google Drive. A scene SX Studio can't read safely is shown read-only and stays a ShowXpress job. Movements (Generator `.gpj`), the live buttons, fixture patching, the 3D view and macros stay in ShowXpress.
+
+If **Tonight's Rig** has trimmed the scene, the tab says so: the version you save counts as the full scene from then on.
+
 **Auto Show**
 1. Press **+ New look** and pick the buttons that should play **together** (say one movement + a colour + the uplights), or set them up in ShowXpress and press **New look from what's playing**. To cycle through movements, make **one look per movement**: MOVEMENTS plays one button at a time, so the tab offers to split a look that has several of them.
 2. Set how many bars each look plays, the order (in order / shuffle) and what happens when you stop.
@@ -150,6 +162,8 @@ SX Studio looks for the show in this order:
 3. The only show in `LightShows` that has a `CENTER SPOT` scene
 
 ## Building
+
+The scene editor's tests (`tools/test_scene_edit.ps1`) run before every release build, on Windows PowerShell 5.1 and PowerShell 7. `-Show <show folder>` also checks that every scene of a real show reads back byte for byte (on a temporary copy).
 
 Pushing a tag such as `v1.1.0` makes GitHub Actions build both installers and publish them as a release.
 - **Windows:** Inno Setup, `windows/aim_movers.iss`

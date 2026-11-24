@@ -5,6 +5,7 @@
 #   APC mini -> apc.ps1        Speed Faders -> speed.ps1      Health Check -> health.ps1 (check, fix, revert)
 #   Rig Test -> rig_test.ps1   Pre-show Check -> preshow.ps1
 #   Auto Show -> sx_remote.ps1 (also presses RIG ID / DF CHECK / ROOM CHECK in a running ShowXpress through its remote)
+#   Scene Editor -> scene_edit.ps1 (its live preview uses dmx_out.ps1 too)
 #   LIVE AIM (Aim Movers tab) -> dmx_out.ps1 drives the DMX interface while ShowXpress is closed; df_aim.ps1 LiveInfo / LiveSave
 # Quits by itself a few minutes after its window is closed.
 #   PHONE / iPAD (user 2026-11-22): the same page, phone-sized, on the Wi-Fi - see "PHONE" below.
@@ -26,6 +27,7 @@ $liveEngine   = Join-Path $here 'dmx_out.ps1'
 $playerEngine = Join-Path $here 'player.ps1'
 $remoteEngine = Join-Path $here 'sx_remote.ps1'
 $quitEngine = Join-Path $here 'sx_quit.ps1'
+$sceneEngine = Join-Path $here 'scene_edit.ps1'
 $repo   = 'XSVProductions/showxpress-helper'
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -513,6 +515,15 @@ function Invoke-Action([string]$path, $body) {
       return (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
     }
     '/api/rt/install' { return (Invoke-Engine '-Action Install' $rtEngine) }
+    '/api/scene/save' {
+      # SCENE EDITOR: only the changes go to scene_edit.ps1, which changes just those in the file
+      $f = "$($body.scene)"
+      if ($f -notmatch $sceneRx) { return @{ ok = $false; error = 'Unknown scene.'; out = '' } }
+      $o = [ordered]@{ scene = $f; sha = "$($body.sha)"; steps = @($body.steps | Where-Object { $null -ne $_ }); addch = @($body.addch | Where-Object { $null -ne $_ }); delch = @($body.delch | Where-Object { $null -ne $_ }) }
+      $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+      [IO.File]::WriteAllText($cf, ($o | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
+      try { return (Invoke-Engine "-Action Save -ChangesFile `"$cf`"" $sceneEngine) } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+    }
     '/api/remote/enable' { return (Invoke-Engine '-Action Enable' $remoteEngine) }
     '/api/rt/apply' {
       $as = [ordered]@{}
@@ -544,12 +555,14 @@ $queueable = @{
   '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
   '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive'
   '/api/gdrive/import' = 'Import from Google Drive'
-  '/api/remote/enable' = 'ShowXpress remote control' }
+  '/api/remote/enable' = 'ShowXpress remote control'; '/api/scene/save' = 'Scene' }
+$sceneRx = '^[^\\/:*?"<>|\x00-\x1f]{1,120}\.scex$'
 $queue = New-Object Collections.Generic.List[object]
 $qReopen = $true; $qDone = $null; $qClosed = 0
 function Get-QueueKey([string]$path, $body) {
   if ($path -eq '/api/apply' -or $path -eq '/api/home') { return "aim-$(if ("$($body.mode)" -eq 'room') { 'room' } else { 'floor' })" }
   if ($path -eq '/api/health/fix') { return "fix-$($body.key)" }
+  if ($path -eq '/api/scene/save') { return "scene-$("$($body.scene)".ToLower())" }   # one queued save per scene
   $path
 }
 function Add-Queue([string]$path, $body) {
@@ -557,9 +570,10 @@ function Add-Queue([string]$path, $body) {
   $label = $queueable[$path]
   if ($key -like 'aim-*') { $label = "$label - $(if ($key -eq 'aim-room') { 'Room' } else { 'Dance Floor' })" }
   if ($path -eq '/api/color/apply') { $label = "$label (#$("$($body.hex)".TrimStart('#').ToLower()))" }
+  if ($path -eq '/api/scene/save') { $label = "$label $("$($body.scene)" -replace '\.scex$', '')" }
   $old = @($queue | Where-Object { $_.key -eq $key })
   foreach ($o in $old) { [void]$queue.Remove($o) }
-  $queue.Add([pscustomobject]@{ key = $key; label = $label; path = $path; body = ($body | ConvertTo-Json -Depth 6 -Compress) })
+  $queue.Add([pscustomobject]@{ key = $key; label = $label; path = $path; body = ($body | ConvertTo-Json -Depth 8 -Compress) })
   @{ ok = $true; queued = $true; replaced = [bool]$old.Count; label = $label; out = ''; error = '' }
 }
 function Get-QueueInfo {
@@ -684,7 +698,7 @@ $setF = Join-Path $cfgDir 'settings.json'
 # 2026-11-24 (user): pages can be collapsed / hidden (collapsed:[n..], hidden:[n..]), and the player has pages of its own
 # (custom:[{id:"x1", name, swap, buttons:[{id:"x1_b1", title, file, fader, bpm, flash, beats, color}]}]) that play the
 # show's scene / movement files. All of it is SX Studio's settings only - live.ini and the scenes are never written.
-$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab')
+$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab', 'scene')
 $secRx = '^[\w .\-]{1,60}$'
 function Get-TabNames($v) {
   $o = [ordered]@{}
@@ -1220,6 +1234,25 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 .arrbar.on{display:flex}
 @media (max-width:860px){.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:640px){.hero2{padding:20px 18px}.hero2 svg.mk{height:58px}.hero2 .hname{font-size:22px;letter-spacing:4px}.hero2 .brand{display:none}.htiles{grid-template-columns:1fr 1fr}header .brandmk svg{height:24px}header h1{font-size:12px;letter-spacing:3px}}
+.sepv{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-radius:10px}.sepv.on{border-color:rgba(61,220,132,.5)}
+.sesc{cursor:pointer}.sesc:hover{border-color:var(--line2)}
+.sesteps{display:flex;gap:6px;flex-wrap:wrap}
+.sst{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:5px 9px;font-size:12.5px;font-weight:650;cursor:pointer;min-width:52px;text-align:center;user-select:none}
+.sst small{display:block;color:var(--dim);font-size:11px;font-weight:400}.sst.on{border-color:var(--amber);background:rgba(255,176,32,.13)}.sst.chg{box-shadow:inset 0 -2px 0 var(--blue)}.sst.new{border-style:dashed}.sst.pl{background:rgba(61,220,132,.18);border-color:var(--green)}
+.segrid{margin-top:14px;overflow-x:auto;background:var(--well);border:1px solid var(--line);border-radius:10px;padding:8px}
+.segrid table{border-collapse:separate;border-spacing:2px;font-size:11px}.segrid td{min-width:15px;height:14px;border-radius:3px;background:var(--tabon);cursor:pointer}
+.segrid td.l{background:var(--amber)}.segrid td.n{background:transparent;box-shadow:inset 0 0 0 1px var(--line)}.segrid td.c{outline:2px solid var(--blue)}
+.segrid th{font-weight:500;color:var(--dim);text-align:right;padding-right:6px;white-space:nowrap;cursor:pointer}.segrid th.on{color:var(--txt)}.segrid tr.hd th{text-align:center;padding:0 0 2px}
+.sewrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:16px;margin-top:14px;align-items:start}
+.seheads{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px;max-height:560px;overflow:auto}
+.seh{display:flex;justify-content:space-between;gap:6px;padding:5px 8px;border-radius:7px;cursor:pointer;font-size:13px;user-select:none}.seh:hover{background:var(--hover)}
+.seh.on{background:rgba(255,176,32,.15)}.seh small{color:var(--dim);white-space:nowrap}.seh.dim{opacity:.45}
+.sech{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}
+.secr{display:grid;grid-template-columns:110px minmax(80px,1fr) 64px 160px 64px 20px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}
+.secr .nm{font-weight:600;font-size:12.5px;word-break:break-word}.secr .nm small{display:block;color:var(--mute);font-weight:400}.secr.chg .nm{color:var(--blue)}.secr.mix .num{color:var(--dim)}
+.secr .x{border:none;background:none;color:var(--mute);padding:0;font-size:18px;line-height:1}.secr .x:hover{color:var(--red)}.secr .fd{font-size:12px}
+@media (max-width:760px){.sewrap{grid-template-columns:1fr}.seheads{max-height:260px}.secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.secr select{grid-column:1/3}}
+.ph .sewrap{grid-template-columns:1fr}.ph .seheads{max-height:260px}.ph .secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.ph .secr select{grid-column:1/3}
 </style>
 <script>(function(){try{var m=localStorage.getItem('sxh_theme')||'dark';if(m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches))document.documentElement.classList.add('light');}catch(e){}})();</script></head><body>
 <svg aria-hidden="true" style="position:absolute;width:0;height:0;border:0;overflow:hidden"><defs>
@@ -1228,7 +1261,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
  <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
 </defs></svg>
 <header><div class="brandmk" id="logo" title="Home"><svg class="mk" viewBox="0 0 778 445" aria-label="SX"><use href="#sxm"/></svg><h1 id="ttl">STUDIO</h1></div>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button></nav>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button><button data-tab="scene">Scene Editor</button></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
@@ -1256,6 +1289,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
    <button class="ht" data-go="apc"><i>CONTROL</i><b>APC mini</b><span>Move pads and pick their colours</span></button>
    <button class="ht" data-go="speed"><i>CONTROL</i><b>Speed Faders</b><span>Which fader drives which button</span></button>
    <button class="ht" data-go="health"><i>SHOW</i><b>Health Check</b><span>Find and fix problems in the show</span></button>
+   <button class="ht" data-go="scene"><i>SHOW</i><b>Scene Editor</b><span>Change a scene and see it on the lights</span></button>
    <button class="ht" data-go="settings"><i>SETUP</i><b>&#9881; Settings</b><span>Google Drive, phone &amp; iPad, tabs, light mode</span></button>
   </div>
  </div>
@@ -1472,6 +1506,38 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 
   <section id="result" class="card result"><h2 id="rtitle"></h2><div id="rbody"></div><details><summary>Full details</summary><pre id="rlog"></pre></details></section>
   <div class="foot" id="foot"></div>
+ <div class="view" id="v-scene">
+  <section class="card">
+    <div class="row"><div class="grow"><h2 id="setitle">Scene Editor</h2>
+      <p class="sub" style="margin-bottom:0">Change a scene&rsquo;s steps and values and see it on the lights. Saving changes only what you changed in the scene file &mdash; everything else in it stays exactly as ShowXpress wrote it.</p></div>
+      <span id="sestate" class="state ok" style="display:none"></span><button id="seback" style="display:none">&#8592; All scenes</button><button id="serefresh">&#8635; Reload</button></div>
+    <div id="seerr" class="warnbox"></div>
+    <div id="sepickw"><div class="row" style="margin-top:14px"><div class="sub grow" id="secount" style="margin:0"></div><input id="seq" class="srch" type="search" placeholder="Find a scene or button&hellip;"></div>
+      <div id="selist" class="scenes"></div></div>
+    <div id="sew" style="display:none">
+      <div id="seinfo" class="sub" style="margin:8px 0 0"></div>
+      <div id="sewarn" class="warnbox"></div>
+      <div id="seedit">
+        <div class="sepv" id="sepv"><b>&#9678; On the lights</b><span class="sub grow" style="margin:0" id="sepvsub">See the step you&rsquo;re on as you change it, or play the whole scene. ShowXpress is closed while this runs; nothing is saved until you press Save.</span>
+          <span id="sepvif" class="tag amber" style="display:none"></span><label class="link" style="display:none" id="sepvreow"><input type="checkbox" id="sepvreo"> Open ShowXpress again when I stop</label>
+          <button class="mini" id="sepvgo">Show on the lights</button><button class="mini" id="sepvplay" style="display:none"></button><button class="mini" id="sepvstop" style="display:none">&#9632; Stop</button></div>
+        <div class="gh"><h3>STEPS</h3><span class="cnt" id="secnt"></span></div>
+        <div class="sesteps" id="sesteps"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="mini" id="seleft">&#9664; Move</button><button class="mini" id="seright">Move &#9654;</button><button class="mini" id="secopy">Copy step</button><button class="mini" id="sedel">Delete step</button>
+          <div class="grow"></div><label class="link" style="cursor:default">Step time <input id="selen" class="num" type="number" min="0.01" step="0.01" style="width:84px;font-size:13px"> s</label><button class="mini" id="selenall">Same for every step</button></div>
+        <div class="segrid" id="segrid"></div>
+        <div class="sewrap">
+          <div class="seheads"><div class="row"><b class="grow">Heads</b><button class="mini" id="seall">All</button><button class="mini" id="senone">None</button></div><div id="sehl"></div></div>
+          <div class="sech"><div id="sechs"></div>
+            <div class="row" style="margin-top:12px" id="seaddw"><select id="seadd" style="width:auto;flex:1;max-width:260px"></select><button class="mini" id="seaddb">Add channel</button><span class="sub" style="margin:0">to these heads, in every step</span></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="sebk" style="display:none"><h2>Earlier versions</h2><p class="sub">Every save keeps the scene as it was just before. Revert puts one back (with ShowXpress closed).</p><div id="sebkl" class="scenes"></div></section>
+ </div>
+
 </main>
 <div class="bar"><div class="in" data-for="home"><div class="hint grow">Pick a tab above to start. Nothing in the show changes until you save in a tab.</div></div>
   <div class="in" data-for="color"><button id="clsave" class="primary">Save tonight's color</button><button id="clundo">Undo changes</button><div class="hint grow" id="clhint"></div></div>
@@ -1483,6 +1549,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
   <div class="in" data-for="apc"><button id="apsave" class="primary">Save pads</button><button id="apundo">Undo changes</button><div class="hint grow" id="aphint"></div></div>
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
   <div class="in" data-for="auto"><button id="ausave" class="primary">Save Auto Show</button><button id="auundo">Undo changes</button><div class="hint grow" id="auhint"></div></div>
+  <div class="in" data-for="scene"><button id="sesave" class="primary">Save scene</button><button id="seundo">Undo changes</button><div class="hint grow" id="sehint"></div></div>
   <div class="in" data-for="health"><button id="hlrun" class="primary">Check again</button><div class="hint grow" id="hlhint"></div></div></div>
 <div class="live" id="live">
  <div class="lvtop"><b class="lvt">&#9678; LIVE AIM</b><span id="lvmode" class="sub" style="margin:0"></span><span id="lvif" class="tag amber"></span><div class="grow"></div>
@@ -1572,12 +1639,12 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
   $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; SX Studio does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto'];
+ const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto','scene','scenerev'];
  if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='clprev'?'Preview didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'||what==='lab'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
-  const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert'].includes(what);
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved',scene:'Scene saved',scenerev:'Scene reverted'}[what]);
+  const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert','scene','scenerev'].includes(what);
   $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(use||chk?'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(use?'use':'check')+' it.</p>':'');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
@@ -1611,24 +1678,24 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
  const qc=$('qclose');if(qc)qc.onclick=sxClose;}
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
 function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
- LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');}
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE)seOpen(SE.file,true);const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');}
 async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
- updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();
+ updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();updScene();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
  catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab'];
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab','scene'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}$('cog').classList.toggle('on',t==='settings');
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 $('logo').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
@@ -2144,7 +2211,7 @@ async function cpFlush(){if(!CP||!CP.on||CP.fl)return;let l=((CP.z?'z ':'')+[...
  if(!r.ok){const reo=$('clreo').checked;await cpStop(false);showResult({ok:false,error:'The preview on the lights stopped: '+(/^The DMX output stopped/.test(r.error||'')?'the DMX interface was unplugged, or SX Studio lost it.':(r.error||'unknown error'))+(reo?' ShowXpress is opening again.':'')},'clprev');if(reo)sxLaunch();return;}
  if(CP.pend.size)cpKick();}
 function cpUi(){const on=!!CP;$('clpv').classList.toggle('on',on);$('clprev').style.display=on?'none':'';$('clprev').disabled=!CL||!CL.ok;}
-async function cpGo(){if(CP||LV||!CL||!CL.ok)return;
+async function cpGo(){if(CP||LV||SEP||!CL||!CL.ok)return;
  const c=await sxCloseLive('Close ShowXpress to show the colour on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show it on the lights','clprev');
  if(!c.go)return;
  const r=await lvStart('floor');
@@ -2215,9 +2282,9 @@ async function lvFlush(){if(!LV||!LV.on||LV.gone||LV.fl)return;let l=((LV.z?'z '
  if(LV!==me||!LV.on)return;LV.fl=false;if(!r.ok){lvGone(r.error);return;}if(LV.pend.size)lvKick();}
 function lvGone(msg){LV.gone=true;if(/^The DMX output stopped/.test(msg||''))msg='Unplugged, or SX Studio lost it.';const g=$('lvgone');g.className='lvgone on';
  g.innerHTML='<b>&#9888; The DMX output stopped.</b><span>'+esc(msg||'')+' Your aims so far are kept.</span><div class="grow"></div><button id="lvre" class="mini primary">Reconnect</button>';$('lvre').onclick=lvReconnect;}
-async function lvStart(mode){busy(true,'Connecting to the DMX interface…');let r;try{r=await api('/api/live/start',{mode});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+async function lvStart(mode,raw){busy(true,'Connecting to the DMX interface…');let r;try{r=await api('/api/live/start',{mode,raw:!!raw});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
  if(!r.ok&&r.nova&&await ask('NovaStar is using the DMX interface','The NovaStar LED-screen software (NovaLCT) has a USB scanner that grabs the DMX interface. Pause it while you aim? NovaLCT starts it again by itself &mdash; your LED screens are not touched.','Pause it and continue')){
-  busy(true,'Pausing NovaStar and connecting…');try{r=await api('/api/live/start',{mode,stopNova:true});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);}
+  busy(true,'Pausing NovaStar and connecting…');try{r=await api('/api/live/start',{mode,raw:!!raw,stopNova:true});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);}
  return r;}
 async function lvReconnect(){const r=await lvStart(LV.mode);
  if(!LV)return;if(!r.ok){lvGone(r.error);return;}LV.gone=false;LV.fl=false;$('lvgone').className='lvgone';lvIf(r);LV.sent={};LV.pend.clear();LV.z=true;lvPush(true);}
@@ -2275,7 +2342,7 @@ async function sxCloseLive(title,text,yes,again,what){if(!sxOpen)return {go:true
  while(Date.now()-t0<120000){await sleep(1000);try{open=(await api('/api/sx')).open;}catch(e){}if(!open)break;}
  if(open){busy(false);try{await api('/api/live/stop',{});}catch(e){}showResult({ok:false,error:'ShowXpress is still open. Close it (save if it asks), then press '+again+' again.'},what);return {go:false};}
  busy(true,'ShowXpress closed - waiting for it to let go of the interface…');await sleep(2500);return {go:true,reo:true};}
-async function lvGo(){if(LV||CP)return;
+async function lvGo(){if(LV||CP||SEP)return;
  const c=await sxCloseLive('Close ShowXpress to aim live?','Only one program can use the DMX interface, so ShowXpress closes while you aim. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It opens again when you finish.','Close and aim live','Aim live','live');
  if(!c.go)return;const reo=c.reo;
  const r=await lvStart(aimMode);
@@ -2338,8 +2405,8 @@ document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display
  if(k==='Tab'){e.preventDefault();lvStepTo(e.shiftKey?-1:1);return;}
  if(e.ctrlKey||e.altKey)return;
  if(k==='n'||k==='N')lvStepTo(1);else if(k==='p'||k==='P')lvStepTo(-1);else if(k==='1')lvSetStep('c');else if(k==='2')lvSetStep('k');});
-window.addEventListener('beforeunload',()=>{if(LV||CP)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
-window.addEventListener('pagehide',()=>{if((LV||CP)&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('beforeunload',()=>{if(LV||CP||SEP)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('pagehide',()=>{if((LV||CP||SEP)&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
 // ---------------- SETTINGS (cogwheel, user 2026-11-22): look (per device), tab order / hidden tabs (shared, settings.json
 // on the computer), Google Drive, phone & iPad, ShowXpress, updates
@@ -2513,7 +2580,7 @@ document.addEventListener('keydown',e=>{if(!$('v-lab').classList.contains('on')|
  const k=(e.key||'').toLowerCase();if(k.length!==1||!/[a-z0-9]/.test(k))return;
  if(!LB||!LB.pages.some(p=>p.buttons.some(x=>(x.key||'').toLowerCase()===k)))return;e.preventDefault();lbCmd({cmd:'key',key:k});});
 async function lbGo(first){if(lbRun())return;
- if(LV||CP){lbToast('<span style="color:var(--amber)">Aim live or the colour preview is using the DMX interface &mdash; finish that first.</span>');return;}
+ if(LV||CP||SEP){lbToast('<span style="color:var(--amber)">Aim live, the colour preview or the Scene Editor is using the DMX interface &mdash; finish that first.</span>');return;}
  let carry=[];if(sxOpen){try{carry=(await api('/api/lab/snap',{})).titles||[];}catch(e){}}
  const c=await sxCloseLive('Close ShowXpress to start the player?','Only one program can use the DMX interface, so ShowXpress closes while the SX Player runs. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.'+(carry.length?'<br><br>The player carries on with what ShowXpress is playing now: <b>'+carry.map(esc).join(', ')+'</b>.':'')+'<br><br>It can open again when you stop, or straight away with <b>Hand over to ShowXpress</b>.','Close and start','Start the player','lab');
  if(!c.go)return;
@@ -2594,6 +2661,195 @@ function updGdAcct(){if(!G||!$('gdacct'))return;
  if(document.activeElement!==$('gdfold'))$('gdfold').value=G.override||'';$('gdfold').placeholder=G.my&&!G.override?'Found: '+G.my:'Found automatically';
  if(G.show)$('sshow').textContent=G.show;}
 applyTheme();
+
+// ---------------- Scene Editor (scene_edit.ps1, user 2026-11-24): change a scene's steps and values, see it on the lights.
+// The page keeps a working copy of the steps; Save sends only what differs from the file (scene_edit.ps1 changes just that).
+let SL=null,SE=null,SW=null,seI=0,seSel=new Set(),seMo='',SEP=null,seVer=0,seTab=null;
+const seKey=(f,i)=>f+'|'+i,seCs=w=>w.len==null?100:w.len,seSec=cs=>(cs/100).toFixed(2).replace(/0$/,'');
+async function loadScenes(){$('secount').textContent='Loading…';SL=await getJ('/api/scenes');renderScenes();}
+function renderScenes(){const pick=!SE;$('sepickw').style.display=pick?'':'none';$('sew').style.display=pick?'none':'';$('seback').style.display=pick?'none':'';
+if(pick){$('sebk').style.display='none';$('setitle').textContent='Scene Editor';$('sestate').style.display='none';}
+ if(!pick){updScene();return;}
+ if(!SL){$('selist').innerHTML='';updScene();return;}
+ if(showErr('seerr',SL)){$('selist').innerHTML='';$('secount').textContent='';updScene();return;}
+ const q=$('seq').value.trim().toLowerCase(),ls=SL.scenes.filter(s=>!q||s.name.toLowerCase().includes(q)||(s.used||[]).some(u=>u.toLowerCase().includes(q)));
+ $('secount').textContent=SL.scenes.length+' scenes'+(q?' · '+ls.length+' found':'')+' · tap one to open it';
+ $('selist').innerHTML=ls.slice(0,500).map(s=>{const u=s.used||[];return `<div class="sc sesc" data-sf="${esc(s.file)}"><div class="nm">${esc(s.name)}${s.trimmed?'<span class="tag amber">trimmed tonight</span>':''}<small>${u.length?esc(u.join(' · ')):'not on a live button'}</small></div><div></div><div class="st"><b>${s.steps}</b> step${s.steps===1?'':'s'} &middot; <b>${s.heads}</b> head${s.heads===1?'':'s'}</div></div>`;}).join('')||'<p class="sub">No scene matches.</p>';
+ $('selist').querySelectorAll('[data-sf]').forEach(e=>e.onclick=()=>seOpen(e.dataset.sf));updScene();}
+async function seOpen(f,keep){
+ if(!keep&&SE&&seDirty()&&!await ask('Leave this scene?','Your changes to <b>'+esc(SE.name)+'</b> are not saved yet. They will be lost.','Leave it'))return;
+ await sePvStop(SEP?SEP.reo:false);
+ busy(true,'Opening the scene…');const r=await getJ('/api/scene?f='+encodeURIComponent(f));busy(false);
+ if(!r.ok){showErr('seerr',r);return;}showErr('seerr',null);
+ const was=keep&&SE&&SE.file===f?{i:seI,sel:seSel,mo:seMo}:null;
+ SE=r;SE.used=SE.used||[];SE.heads=SE.heads||[];SE.steps=SE.steps||[];SE.models=SE.models||{};SE.byId={};SE.heads.forEach(h=>SE.byId[h.id]=h);
+ SE.steps.forEach(s=>{s.map={};s.fx=s.fx||[];s.ids=new Set();s.fx.forEach(x=>{s.ids.add(x.id);(x.ch||[]).forEach(c=>s.map[seKey(x.id,c[0])]=c);});});   // c = [index, name, value, fade]
+ seReset();
+ if(was){seI=Math.min(was.i,Math.max(0,SW.steps.length-1));seSel=was.sel;seMo=was.mo;}
+ else{seI=0;seSel=new Set();seMo='';const h=SE.heads[0];if(h){seSel.add(h.id);seMo=h.model;}}
+ renderScenes();renderScene();seBackups();}
+function seReset(){SW={steps:SE.readonly?[]:SE.steps.map((s,i)=>seFromStep(i)),add:[],del:[]};seVer++;}
+function seFromStep(i){const s=SE.steps[i],ch={};for(const k in s.map){const c=s.map[k];ch[k]=[c[2],c[3]?1:0];}return {src:i,len:s.len,ch};}
+function seGone(fx,ix){return SW.del.some(d=>d.fx===fx&&d.ix===ix);}
+function seBody(){const steps=SW.steps.map(w=>{const o=SE.steps[w.src],set=[];
+  for(const k in w.ch){const p=k.split('|'),fx=p[0],ix=+p[1],c=o.map[k],v=w.ch[k];
+   if(!c){if(v[0]||v[1])set.push({fx,ix,v:v[0],fade:!!v[1]});continue;}
+   const x={fx,ix};let d=false;if(v[0]!==c[2]){x.v=v[0];d=true;}if(!!v[1]!==!!c[3]){x.fade=!!v[1];d=true;}if(d)set.push(x);}
+  const s={src:w.src,set};if(w.len!==o.len)s.len=w.len;return s;});
+ return {scene:SE.file,sha:SE.sha,steps,addch:SW.add.slice(),delch:SW.del.slice()};}
+function seDirty(){if(!SE||SE.readonly||!SW)return false;const b=seBody();
+ return b.addch.length||b.delch.length||b.steps.length!==SE.steps.length||b.steps.some((s,i)=>s.src!==i||s.set.length||s.len!==undefined);}
+function seWhat(){const b=seBody();let v=0,l=0;b.steps.forEach(s=>{v+=s.set.length;if(s.len!==undefined)l++;});const o=[];
+ if(b.steps.length!==SE.steps.length)o.push(SE.steps.length+' → '+b.steps.length+' steps');else if(b.steps.some((s,i)=>s.src!==i))o.push('steps moved');
+ if(v)o.push(v+' value'+(v===1?'':'s'));if(l)o.push(l+' step time'+(l===1?'':'s'));if(b.addch.length)o.push(b.addch.length+' channel'+(b.addch.length===1?'':'s')+' added');if(b.delch.length)o.push(b.delch.length+' taken out');return o.join(', ');}
+// ---- lit or dark (same rule as Tonight's Rig: dimmer above 0 and the shutter not closed; no dimmer = any channel above 0)
+function seClosed(mo,v){const r=((SE.models[mo]||{}).ranges||{}).shutter;if(!r)return false;return r.some(x=>x.n==='closed'&&v>=x.lo&&v<=x.hi);}
+function seChName(mo,ix,k){const m=SE.models[mo],c=m&&(m.chans||[]).find(x=>x.ix===ix);if(c)return c.name;for(const s of SE.steps){const x=s.map[k];if(x)return x[1];}return 'channel '+(ix+1);}
+function seLit(w,h){let dim=null,sh=null,any=false;for(const k in w.ch){if(!k.startsWith(h.id+'|'))continue;const ix=+k.split('|')[1],n=seChName(h.model,ix,k).toLowerCase(),v=w.ch[k][0];
+  if(n==='dimmer')dim=v;else if(n==='shutter')sh=v;if(v>0)any=true;}
+ if(dim===null)return any;return dim>0&&!(sh!==null&&seClosed(h.model,sh));}
+function seIn(w,id){return SE.steps[w.src].ids.has(id);}
+// ---- drawing
+function renderScene(){if(!SE)return;const ro=SE.readonly;$('setitle').textContent=SE.name;
+ const np=SE.heads.filter(h=>!h.addr).length;
+ $('seinfo').innerHTML=(SE.used.length?'On '+SE.used.map(esc).join(' &middot; '):'Not on a live button')+' &middot; '+SE.heads.length+' head'+(SE.heads.length===1?'':'s');
+ const w=[];if(ro)w.push('SX Studio doesn&rsquo;t change this scene: '+esc(ro)+'. ShowXpress still opens and edits it as before.');
+ if(SE.trimmed)w.push('<b>Tonight&rsquo;s Rig has trimmed this scene for tonight.</b> If you save it, the version you save counts as the full scene from then on: the steps Tonight&rsquo;s Rig took out don&rsquo;t come back.');
+ if(!ro&&!SE.structural)w.push('This scene has something between its steps that SX Studio doesn&rsquo;t know, so its steps can be changed here but not added, moved or taken out.');
+ if(!ro&&np)w.push(np+' head'+(np===1?' isn&rsquo;t':'s aren&rsquo;t')+' patched in the show (no DMX address), so '+(np===1?'it doesn&rsquo;t':'they don&rsquo;t')+' show on the lights.');
+ const wb=$('sewarn');wb.style.display=w.length?'block':'none';wb.innerHTML=w.join('<br><br>');
+ $('seedit').style.display=ro?'none':'';if(ro){updScene();return;}
+ seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();updScene();}
+function seStepsDraw(){const seen={};
+ $('sesteps').innerHTML=SW.steps.map((w,i)=>{const o=SE.steps[w.src],cp=seen[w.src];seen[w.src]=1;const b=seBody().steps[i];
+  const chg=b.set.length||b.len!==undefined;const pl=SEP&&SEP.play&&SEP.at===i;
+  return `<div class="sst${i===seI?' on':''}${chg?' chg':''}${cp?' new':''}${pl?' pl':''}" data-si="${i}">${i+1}<small>${seSec(seCs(w))} s</small></div>`;}).join('');
+ $('sesteps').querySelectorAll('[data-si]').forEach(e=>e.onclick=()=>{seI=+e.dataset.si;seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();updScene();sePush();});
+ $('secnt').textContent=SW.steps.length+' step'+(SW.steps.length===1?'':'s')+' · loop '+seSec(SW.steps.reduce((a,w)=>a+seCs(w),0))+' s';
+ const w=SW.steps[seI];if(document.activeElement!==$('selen'))$('selen').value=w?seSec(seCs(w)):'';}
+function seGridDraw(){if(!SE.heads.length){$('segrid').innerHTML='';return;}
+ const big=SW.steps.length>60;
+ $('segrid').innerHTML='<table><tr class="hd"><th></th>'+SW.steps.map((w,i)=>'<th class="'+(i===seI?'on':'')+'" data-gs="'+i+'">'+(big&&i%5?'':(i+1))+'</th>').join('')+'</tr>'+
+  SE.heads.map(h=>'<tr><th class="'+(seSel.has(h.id)?'on':'')+'" data-gh="'+esc(h.id)+'">'+esc(h.name)+'</th>'+SW.steps.map((w,i)=>{const inn=seIn(w,h.id);
+   return '<td class="'+(!inn?'n':seLit(w,h)?'l':'')+(i===seI&&seSel.has(h.id)?' c':'')+'" data-gs="'+i+'" data-gh="'+esc(h.id)+'"></td>';}).join('')+'</tr>').join('')+'</table>';
+ $('segrid').querySelectorAll('[data-gs],[data-gh]').forEach(e=>e.onclick=ev=>{const s=e.dataset.gs,h=e.dataset.gh;if(s!==undefined)seI=+s;
+  if(h!==undefined){const m=SE.byId[h].model;if(m!==seMo||!(ev.shiftKey||ev.ctrlKey||ev.metaKey))seSel=new Set();seMo=m;seSel.has(h)&&seSel.size>1?seSel.delete(h):seSel.add(h);}
+  seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();updScene();sePush();});}
+function seHeadsDraw(){const w=SW.steps[seI],g={};SE.heads.forEach(h=>(g[h.model]=g[h.model]||[]).push(h));
+ $('sehl').innerHTML=Object.keys(g).map(m=>'<div class="gh" style="margin:10px 0 4px"><h3>'+esc(m)+'</h3></div>'+g[m].map(h=>'<div class="seh'+(seSel.has(h.id)?' on':'')+(w&&!seIn(w,h.id)?' dim':'')+'" data-hh="'+esc(h.id)+'"><span>'+esc(h.name)+'</span><small>'+(h.addr?'DMX '+h.addr:'not patched')+'</small></div>').join('')).join('');
+ $('sehl').querySelectorAll('[data-hh]').forEach(e=>e.onclick=()=>{const h=SE.byId[e.dataset.hh];if(h.model!==seMo){seSel=new Set();seMo=h.model;}
+  if(seSel.has(h.id))seSel.delete(h.id);else seSel.add(h.id);seGridDraw();seHeadsDraw();seChDraw();updScene();});}
+function seRows(){// the channels of the picked heads in this step: ix -> {k:[keys], vals:[...]}
+ const w=SW.steps[seI],r={};if(!w)return r;
+ for(const id of seSel){for(const k in w.ch){if(!k.startsWith(id+'|'))continue;const ix=+k.split('|')[1];(r[ix]=r[ix]||{ix,keys:[]}).keys.push(k);}}
+ return r;}
+function seRangeOpts(rs,v){return '<option value="">'+(rs.length?'named&hellip;':'&mdash;')+'</option>'+rs.map(x=>'<option value="'+Math.round((x.lo+x.hi)/2)+'"'+(v>=x.lo&&v<=x.hi?' selected':'')+'>'+esc(x.n)+' ('+x.lo+(x.hi!==x.lo?'&ndash;'+x.hi:'')+')</option>').join('');}
+function seChDraw(){const w=SW.steps[seI],box=$('sechs');if(!w||!seSel.size){box.innerHTML='<p class="sub" style="margin:0">Pick one or more heads on the left (or in the grid). Shift-click in the grid picks more.</p>';$('seaddw').style.display='none';return;}
+ const rows=Object.values(seRows()).sort((a,b)=>a.ix-b.ix),o=SE.steps[w.src],ro=k=>{const c=o.map[k];return c&&c[2]<0;};
+ const nm=[...seSel].map(id=>SE.byId[id].name);
+ box.innerHTML='<div class="row" style="margin-bottom:6px"><b class="grow">'+esc(nm.length>3?nm.length+' heads':nm.join(', '))+' &middot; step '+(seI+1)+'</b><span class="sub" style="margin:0">'+esc(seMo)+'</span></div>'+
+  (rows.length?rows.map(r=>{const vs=r.keys.map(k=>w.ch[k][0]),fs=r.keys.map(k=>w.ch[k][1]),v=vs[0],mix=vs.some(x=>x!==v),fm=fs.some(x=>x!==fs[0]),k0=r.keys[0],n=seChName(seMo,r.ix,k0),rs=((SE.models[seMo]||{}).ranges||{})[n.toLowerCase()]||[];
+   const chg=r.keys.some(k=>{const c=o.map[k];return !c||c[2]!==w.ch[k][0]||!!c[3]!==!!w.ch[k][1];});
+   if(r.keys.some(ro))return '<div class="secr"><div class="nm">'+esc(n)+'<small>ch '+(r.ix+1)+'</small></div><div class="sub" style="margin:0;grid-column:span 5">a value SX Studio doesn&rsquo;t change &mdash; edit it in ShowXpress</div></div>';
+   return '<div class="secr'+(chg?' chg':'')+(mix?' mix':'')+'" data-cx="'+r.ix+'"><div class="nm">'+esc(n)+'<small>ch '+(r.ix+1)+(mix?' &middot; mixed':'')+'</small></div>'+
+    '<input type="range" min="0" max="255" value="'+v+'" data-cv><input class="num" type="number" min="0" max="255" value="'+v+'" data-cn style="width:64px;font-size:13px">'+
+    '<select data-cr>'+seRangeOpts(rs,v)+'</select><label class="link fd" title="Glide from the step before over this step&rsquo;s time"><input type="checkbox" data-cf'+(fs[0]&&!fm?' checked':'')+'> fade</label>'+
+    '<button class="x" data-cd title="Take this channel out of these heads, in every step">&times;</button></div>';}).join(''):'<p class="sub" style="margin:0">'+(nm.length===1?'This head has':'These heads have')+' no channels in this step.</p>');
+ box.querySelectorAll('[data-cx]').forEach(row=>{const ix=+row.dataset.cx,rg=row.querySelector('[data-cv]'),nb=row.querySelector('[data-cn]'),sl=row.querySelector('[data-cr]');
+  const put=v=>{v=Math.max(0,Math.min(255,Math.round(+v||0)));for(const k of seRows()[ix].keys)w.ch[k][0]=v;rg.value=v;if(document.activeElement!==nb)nb.value=v;
+   const n=seChName(seMo,ix,seRows()[ix].keys[0]),rs=((SE.models[seMo]||{}).ranges||{})[n.toLowerCase()]||[];sl.innerHTML=seRangeOpts(rs,v);row.classList.remove('mix');seVer++;seLite();};
+  rg.oninput=()=>put(rg.value);nb.oninput=()=>{if(nb.value!=='')put(nb.value);};nb.onchange=()=>{put(nb.value);seChDraw();};rg.onchange=()=>seChDraw();
+  sl.onchange=()=>{if(sl.value!=='')put(sl.value);seChDraw();};
+  row.querySelector('[data-cf]').onchange=e=>{for(const k of seRows()[ix].keys)w.ch[k][1]=e.target.checked?1:0;seVer++;seLite();seChDraw();};
+  row.querySelector('[data-cd]').onclick=()=>seDelCh(ix);});
+ // add a channel the model has (as named in the show's scenes) that these heads don't have yet
+ const have=new Set(rows.map(r=>r.ix)),opts=((SE.models[seMo]||{}).chans||[]).filter(c=>!have.has(c.ix)&&[...seSel].some(id=>seIn(w,id)));
+ $('seaddw').style.display=opts.length?'':'none';$('seadd').innerHTML=opts.map(c=>'<option value="'+c.ix+'">'+esc(c.name)+' (ch '+(c.ix+1)+')</option>').join('');}
+function seLite(){seStepsDraw();seGridDraw();updScene();sePush();}
+async function seDelCh(ix){const ids=[...seSel].filter(id=>SW.steps.some(w=>w.ch[seKey(id,ix)]));if(!ids.length)return;
+ const n=seChName(seMo,ix,seKey(ids[0],ix));
+ if(!await ask('Take '+n+' out?','Channel <b>'+esc(n)+'</b> comes out of '+(ids.length===1?esc(SE.byId[ids[0]].name):ids.length+' heads')+' in <b>every step</b> of this scene. In ShowXpress it then isn&rsquo;t set by this scene at all.','Take it out'))return;
+ for(const id of ids){const k=seKey(id,ix);SW.steps.forEach(w=>delete w.ch[k]);
+  const a=SW.add.findIndex(x=>x.fx===id&&x.ix===ix);if(a>=0)SW.add.splice(a,1);else if(SE.steps.some(s=>s.map[k]))SW.del.push({fx:id,ix});}
+ seVer++;seChDraw();seLite();}
+function seAddCh(){const ix=+$('seadd').value;if(isNaN(ix))return;
+ for(const id of seSel){const k=seKey(id,ix);const d=SW.del.findIndex(x=>x.fx===id&&x.ix===ix);
+  if(d>=0){SW.del.splice(d,1);SW.steps.forEach(w=>{const c=SE.steps[w.src].map[k];if(c)w.ch[k]=[c[2],c[3]?1:0];});continue;}   // put back what was taken out
+  if(SE.steps.some(s=>s.map[k])||SW.add.some(x=>x.fx===id&&x.ix===ix))continue;
+  SW.add.push({fx:id,ix});SW.steps.forEach(w=>{if(seIn(w,id))w.ch[k]=[0,0];});}
+ seVer++;seChDraw();seLite();}
+function updScene(){const ok=!!(SE&&!SE.readonly),d=seDirty(),st=ok&&SE.structural,n=ok?SW.steps.length:0;
+ $('sesave').disabled=!ok||!d;$('seundo').disabled=!ok||!d;
+ $('seleft').disabled=!st||seI<1;$('seright').disabled=!st||seI>=n-1;$('secopy').disabled=!st||n>=999;$('sedel').disabled=!st||n<2;
+ if(SE)stateTag('sestate',d);
+ $('sehint').innerHTML=!SE?'Open a scene to change it.':SE.readonly?'This scene can only be changed in ShowXpress.':sxHint('save')??(d?esc(seWhat())+'. Only that is changed in the file.':'Matches the show.');
+ document.querySelectorAll('.sebkr').forEach(b=>b.disabled=sxOpen);}
+function seMove(dir){const j=seI+dir;if(j<0||j>=SW.steps.length)return;const s=SW.steps;[s[seI],s[j]]=[s[j],s[seI]];seI=j;seVer++;seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();updScene();sePush();}
+$('seleft').onclick=()=>seMove(-1);$('seright').onclick=()=>seMove(1);
+$('secopy').onclick=()=>{const w=SW.steps[seI],c={src:w.src,len:w.len,ch:{}};for(const k in w.ch)c.ch[k]=w.ch[k].slice();SW.steps.splice(seI+1,0,c);seI++;seVer++;seStepsDraw();seGridDraw();seChDraw();updScene();sePush();};
+$('sedel').onclick=()=>{if(SW.steps.length<2)return;SW.steps.splice(seI,1);seI=Math.min(seI,SW.steps.length-1);seVer++;seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();updScene();sePush();};
+const seLenIn=()=>{const v=parseFloat(String($('selen').value).replace(',','.'));return isFinite(v)&&v>0?Math.max(1,Math.round(v*100)):null;};
+$('selen').oninput=()=>{const cs=seLenIn(),w=SW&&SW.steps[seI];if(!w||cs==null)return;w.len=cs;seVer++;seStepsDraw();updScene();};
+$('selen').onchange=()=>seStepsDraw();
+$('selenall').onclick=()=>{const cs=seLenIn();if(cs==null||!SW)return;SW.steps.forEach(w=>w.len=cs);seVer++;seStepsDraw();updScene();};
+$('seall').onclick=()=>{if(!SE)return;if(!seMo&&SE.heads[0])seMo=SE.heads[0].model;seSel=new Set(SE.heads.filter(h=>h.model===seMo).map(h=>h.id));seGridDraw();seHeadsDraw();seChDraw();};
+$('senone').onclick=()=>{seSel=new Set();seGridDraw();seHeadsDraw();seChDraw();};
+$('seaddb').onclick=seAddCh;
+$('seq').oninput=renderScenes;
+$('seback').onclick=async()=>{if(SE&&seDirty()&&!await ask('Leave this scene?','Your changes to <b>'+esc(SE.name)+'</b> are not saved yet. They will be lost.','Leave it'))return;await sePvStop(SEP?SEP.reo:false);SE=null;SW=null;if(!SL)loadScenes();else renderScenes();};
+$('serefresh').onclick=async()=>{if(SE){if(seDirty()&&!await ask('Reload the scene?','Your changes that are not saved yet will be lost.','Reload'))return;seOpen(SE.file,true);}else loadScenes();};
+$('seundo').onclick=()=>{if(!SE)return;seReset();seI=Math.min(seI,SW.steps.length-1);renderScene();sePush();};
+$('sesave').onclick=()=>{if(!SE||!seDirty())return;const f=SE.file;
+ saveTo('/api/scene/save',seBody(),'Saving the scene…',async()=>{SL=null;await seOpen(f,true);},'scene');};
+// ---- earlier versions (backups kept by scene_edit.ps1, outside the show folder)
+async function seBackups(){if(!SE){$('sebk').style.display='none';return;}const f=SE.file,r=await getJ('/api/scene/backups?f='+encodeURIComponent(f));if(!SE||SE.file!==f)return;
+ const b=(r.ok&&r.backups)||[];$('sebk').style.display=b.length?'':'none';
+ $('sebkl').innerHTML=b.map(x=>'<div class="sc"><div class="nm">'+esc(String(x.at).replace('T',' '))+'<small>'+esc(x.what)+'</small></div><div></div><div class="st"><button class="mini sebkr" data-bk="'+esc(x.id)+'"'+(sxOpen?' disabled':'')+'>Revert to this</button></div></div>').join('');
+ $('sebkl').querySelectorAll('[data-bk]').forEach(e=>e.onclick=()=>seRevert(e.dataset.bk,false));}
+async function seRevert(id,force){if(!SE)return;const f=SE.file;
+ if(!force&&!await ask('Put this version back?','<b>'+esc(SE.name)+'</b> goes back to how it was before that save.'+(seDirty()?' Your changes that are not saved yet are lost.':'')+' The scene as it is now is kept as a backup too, so this can be undone.','Revert'))return;
+ busy(true,'Reverting…');let r;try{r=await api('/api/scene/revert',{f,id,force:!!force});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+ if(r.ok&&r.conflict){if(await ask('The scene changed since','<b>'+esc(SE.name)+'</b> was changed after that save (in ShowXpress or here). Revert anyway? The scene as it is now is kept as a backup.','Revert anyway'))return seRevert(id,true);return;}
+ if(r.ok){SL=null;await seOpen(f,true);}showResult(r,'scenerev');}
+// ---- on the lights: the step on screen, or Play (the whole scene, looping, with its fades) - straight from this page
+// through the Helper's DMX output (same as the colour preview). The scene's own values go out as they are.
+function seVals(){// [step][key] -> value, a channel missing from a step keeps the step before's value (like the SX Player)
+ if(seTab&&seTab.ver===seVer)return seTab;const keys=new Set();SW.steps.forEach(w=>{for(const k in w.ch)keys.add(k);});
+ const v=[],f=[];let prev={};SW.steps.forEach((w,i)=>{const a={},b={};for(const k of keys){if(w.ch[k]){a[k]=w.ch[k][0];b[k]=!!w.ch[k][1];}else a[k]=prev[k]||0;}v.push(a);f.push(b);prev=a;});
+ seTab={ver:seVer,keys:[...keys],v,f};return seTab;}
+function seFrame(){const t=seVals(),out={},n=SW.steps.length;if(!n)return out;let at=seI,frac=1;
+ if(SEP.play){const ms=SW.steps.map(w=>Math.max(10,seCs(w)*10)),tot=ms.reduce((a,b)=>a+b,0);let p=(Date.now()-SEP.t0)%tot;at=0;while(p>=ms[at]){p-=ms[at];at++;}frac=p/ms[at];
+  if(SEP.at!==at){SEP.at=at;seStepsDraw();}}
+ const pv=t.v[(at-1+n)%n];
+ for(const k of t.keys){const h=SE.byId[k.split('|')[0]];if(!h||!h.addr)continue;const ch=h.addr+(+k.split('|')[1]);if(ch<1||ch>8192)continue;
+  let v=t.v[at][k];if(SEP.play&&t.f[at][k])v=pv[k]+(v-pv[k])*frac;out[ch]=Math.max(0,Math.min(255,Math.round(v)));}
+ return out;}
+function sePush(){if(!SEP||!SEP.on||!SE||SE.readonly)return;const fr=seFrame();
+ for(const ch in SEP.sent){if(!(ch in fr)&&SEP.sent[ch]!==0){SEP.sent[ch]=0;SEP.pend.set(ch,'b:'+ch+':0');}}
+ for(const ch in fr){if(SEP.sent[ch]!==fr[ch]){SEP.sent[ch]=fr[ch];SEP.pend.set(ch,'b:'+ch+':'+fr[ch]);}}
+ seKick();}
+function seKick(){if(!SEP||SEP.tm||SEP.fl)return;const d=30-(Date.now()-SEP.last);if(d>0)SEP.tm=setTimeout(()=>{if(SEP){SEP.tm=0;seFlush();}},d);else seFlush();}
+async function seFlush(){if(!SEP||!SEP.on||SEP.fl)return;let l=((SEP.z?'z ':'')+[...SEP.pend.values()].join(' ')).trim();if(!l){if(!SEP.ka)return;l='k';}
+ const me=SEP;SEP.z=false;SEP.ka=false;SEP.pend.clear();SEP.fl=true;SEP.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}
+ if(SEP!==me||!SEP.on)return;SEP.fl=false;
+ if(!r.ok){const reo=SEP.reo;await sePvStop(false);showResult({ok:false,error:(r.error||'The DMX output stopped.')+(reo?' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.':'')},'clprev');return;}
+ if(SEP.pend.size)seKick();}
+function sePvUi(){const on=!!SEP;$('sepv').classList.toggle('on',on);$('sepvsub').style.display=on?'none':'';$('sepvgo').style.display=on?'none':'';$('sepvgo').disabled=!SE||!!SE.readonly;$('sepvplay').style.display=on?'':'none';$('sepvstop').style.display=on?'':'none';$('sepvreow').style.display=on?'':'none';
+ $('sepvplay').innerHTML=on&&SEP.play?'&#10074;&#10074; Hold this step':'&#9654; Play the scene';const t=$('sepvif');t.style.display=on?'':'none';
+ if(on){t.className='tag '+(SEP.test?'red':'blue');t.textContent=SEP.test?'TEST - no real output':'Output: '+SEP.iface;}}
+async function sePvGo(){if(SEP||LV||CP||!SE||SE.readonly)return;
+ const c=await sxCloseLive('Close ShowXpress to see the scene on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show on the lights','clprev');
+ if(!c.go)return;
+ const r=await lvStart('floor',true);
+ if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(c.reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'clprev');return;}
+ SEP={on:true,sent:{},pend:new Map(),z:true,ka:false,fl:false,tm:0,last:0,play:false,t0:0,at:-1,reo:c.reo,test:!!r.test,iface:r.iface};
+ SEP.kat=setInterval(()=>{if(SEP&&SEP.on&&Date.now()-SEP.last>1000){SEP.ka=true;seKick();}},1000);
+ SEP.pt=setInterval(()=>{if(SEP&&SEP.play)sePush();},40);
+ $('sepvreo').checked=c.reo;sePvUi();sePush();}
+async function sePvStop(reo){if(!SEP)return;clearInterval(SEP.kat);clearInterval(SEP.pt);if(SEP.tm)clearTimeout(SEP.tm);SEP.on=false;SEP=null;sePvUi();if(SE&&!SE.readonly)seStepsDraw();
+ busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)await sxLaunch();}
+$('sepvgo').onclick=sePvGo;$('sepvstop').onclick=()=>sePvStop($('sepvreo').checked);
+$('sepvplay').onclick=()=>{if(!SEP)return;SEP.play=!SEP.play;if(SEP.play)SEP.t0=Date.now();else{if(SEP.at>=0)seI=SEP.at;SEP.at=-1;seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();}sePvUi();sePush();};
 
 // ---------------- PHONE / iPAD: pairing (on the phone) and the Phone & iPad card (on the computer)
 function phUnpaired(msg){const off=/turned off/.test(msg||'');
@@ -2760,15 +3016,21 @@ try {
         '/api/live/start' {
           if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; sxopen = $true; error = 'ShowXpress is open - it has to be closed while you aim live (only one program can use the DMX interface).'; out = '' }; break }
           if (Test-Player) { Send-Json $ctx @{ ok = $false; error = 'The SX Player (Lab) is using the DMX interface. Stop it in the Lab first.'; out = '' }; break }
-          $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
-          $r = Invoke-Engine "-Action LiveInfo$mo"
-          $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
-          if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }); out = '' }; break }
+          # raw = the Scene Editor's preview: the scene's own values go out as they are (the show files already hold
+          # what goes out to reversed heads), so no head info and no reversing
+          $raw = [bool]$body.raw
+          if ($raw) { $j = '{}' }
+          else {
+            $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
+            $r = Invoke-Engine "-Action LiveInfo$mo"
+            $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+            if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }); out = '' }; break }
+          }
           $script:liveHold = Get-Date
           # REVERSE HEADS: the screen works "as if hung normally"; heads the Helper reverses get 65535 - v here (like the fixture's menu)
           $script:liveInv = @{}
-          try { foreach ($h in @(($j | ConvertFrom-Json).heads)) { $ad = [int]$h.addr
-            if ($h.rp) { $script:liveInv[$ad] = 1; $script:liveInv[$ad + 1] = 1 }; if ($h.rt) { $script:liveInv[$ad + 2] = 1; $script:liveInv[$ad + 3] = 1 } } } catch {}
+          if (-not $raw) { try { foreach ($h in @(($j | ConvertFrom-Json).heads)) { $ad = [int]$h.addr
+            if ($h.rp) { $script:liveInv[$ad] = 1; $script:liveInv[$ad + 1] = 1 }; if ($h.rt) { $script:liveInv[$ad + 2] = 1; $script:liveInv[$ad + 3] = 1 } } } catch {} }
           # NovaStar NovaLCT (LED screens) has a USB scanner that grabs the D512S (found 2026-11-21). Paused only when the user says so.
           if ($body.stopNova -and -not $onMac) { Get-Process MarsServerProvider -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 }
           $s = Start-Live
@@ -2996,6 +3258,25 @@ try {
           Send-Json $ctx (Invoke-Engine "-Action Keep -FixId $i" $healthEngine)
         }
         '/api/rt'      { Send-EngineJson $ctx (Invoke-Engine '-Action Preview' $rtEngine) }
+        '/api/scenes'  { Send-EngineJson $ctx (Invoke-Engine '-Action List' $sceneEngine) }
+        '/api/scene'   {
+          $f = "$($req.QueryString['f'])"
+          if ($f -notmatch $sceneRx) { Send-Json $ctx @{ ok = $false; error = 'Unknown scene.' }; break }
+          Send-EngineJson $ctx (Invoke-Engine "-Action Open -Scene `"$f`"" $sceneEngine)
+        }
+        '/api/scene/backups' {
+          $f = "$($req.QueryString['f'])"
+          if ($f -notmatch $sceneRx) { Send-Json $ctx @{ ok = $false; error = 'Unknown scene.' }; break }
+          Send-EngineJson $ctx (Invoke-Engine "-Action Backups -Scene `"$f`"" $sceneEngine)
+        }
+        '/api/scene/revert' {
+          $f = "$($body.f)"; $i = "$($body.id)"
+          if ($f -notmatch $sceneRx -or $i -notmatch '^\d{8}-\d{6}-\d{3}$') { Send-Json $ctx @{ ok = $false; error = 'Unknown backup.'; out = '' }; break }
+          if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress is open. Close it (save first), then press Revert again.'; out = '' }; break }
+          $r = Invoke-Engine "-Action Revert -Scene `"$f`" -Backup $i$(if ($body.force) { ' -Force' })" $sceneEngine
+          $cj = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{"conflict"' } | Select-Object -Last 1 }
+          if ($cj) { Send-Json $ctx @{ ok = $true; conflict = $true; out = '' } } else { Send-Json $ctx $r }
+        }
         '/api/pre'     { Send-EngineJson $ctx (Invoke-Engine '-Action Check' $preEngine) }
         default        { Send-Text $ctx 404 'text/plain' 'not found' }
       }

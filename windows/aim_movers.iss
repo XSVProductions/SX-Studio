@@ -52,6 +52,7 @@ Source: "..\src\show_common.ps1";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\sx_remote.ps1";    DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\sx_quit.ps1";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\dmx_out.ps1";      DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\scene_edit.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\showxpress_helper.vbs";  DestDir: "{app}"; Flags: ignoreversion
 ; installed as sx_studio.ico (2026-11-24): a NEW file name, so Windows reads the SX icon fresh instead of its cached old picture
 Source: "..\assets\aim_movers.ico";      DestDir: "{app}"; DestName: "sx_studio.ico"; Flags: ignoreversion

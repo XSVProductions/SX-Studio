@@ -50,6 +50,70 @@ function Open-AppWindow($url) {
   Start-Process $url
 }
 
+# ---- TASKBAR (user 2026-11-24: pinning the window pinned Microsoft Edge). The window is an Edge --app window, so Windows
+#      saw Edge. Give it SX Studio's own identity on the taskbar: AppUserModelID (same as the shortcuts' - set in the .iss),
+#      relaunch command = our launcher, name + SX icon, so "Pin to taskbar" pins SX Studio. Found by class + exact title
+#      "SX Studio" (a normal Edge window's title has " - Microsoft Edge" after it, so it is never touched).
+$sxAppId = 'XSVProductions.SXStudio'
+$script:tbNext = [datetime]::MinValue; $script:tbOk = $null
+function Step-Taskbar {
+  if ($onMac -or $script:tbOk -eq $false -or (Get-Date) -lt $script:tbNext) { return }
+  $script:tbNext = (Get-Date).AddSeconds(1)
+  if ($null -eq $script:tbOk) {
+    try {
+      if (-not ('SxTaskbar' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class SxTaskbar {
+  [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IPropertyStore { void GetCount(out uint c); void GetAt(uint i, out PKEY k); void GetValue(ref PKEY k, out PV v); void SetValue(ref PKEY k, ref PV v); void Commit(); }
+  [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PKEY { public Guid fmt; public uint pid; }
+  [StructLayout(LayoutKind.Explicit, Size = 24)] struct PV { [FieldOffset(0)] public ushort vt; [FieldOffset(8)] public IntPtr p; }
+  [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr h, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore ps);
+  [DllImport("ole32.dll")] static extern int PropVariantClear(ref PV v);
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  static readonly Guid F = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+  static readonly HashSet<IntPtr> done = new HashSet<IntPtr>();
+  static void Set(IPropertyStore ps, uint pid, string s) {
+    PKEY k = new PKEY { fmt = F, pid = pid }; PV v = new PV { vt = 31, p = Marshal.StringToCoTaskMemUni(s) };
+    try { ps.SetValue(ref k, ref v); } finally { PropVariantClear(ref v); }
+  }
+  // tags every visible app window titled exactly <title> that isn't tagged yet; returns how many were tagged now
+  public static int Tag(string title, string id, string cmd, string icon, string name) {
+    List<IntPtr> found = new List<IntPtr>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h) || done.Contains(h)) return true;
+      StringBuilder c = new StringBuilder(64); GetClassName(h, c, 64);
+      if (c.ToString() != "Chrome_WidgetWin_1") return true;
+      StringBuilder t = new StringBuilder(256); GetWindowText(h, t, 256);
+      if (t.ToString() == title) found.Add(h);
+      return true; }, IntPtr.Zero);
+    int n = 0; Guid iid = typeof(IPropertyStore).GUID;
+    foreach (IntPtr h in found) {
+      IPropertyStore ps;
+      if (SHGetPropertyStoreForWindow(h, ref iid, out ps) != 0 || ps == null) continue;
+      try { Set(ps, 2, cmd); Set(ps, 3, icon); Set(ps, 4, name); Set(ps, 5, id); ps.Commit(); done.Add(h); n++; }
+      catch { } finally { Marshal.ReleaseComObject(ps); }
+    }
+    return n;
+  }
+}
+'@
+      }
+      $script:tbOk = $true
+    } catch { $script:tbOk = $false; return }
+  }
+  $vbs = Join-Path $here 'showxpress_helper.vbs'
+  $ico = @((Join-Path $here 'sx_studio.ico'), (Join-Path $here '../assets/aim_movers.ico')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if (-not $ico) { return }
+  $cmd = '"' + (Join-Path $env:SystemRoot 'System32\wscript.exe') + '" "' + $vbs + '"'
+  try { [void][SxTaskbar]::Tag('SX Studio', $sxAppId, $cmd, ([IO.Path]::GetFullPath($ico) + ',0'), 'SX Studio') } catch {}
+}
+
 # ---- one copy only: if it's already running, just bring up its window
 #      (an older version still running - e.g. right after an update - is stopped and replaced)
 $token = [guid]::NewGuid().ToString('N')
@@ -2478,12 +2542,14 @@ try {
       try { Step-Pending } catch {}
       Step-PlayerKeep
       try { Step-PlayerWatch } catch {}
+      try { Step-Taskbar } catch {}
       if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto) -and -not (Test-Player)) { $l.Stop(); break }
     }
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
     Step-PlayerKeep   # busy windows (the Lab polls 2-3x a second) never reach the idle loop above
     try { Step-PlayerWatch } catch {}
+    try { Step-Taskbar } catch {}
     try {
       $path = $req.Url.AbsolutePath
       # a phone (through the Wi-Fi relay) needs the phone key; everything else needs this window's key

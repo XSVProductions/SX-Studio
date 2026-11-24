@@ -73,8 +73,8 @@ Type: files; Name: "{autoprograms}\AIM MOVERS.lnk"
 Type: filesandordirs; Name: "{localappdata}\Programs\AIM MOVERS"
 
 [Icons]
-Name: "{autoprograms}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\sx_studio.ico"; Comment: "Lighting control for ShowXpress - XSV Productions"
-Name: "{autodesktop}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\sx_studio.ico"; Comment: "Lighting control for ShowXpress - XSV Productions"; Tasks: desktopicon
+Name: "{autoprograms}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\sx_studio.ico"; AppUserModelID: "XSVProductions.SXStudio"; Comment: "Lighting control for ShowXpress - XSV Productions"
+Name: "{autodesktop}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\sx_studio.ico"; AppUserModelID: "XSVProductions.SXStudio"; Comment: "Lighting control for ShowXpress - XSV Productions"; Tasks: desktopicon
 
 [Run]
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent

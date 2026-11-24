@@ -1213,7 +1213,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 .lbpg .pcol{background:none;border:0;padding:0 2px;color:var(--dim);cursor:pointer;font-size:12px;line-height:1;min-width:16px}.lbpg .pcol:hover{color:var(--amber)}
 .lbpg.col .lbg,.lbpg.col>p{display:none}.lbpg .pgon{color:var(--green);font-weight:600;letter-spacing:.5px}
 .lbpg .pgtag{font-size:9.5px;padding:1px 6px;border-radius:6px;border:1px solid var(--line2);color:var(--mute);letter-spacing:1px}
-#lbpages.arr .lbpg.hid .lbg,#lbpages.arr .lbpg.hid h3{opacity:.45}
+.lbhid{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:16px;padding-top:12px;border-top:1px dashed var(--line);font-size:12.5px;color:var(--dim)}
 .lbb{position:relative}.lbb .xdel{display:none;position:absolute;top:2px;right:6px;font-style:normal;font-size:15px;color:var(--mute);cursor:pointer;padding:0 3px}#lbpages.arr .lbb .xdel{display:block}.lbb .xdel:hover{color:var(--red)}
 .lbal{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px}.lbal label{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border-radius:8px;cursor:pointer}.lbal label:hover{background:rgba(255,176,32,.07)}.lbal small{color:var(--mute);margin-left:auto;text-align:right}
 .arrbar{display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:rgba(255,176,32,.07);border:1px solid rgba(255,176,32,.4);font-size:13px;color:var(--txt2)}
@@ -1290,7 +1290,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
    <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap" id="lbctl"></div><div id="lbmsg" class="summary" style="margin-top:8px"></div></section>
   <section class="card" id="lbbpm" style="display:none"></section>
   <section class="card" id="lbfd" style="display:none"></section>
-  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page, and <b>Hide</b> takes a page out of the player. <b>New page</b> makes a page that&rsquo;s only in the SX Player, with copies of any of the show&rsquo;s buttons. It&rsquo;s all saved for this computer, the phone and the iPad &mdash; ShowXpress and its live screen stay exactly as they are.<div class="grow"></div><button id="lbnewpg" class="mini">+ New page</button><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
+  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page, and <b>Hide</b> takes a page out of the player (the &#128065; buttons under the pages bring it back). <b>New page</b> makes a page that&rsquo;s only in the SX Player, with copies of any of the show&rsquo;s buttons. It&rsquo;s all saved for this computer, the phone and the iPad &mdash; ShowXpress and its live screen stay exactly as they are.<div class="grow"></div><button id="lbnewpg" class="mini">+ New page</button><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
   <section class="card idle" id="lbpages"><p class="sub" style="margin:0">Loading&hellip;</p></section>
   <div class="lbtoast" id="lbtoast"></div>
  </div>
@@ -2400,8 +2400,8 @@ function lbAllButtons(){return lbAllPages().flatMap(p=>p.buttons);}
 function lbPageOf(sec){return lbAllPages().find(p=>p.buttons.some(x=>x.sec===sec));}
 function lbPages(){if(!LB||!LB.ok)return [];const lay=lbLay(),po=lay.pages,od=lay.order,hid=new Set(lay.hidden);
  const ix=(a,v,d)=>{const i=a.indexOf(v);return i<0?d:i;},cu=lay.custom.map(c=>c.id),key=p=>ix(po,String(p.n),p.custom?2e6+cu.indexOf(p.n):1e6+p.n);
- return lbAllPages().filter(p=>(p.custom||p.buttons.length)&&(LBarr||!hid.has(String(p.n)))).sort((a,b)=>key(a)-key(b))
-  .map(p=>{const o=p.custom?[]:(od[String(p.n)]||[]).map(String);return {p:p,hid:hid.has(String(p.n)),col:lay.collapsed.includes(String(p.n)),bs:p.custom?p.buttons:p.buttons.slice().sort((a,b)=>ix(o,a.sec,1e6)-ix(o,b.sec,1e6))};});}
+ return lbAllPages().filter(p=>(p.custom||p.buttons.length)&&!hid.has(String(p.n))).sort((a,b)=>key(a)-key(b))
+  .map(p=>{const o=p.custom?[]:(od[String(p.n)]||[]).map(String);return {p:p,col:lay.collapsed.includes(String(p.n)),bs:p.custom?p.buttons:p.buttons.slice().sort((a,b)=>ix(o,a.sec,1e6)-ix(o,b.sec,1e6))};});}
 function lbArrange(on){LBarr=on;$('lbpages').classList.toggle('arr',on);$('lbarrbar').classList.toggle('on',on);$('lbarr').classList.toggle('son',on);
  $('lbarr').innerHTML=on?'&#10003; Arranging':'&#8645; Arrange';$('lbpages').dataset.gen='';if(LB)renderLab();}
 const lbGen=()=>String(LB.show)+LB.pages.length+'|'+LBarr+'|'+JSON.stringify((SET&&SET.playerLayout)||{});
@@ -2423,7 +2423,7 @@ function lbPageForm(name,swap){return 'Name<br><input id="lbpn" maxlength="40" s
 const lbClean=v=>String(v||'').replace(/[\x00-\x1f<>|]/g,'').trim().slice(0,40);
 $('lbnewpg').onclick=async()=>{const lay=lbLay();if(lay.custom.length>=40){lbToast('<span style="color:var(--amber)">That&rsquo;s the most pages the player can have (40).</span>');return;}
  const go=ask('New page',lbPageForm('',false),'Make the page');setTimeout(()=>{const i=$('lbpn');if(i)i.focus();},50);if(!await go)return;
- const nm=lbClean($('lbpn').value)||'NEW PAGE',id=lbNextPage(lay);lay.custom.push({id:id,name:nm,swap:$('lbps').checked,buttons:[]});lay.pages=lbPages().map(x=>String(x.p.n)).concat(id);
+ const nm=lbClean($('lbpn').value)||'NEW PAGE',id=lbNextPage(lay);lay.custom.push({id:id,name:nm,swap:$('lbps').checked,buttons:[]});{const vis=lbPages().map(x=>String(x.p.n));lay.pages=vis.concat(lay.pages.filter(x=>!vis.includes(x)),[id]);}
  await lbSaveLayout(lay);renderLab();lbAddButtons(id);};
 async function lbAddButtons(id){const lay=lbLay(),c=lay.custom.find(x=>x.id===id);if(!c)return;
  const used=new Set(LB.pages.flatMap(p=>p.buttons.map(b=>String(b.file).toLowerCase()))),items=[];
@@ -2437,13 +2437,14 @@ async function lbAddButtons(id){const lay=lbLay(),c=lay.custom.find(x=>x.id===id
  pick.forEach(x=>{if(c2.buttons.length>=64){full=true;return;}const b=x.b;
   c2.buttons.push(b?{id:lbNextBtn(c2),title:b.title,file:b.file,fader:b.fader||0,bpm:!!b.bpm,flash:!!b.flash,beats:b.beats||1,color:b.color==null?-1:b.color}:{id:lbNextBtn(c2),title:x.t,file:x.f,fader:0,bpm:false,flash:false,beats:1,color:-1});});
  await lbSaveLayout(l2);renderLab();if(full)lbToast('<span style="color:var(--amber)">A page holds 64 buttons &mdash; the rest weren&rsquo;t added.</span>');}
-$('lbpages').addEventListener('click',async e=>{const t=e.target.closest('[data-pa],[data-pmv],[data-xdel]');if(!t)return;e.stopPropagation();
- const g=t.closest('.lbpg'),n=g.dataset.n;
+$('lbpages').addEventListener('click',async e=>{const u=e.target.closest('[data-unhide]');if(u){e.stopPropagation();const n=u.dataset.unhide;await lbSetLay(l=>{l.hidden=l.hidden.filter(x=>x!==n);});return;}
+ const t=e.target.closest('[data-pa],[data-pmv],[data-xdel]');if(!t)return;e.stopPropagation();
+ const g=t.closest('.lbpg');if(!g)return;const n=g.dataset.n;
  if(t.dataset.pa==='col'){const lay=lbLay(),c=!lay.collapsed.includes(n);lay.collapsed=lay.collapsed.filter(x=>x!==n);if(c)lay.collapsed.push(n);g.classList.toggle('col',c);t.innerHTML=c?'&#9656;':'&#9662;';t.title=c?'Open this page':'Collapse this page';lbSaveLayout(lay);drawLab();return;}
  if(!LBarr)return;
  if(t.dataset.pmv){const box=g.parentElement,sib=t.dataset.pmv==='-1'?g.previousElementSibling:g.nextElementSibling;if(!sib||!sib.classList.contains('lbpg'))return;
   if(t.dataset.pmv==='-1')box.insertBefore(g,sib);else box.insertBefore(sib,g);lbSaveLayout();return;}
- if(t.dataset.pa==='hide'){await lbSetLay(l=>{const h=!l.hidden.includes(n);l.hidden=l.hidden.filter(x=>x!==n);if(h)l.hidden.push(n);});return;}
+ if(t.dataset.pa==='hide'){await lbSetLay(l=>{if(!l.hidden.includes(n))l.hidden.push(n);});return;}
  const lay=lbLay(),c=lay.custom.find(x=>x.id===n);if(!c)return;
  if(t.dataset.xdel){c.buttons=c.buttons.filter(b=>b.id!==t.dataset.xdel);await lbSaveLayout(lay);renderLab();return;}
  if(t.dataset.pa==='add'){lbAddButtons(n);return;}
@@ -2472,14 +2473,14 @@ function renderLab(){const run=lbRun();
  const pg=$('lbpages');pg.classList.toggle('idle',!run);
  if(!LB||!LB.ok){pg.innerHTML='<p class="sub" style="margin:0;color:var(--red)">'+esc((LB&&LB.error)||'Could not read the show.')+'</p>';drawLab();return;}
  const gen=lbGen();
- if(!pg.querySelector('.lbb')||pg.dataset.gen!==gen){pg.dataset.gen=gen;const ps=lbPages(),lay=lbLay(),ids=new Set(lbAllPages().map(p=>String(p.n))),nh=lay.hidden.filter(n=>ids.has(n)).length;
-  pg.innerHTML=ps.map(({p,bs,hid,col})=>'<div class="lbpg'+(col?' col':'')+(hid?' hid':'')+'" data-n="'+esc(String(p.n))+'"><h3><button class="pcol" data-pa="col" title="'+(col?'Open this page':'Collapse this page')+'">'+(col?'&#9656;':'&#9662;')+'</button>'+esc(p.name||('Page '+p.n))+
-   (p.custom?'<span class="pgtag" title="Only in the SX Player - not in ShowXpress">SX Player</span>':'')+(hid?'<span class="pgtag">hidden</span>':'')+'<span class="pgon"></span>'+
-   '<span class="pgbar"><button class="mini" data-pmv="-1" title="Move this page up">&#9650;</button><button class="mini" data-pmv="1" title="Move this page down">&#9660;</button><button class="mini" data-pa="hide" title="'+(hid?'Show this page in the player again':'Hide this page from the player (it still plays from the APC and the Auto Show)')+'">'+(hid?'Show':'Hide')+'</button>'+
+ if(!pg.querySelector('.lbb')||pg.dataset.gen!==gen){pg.dataset.gen=gen;const ps=lbPages(),lay=lbLay(),ids=new Set(lbAllPages().map(p=>String(p.n))),hp=lay.hidden.filter(n=>ids.has(n)).map(n=>lbAllPages().find(p=>String(p.n)===n));
+  pg.innerHTML=ps.map(({p,bs,col})=>'<div class="lbpg'+(col?' col':'')+'" data-n="'+esc(String(p.n))+'"><h3><button class="pcol" data-pa="col" title="'+(col?'Open this page':'Collapse this page')+'">'+(col?'&#9656;':'&#9662;')+'</button>'+esc(p.name||('Page '+p.n))+
+   (p.custom?'<span class="pgtag" title="Only in the SX Player - not in ShowXpress">SX Player</span>':'')+'<span class="pgon"></span>'+
+   '<span class="pgbar"><button class="mini" data-pmv="-1" title="Move this page up">&#9650;</button><button class="mini" data-pmv="1" title="Move this page down">&#9660;</button><button class="mini" data-pa="hide" title="Hide this page from the player (its buttons still play from the APC and the Auto Show)">Hide</button>'+
    (p.custom?'<button class="mini" data-pa="add">+ Buttons</button><button class="mini" data-pa="edit">Settings</button><button class="mini" data-pa="del">Delete</button>':'')+'</span></h3><div class="lbg">'+bs.map(b=>{const c=lbCol(b.color);
    return '<div class="lbb'+(b.kind==='missing'?' na':'')+'" data-sec="'+esc(b.sec)+'" data-k="'+esc(lbKind(b))+'" title="'+esc(b.file)+'"'+(c?' style="--c:'+c+'"':'')+'>'+(b.custom?'<i class="xdel" data-xdel="'+esc(b.sec)+'" title="Take it off this page">&times;</i>':'')+'<b>'+esc(b.title)+'</b><small>'+esc(lbKind(b))+'</small></div>';}).join('')+'</div>'+
    (p.custom&&!bs.length?'<p class="sub" style="margin:0">No buttons yet &mdash; '+(LBarr?'press <b>+ Buttons</b>.':'press <b>Arrange</b>, then <b>+ Buttons</b>.')+'</p>':'')+'</div>').join('')+
-   (!LBarr&&nh?'<p class="sub" style="margin:14px 0 0">'+nh+' page'+(nh===1?' is':'s are')+' hidden &mdash; press <b>Arrange</b> to show '+(nh===1?'it':'them')+' again.</p>':'')||'<p class="sub" style="margin:0">No live buttons in the show.</p>';}
+   (hp.length?'<div class="lbhid"><span>Hidden:</span>'+hp.map(p=>'<button class="mini" data-unhide="'+esc(String(p.n))+'" title="Show this page in the player again">&#128065; '+esc(p.name||('Page '+p.n))+'</button>').join('')+'</div>':'')||'<p class="sub" style="margin:0">No live buttons in the show.</p>';}
  drawLab();}
 function drawLab(){const st=LBS&&LBS.running&&LBS.status,on={};if(st&&st.on)st.on.forEach(x=>on[x.slot]=x);
  document.querySelectorAll('#lbpages .lbpg').forEach(g=>{const n=g.classList.contains('col')?[...g.querySelectorAll('.lbb')].filter(el=>on[el.dataset.sec]).length:0,s=g.querySelector('.pgon'),tx=n?'\u25b6 '+n+' playing':'';if(s&&s.textContent!==tx)s.textContent=tx;});

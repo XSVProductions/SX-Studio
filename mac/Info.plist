@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>SX Helper</string>
-  <key>CFBundleDisplayName</key><string>SX Helper</string>
+  <key>CFBundleName</key><string>SX Studio</string>
+  <key>CFBundleDisplayName</key><string>SX Studio</string>
   <key>CFBundleIdentifier</key><string>io.github.aimmovers.app</string>
   <key>CFBundleExecutable</key><string>SXHelper</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>

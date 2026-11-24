@@ -142,6 +142,6 @@ if ($want.Count) {
 foreach ($m in $movers) {
   if (-not $delta[$m.Id]) { continue }
   $w = $want[$m.Id]; $now = @(); if ($w -and $w.pan) { $now += 'pan' }; if ($w -and $w.tilt) { $now += 'tilt' }
-  "  CHANGED  $(Get-Label $m): " + $(if ($now.Count) { "$($now -join ' + ') reversed by the Helper" } else { 'back to normal (not reversed)' })
+  "  CHANGED  $(Get-Label $m): " + $(if ($now.Count) { "$($now -join ' + ') reversed by SX Studio" } else { 'back to normal (not reversed)' })
 }
 "  $nScene scenes + $nMove movements updated ($nVal values)" + $(if ($nRig) { ", $nRig kept full chase scene(s) of Tonight's Rig too" } else { '' })

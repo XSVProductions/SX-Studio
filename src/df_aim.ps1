@@ -380,7 +380,7 @@ function Update-Gpjs($fix, [double]$sx, [double]$sy, $st) {
         $hf = $fix[$id]; $new = $null
         if ($ln -match '^Reverse(Pan|Tilt) = (\d+)$') {   # should match Reverse heads (flip.ps1) - else it was changed in Generator
           $fl = $flip[$id]; $on = [bool]($fl -and $fl[$matches[1].ToLower()])
-          if (($matches[2] -ne '0') -ne $on) { $warn += "$f : fixture $id has Reverse$($matches[1]) $(if ($on) { 'OFF but the Helper reverses that head' } else { 'on' }) - check that head by eye" } }
+          if (($matches[2] -ne '0') -ne $on) { $warn += "$f : fixture $id has Reverse$($matches[1]) $(if ($on) { 'OFF but SX Studio reverses that head' } else { 'on' }) - check that head by eye" } }
         if ($ln -match '^OffsetPan = ')  { $new = "OffsetPan = $($hf.op)" }
         if ($ln -match '^OffsetTilt = ') { $new = "OffsetTilt = $($hf.ot)" }
         if ($ln -match '^ZoomPan = ')    { $new = "ZoomPan = $(if ($useZoom) { $hf.zp } else { 0 })" }
@@ -509,9 +509,11 @@ function Get-CurvePath($pts, [int]$transition) {
     $P = @(foreach ($d in -1, 0, 1, 2) { ,$pts[(($k + $d) % $n + $n) % $n] })   # , = keep each point a pair
     for ($j = 0; $j -lt $renderSub; $j++) {
       $t = $j / $renderSub; $xy = @()
-      foreach ($a in 0, 1) {   # closed Catmull-Rom: passes through every point, smooth like Generator "curves"
-        $p0 = $P[0][$a]; $p1 = $P[1][$a]; $p2 = $P[2][$a]; $p3 = $P[3][$a]
-        $xy += 0.5 * (2*$p1 + (-$p0 + $p2)*$t + (2*$p0 - 5*$p1 + 4*$p2 - $p3)*$t*$t + (-$p0 + 3*$p1 - 3*$p2 + $p3)*$t*$t*$t)
+      foreach ($a in 0, 1) {   # closed cardinal spline through every point, tangents 0.75 x (next - previous) = ShowXpress's
+        # Generator "curves" (measured on its Art-Net output 2026-11-23; plain Catmull-Rom 0.5 swung ~9% short - same as player.ps1)
+        $p0 = $P[0][$a]; $p1 = $P[1][$a]; $p2 = $P[2][$a]; $p3 = $P[3][$a]; $m1 = 0.75 * ($p2 - $p0); $m2 = 0.75 * ($p3 - $p1)
+        $t2 = $t * $t; $t3 = $t2 * $t
+        $xy += (2*$t3 - 3*$t2 + 1)*$p1 + ($t3 - 2*$t2 + $t)*$m1 + (-2*$t3 + 3*$t2)*$p2 + ($t3 - $t2)*$m2
       }
       $all.Add($xy)
     }

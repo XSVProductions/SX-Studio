@@ -1,4 +1,4 @@
-﻿# SX Helper (was AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
+﻿# SX Studio (was SX Helper, before that AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
 # Runs a private web page on this computer only (localhost + random key) and opens it as an app window
 # (Edge/Chrome "app" mode, else the normal browser). Each tab is backed by a script that does the work:
 #   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
@@ -23,7 +23,9 @@ $preEngine    = Join-Path $here 'preshow.ps1'
 $colorEngine  = Join-Path $here 'color.ps1'
 $gdEngine     = Join-Path $here 'gdrive.ps1'
 $liveEngine   = Join-Path $here 'dmx_out.ps1'
+$playerEngine = Join-Path $here 'player.ps1'
 $remoteEngine = Join-Path $here 'sx_remote.ps1'
+$quitEngine = Join-Path $here 'sx_quit.ps1'
 $repo   = 'XSVProductions/showxpress-helper'
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -70,7 +72,7 @@ catch {
   }
   if (-not $up) {
     if ($i) { Open-AppWindow $i.url; return }
-    throw "Port $Port is busy and no running SX Helper was found."
+    throw "Port $Port is busy and no running SX Studio was found."
   }
 }
 $url = "http://localhost:$Port/?t=$token"
@@ -230,9 +232,15 @@ function Start-Live {
     $a = Find-SxMacApp
     if (-not $a) { return @{ ok = $false; error = 'ShowXpress was not found in Applications, so its interface driver was not found either.'; out = '' } }
     $exe = Join-Path (Split-Path $here) 'MacOS/sxh_dmx'
-    if (-not (Test-Path -LiteralPath $exe)) { return @{ ok = $false; error = 'The live aim part of the Helper is missing - install the Helper again.'; out = '' } }
+    if (-not (Test-Path -LiteralPath $exe)) { return @{ ok = $false; error = 'The live aim part of SX Studio is missing - install SX Studio again.'; out = '' } }
     $ea = "--dir `"$(Split-Path $a.FullName)`""
   }
+  $r = Open-DmxChild $exe $ea
+  if ($r.ok) { $script:liveP = $r.p }
+  $r.Remove('p'); $r
+}
+function Open-DmxChild([string]$exe, [string]$ea) {
+  # start a DMX child (dmx_out.ps1 / player.ps1 / sxh_dmx) -> @{ ok; p = the process; iface } or @{ ok = $false; error }
   $why = ''
   foreach ($try in 1..3) {   # right after ShowXpress closes the interface can take a moment to be free
     $psi = New-Object Diagnostics.ProcessStartInfo
@@ -243,7 +251,7 @@ function Start-Live {
     $t = $p.StandardOutput.ReadLineAsync()
     if (-not $t.Wait(20000)) { try { $p.Kill() } catch {}; $why = 'The DMX interface did not answer.'; continue }
     $line = "$($t.Result)"
-    if ($line -like 'OK *') { $script:liveP = $p; return @{ ok = $true; iface = $line.Substring(3); out = ''; error = '' } }
+    if ($line -like 'OK *') { return @{ ok = $true; p = $p; iface = $line.Substring(3); out = ''; error = '' } }
     try { if (-not $p.WaitForExit(3000)) { $p.Kill() } } catch {}
     if ($line -eq 'ERR none') { $why = 'The DMX interface (D512S) was not found. Check its USB cable - unplug it, plug it back in, wait a few seconds - and try again. ShowXpress must stay closed.' }
     elseif ($line -like 'ERR *') { $why = $line.Substring(4); break }
@@ -251,6 +259,94 @@ function Start-Live {
     Start-Sleep -Milliseconds 1500
   }
   @{ ok = $false; error = $why; out = '' }
+}
+
+# ---- SX PLAYER (Lab tab, stages 1+2, user 2026-11-23): the Helper plays the show's scenes + movements itself (player.ps1 child
+# process). Same rule as live aim: ShowXpress closed, one program on the interface at a time. The Helper itself sends
+# the keep-alive once a second (not the window), so the lights keep playing when the window is in the background; if
+# the Helper quits, the player puts the lights out by itself.
+$script:playP = $null; $script:labMap = @{}
+$script:labStat = Join-Path ([IO.Path]::GetTempPath()) "sxh_player_$PID.json"
+function Test-Player { [bool]($script:playP -and -not $script:playP.HasExited) }
+function Stop-Player {
+  $p = $script:playP; $script:playP = $null
+  if ($p) { try { if (-not $p.HasExited) { $p.StandardInput.WriteLine('q'); if (-not $p.WaitForExit(4000)) { $p.Kill() } } } catch { try { $p.Kill() } catch {} } }
+  Remove-Item -LiteralPath $script:labStat -ErrorAction SilentlyContinue
+}
+function Start-Player([string]$root) {
+  Stop-Player
+  if ($onMac) { return @{ ok = $false; error = 'The SX Player only runs on Windows for now - the Mac part comes in a later stage.'; out = '' } }
+  $ea = "-NoProfile -ExecutionPolicy Bypass -File `"$playerEngine`" -Show `"$root`" -StatusFile `"$($script:labStat)`" -Pipe sxh_player_$PID"
+  if ($TestRoot) { $ea += " -Fake -FakeLog `"$(Join-Path $TestRoot '_dmx_frame.txt')`"" }
+  $r = Open-DmxChild $psExe $ea
+  if ($r.ok) {
+    $script:playP = $r.p; $script:playRoot = $root; $script:playSnap = $null
+    try { $r.p.StandardInput.WriteLine('k') } catch {}   # Windows PowerShell swallows the first line a child gets - make it this one
+  }
+  $r.Remove('p'); $r
+}
+# ---- stage 5 (gig-ready): watchdog, hand-over to ShowXpress, events for the Lab
+$script:playRoot = ''; $script:playSnap = $null; $script:playTries = @(); $script:watchT = [datetime]::MinValue
+$script:playEvent = $null; $script:playEvN = 0; $script:carry = $null
+function Set-PlayEvent([string]$kind, [string]$text) { $script:playEvN++; $script:playEvent = @{ n = $script:playEvN; kind = $kind; text = $text; at = (Get-Date).ToString('o') } }
+function Invoke-Handoff([bool]$launch, [string]$why) {
+  # stop the player and let ShowXpress carry on with what was playing (the Auto Show goes back to ShowXpress by itself)
+  $titles = @(); $st = Get-PlayerStatus
+  if ($st) { foreach ($o in @($st.on)) { $b = $script:labMap["$($o.slot)"]; if ($b -and "$($b.title)" -match $titleRx -and $titles -notcontains "$($b.title)") { $titles += "$($b.title)" } } }
+  $wasAuto = (Test-Auto) -and $script:autoPl
+  Stop-Player
+  if ($wasAuto) { $as = Get-AutoStatus; [void](Start-Auto "$(if ($as) { $as.lookId })") }
+  elseif ($titles.Count) { Set-PendingPress $titles 'what the SX Player was playing' }
+  $sx = if ($launch) { Start-Sx } else { @{ ok = $true; out = ''; error = '' } }
+  Set-PlayEvent 'handoff' $why
+  @{ ok = [bool]$sx.ok; error = "$($sx.error)"; out = "$($sx.out)"; titles = $titles; auto = [bool]$wasAuto; test = [bool]$TestRoot }
+}
+function Step-PlayerWatch {
+  if (((Get-Date) - $script:watchT).TotalMilliseconds -lt 1000) { return }
+  $script:watchT = Get-Date
+  if (Test-Player) {
+    # ShowXpress opened while the player plays: both would fight over the interface - hand over to it
+    if (Test-SxOpen) { [void](Invoke-Handoff $false 'ShowXpress was opened, so the SX Player stopped and handed over to it.'); return }
+    $s = Get-PlayerStatus
+    if ($s) {
+      $o = $script:playSnap
+      if ("$($s.iface)" -eq 'lost' -and (-not $o -or "$($o.iface)" -ne 'lost')) { Set-PlayEvent 'lost' 'The DMX interface was unplugged. Plug it back in - the player carries on by itself.' }
+      if ($o -and [int]$s.reconn -gt [int]$o.reconn) { Set-PlayEvent 'back' 'The DMX interface is back - the lights are playing again.' }
+      $script:playSnap = $s
+    }
+    return
+  }
+  if (-not $script:playP) { return }   # stopped on purpose
+  # the player stopped by itself: start it again and put back what was playing
+  $script:playP = $null; $snap = $script:playSnap
+  $script:playTries = @($script:playTries | Where-Object { ((Get-Date) - $_).TotalSeconds -lt 60 })
+  if ($script:playTries.Count -ge 3 -or (Test-SxOpen) -or (Test-Live) -or -not $script:playRoot) {
+    Set-PlayEvent 'gone' 'The SX Player stopped and could not be started again. Start it again, or hand over to ShowXpress.'; return
+  }
+  $script:playTries += Get-Date
+  $r = Start-Player $script:playRoot
+  if (-not $r.ok) { Set-PlayEvent 'gone' "The SX Player stopped and could not be started again: $($r.error)"; return }
+  if ($snap) {
+    $fd = @($snap.fd); for ($f = 0; $f -lt [math]::Min(16, $fd.Count); $f++) { [void](Send-Player ('fader ' + $f + ' ' + ([double]$fd[$f]).ToString('0.####', [Globalization.CultureInfo]::InvariantCulture))) }
+    if ("$($snap.src)" -ne 'VirtualDJ' -and $snap.bpm) { [void](Send-Player ('bpm ' + ([double]$snap.bpm).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture))) }
+    if (-not ((Test-Auto) -and $script:autoPl)) { foreach ($o in @($snap.on)) { if ("$($o.slot)" -match '^page\d+_button\d+$') { [void](Send-Player "seton $($o.slot)") } } }
+    if ($snap.bo) { [void](Send-Player 'bo 1') }
+  }
+  Set-PlayEvent 'restart' 'The SX Player stopped by itself and was started again - the lights were dark for a few seconds.'
+}
+$script:playK = [datetime]::MinValue
+function Step-PlayerKeep {
+  # keep-alive at most once a second, whether the Helper is idle or busy answering the window
+  if (-not $script:playP -or ((Get-Date) - $script:playK).TotalMilliseconds -lt 1000) { return }
+  $script:playK = Get-Date; [void](Send-Player 'k')
+}
+function Send-Player([string]$line) {
+  if (-not (Test-Player)) { return $false }
+  try { $script:playP.StandardInput.WriteLine($line); $true } catch { $false }
+}
+function Get-PlayerStatus {
+  if (-not (Test-Player) -or -not (Test-Path -LiteralPath $script:labStat)) { return $null }
+  try { [IO.File]::ReadAllText($script:labStat) | ConvertFrom-Json } catch { $null }
 }
 
 # ---- everything that changes the show. Called straight away, or later from the queue (see below).
@@ -381,7 +477,7 @@ function Step-Queue {
   if (-not $queue.Count) { $script:qClosed = 0; return }
   if (Test-SxOpen) { $script:qClosed = 0; return }
   # live aim closed ShowXpress / is running: the queue waits for it (it runs when live aim is saved)
-  if ((Test-Live) -or ((Get-Date) - $script:liveHold).TotalSeconds -lt 180) { $script:qClosed = 0; return }
+  if ((Test-Live) -or (Test-Player) -or ((Get-Date) - $script:liveHold).TotalSeconds -lt 180) { $script:qClosed = 0; return }
   $script:qClosed++
   if ($script:qClosed -lt 4) { return }   # give ShowXpress time to finish writing the show
   Invoke-QueueItems $qReopen
@@ -428,7 +524,7 @@ function Step-Pending {
 
 # ---- AUTO SHOW (user 2026-11-22): sx_remote.ps1 -Action Auto runs as a child process and plays the looks from
 # <show>/auto_show.json; commands go to its stdin, it writes its state to a temp file. The Helper doesn't quit while it plays.
-$script:autoP = $null; $autoStat = Join-Path ([IO.Path]::GetTempPath()) "sxh_autoshow_$PID.json"
+$script:autoP = $null; $script:autoPl = $false; $autoStat = Join-Path ([IO.Path]::GetTempPath()) "sxh_autoshow_$PID.json"
 function Test-Auto { [bool]($script:autoP -and -not $script:autoP.HasExited) }
 function Get-AutoStatus {
   $s = $null
@@ -450,6 +546,9 @@ function Start-Auto([string]$look) {
   $a = "-NoProfile -ExecutionPolicy Bypass -File `"$remoteEngine`" -Action Auto -StatusFile `"$autoStat`""
   if ($look -match '^[0-9a-f]{8}$') { $a += " -Titles $look" }
   if ($TestRoot) { $a += " -TestRoot `"$TestRoot`"" }
+  # SX Player running (Lab, stage 4): the looks play on it instead of ShowXpress
+  $script:autoPl = Test-Player
+  if ($script:autoPl) { $a += " -Pipe sxh_player_$PID -PlayerStatus `"$($script:labStat)`"" }
   $psi.Arguments = $a; $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
   $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
   $p = [Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true
@@ -486,9 +585,25 @@ if (-not $script:ph.key) { $script:ph.key = New-PhoneKey }
 # ---- SETTINGS (user 2026-11-22: the cogwheel). settings.json next to phone.json. Light/dark is per device (browser);
 # the tab layout is shared by the window, phones and iPads. driveFolder = Google Drive's My Drive (gdrive.ps1 reads it).
 $setF = Join-Path $cfgDir 'settings.json'
-$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto')
+# 'lab' = the SX Player tab (out of the Lab since 2026-11-23, the id stayed). tabNames = the user's own tab names (Settings).
+# playerLayout = how the SX Player tab arranges the show's pages and buttons: {pages:[page n..], order:{"n":[button sec..]}} -
+# only this tab's view, ShowXpress's own live screen is never changed.
+$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab')
+$secRx = '^[\w .\-]{1,60}$'
+function Get-TabNames($v) {
+  $o = [ordered]@{}
+  if ($v) { foreach ($p in $v.PSObject.Properties) { $n = ("$($p.Value)" -replace '[\x00-\x1f<>]', '').Trim(); if ($tabIds -contains $p.Name -and $n -and $n.Length -le 24) { $o[$p.Name] = $n } } }
+  $o
+}
+function Get-PlayerLayout($v) {
+  $pg = @(@($v.pages) | ForEach-Object { "$_" } | Where-Object { $_ -match '^\d{1,3}$' } | Select-Object -Unique -First 100)
+  $od = [ordered]@{}
+  if ($v -and $v.order) { foreach ($p in $v.order.PSObject.Properties) { if ($p.Name -match '^\d{1,3}$') {
+    $od[$p.Name] = @(@($p.Value) | ForEach-Object { "$_" } | Where-Object { $_ -match $secRx } | Select-Object -Unique -First 300) } } }
+  [ordered]@{ pages = $pg; order = $od }
+}
 function Get-Settings {
-  $s = [ordered]@{ tabOrder = $tabIds; tabHidden = @(); reopen = $true; autoUpd = $true; driveFolder = '' }
+  $s = [ordered]@{ tabOrder = $tabIds; tabHidden = @(); tabNames = $null; playerLayout = $null; reopen = $true; autoUpd = $true; driveFolder = '' }
   if (Test-Path -LiteralPath $setF) {
     try { $j = [IO.File]::ReadAllText($setF) | ConvertFrom-Json; foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } } } catch {}
   }
@@ -496,11 +611,12 @@ function Get-Settings {
   $s.tabOrder = @($o + @($tabIds | Where-Object { $o -notcontains $_ }))
   $s.tabHidden = @(@($s.tabHidden) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
   $s.reopen = [bool]$s.reopen; $s.autoUpd = [bool]$s.autoUpd; $s.driveFolder = "$($s.driveFolder)"
+  $s.tabNames = Get-TabNames $s.tabNames; $s.playerLayout = Get-PlayerLayout $s.playerLayout
   $s
 }
 function Save-Settings($s) {
   if (-not (Test-Path -LiteralPath $cfgDir)) { [void](New-Item -ItemType Directory -Path $cfgDir -Force) }
-  [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 function Get-BackupDir { if ($TestRoot) { Join-Path (Split-Path (Split-Path $TestRoot)) 'HelperBackups' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/backups' } else { Join-Path $env:APPDATA 'ShowXpress Helper/backups' } }
 function Open-OnComputer([string]$what) {
@@ -674,16 +790,16 @@ function Get-PhoneInfo {
      lastSeen = $seen; lastIp = $(if ($seen) { "$($script:relay.LastIp)" } else { '' }) }
 }
 # routes a phone may use without its key, and routes only the computer itself may use
-$phoneOpen = @('/', '/icon.png', '/brand.png', '/api/phone/pair')
+$phoneOpen = @('/', '/icon.png', '/brand.png', '/api/phone/pair', '/fonts/saira.woff2', '/fonts/orbitron.woff2')
 $phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open')
 if ($script:ph.on) { Start-PhoneRelay }
 
 $html = @'
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>SX Helper</title>
+<html lang="en"><head><meta charset="utf-8"><title>SX Studio</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><link rel="icon" href="/icon.png?t=__TOKEN__">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SX Helper"><meta name="theme-color" content="#0e1014"><link rel="apple-touch-icon" href="/icon.png">
+<meta name="apple-mobile-web-app-title" content="SX Studio"><meta name="theme-color" content="#0e1014"><link rel="apple-touch-icon" href="/icon.png">
 <style>
 :root{--bg:#0e1014;--card:#171a21;--line:#262b36;--txt:#e9ecf1;--dim:#8b93a3;--amber:#ffb020;--green:#3ddc84;--red:#ff5c5c;--blue:#5aa9ff;--panel:#12151b;--well:#0f1217;--hover:#1d212a;--line2:#3a4150;--txt2:#c7cdd8;--mute:#5d6574;--redtxt:#ffc9c9;--hdr:rgba(14,16,20,.95);--veil:rgba(14,16,20,.7);--tabon:#262b36}
 html.light{color-scheme:light;--bg:#eef0f4;--card:#ffffff;--panel:#f4f6f9;--well:#e8ebf0;--hover:#e6e9ef;--line:#d3d8e1;--line2:#aab2bf;--txt:#141821;--txt2:#2b313d;--dim:#566070;--mute:#7d8696;--redtxt:#b3261e;--hdr:rgba(238,240,244,.95);--veil:rgba(238,240,244,.75);--tabon:#ffffff;--amber:#d98200;--green:#13994b;--red:#d63333;--blue:#1d6ad0}
@@ -864,7 +980,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .pair .primary{width:100%;max-width:280px}
 .offl{position:fixed;left:0;right:0;top:0;z-index:45;display:none;padding:calc(env(safe-area-inset-top) + 9px) 14px 9px;background:rgba(200,60,60,.96);color:#fff;font-weight:600;font-size:13px;text-align:center}.offl.on{display:block}
 .phaddr{font:600 16px ui-monospace,Menlo,Consolas,monospace;background:var(--well);border:1px solid var(--line);border-radius:10px;padding:7px 12px;display:inline-block;margin:4px 8px 4px 0;user-select:all;color:var(--txt)}
-.phaddr small{font:500 11.5px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--dim);margin-left:8px}
+.phaddr small{font:500 11.5px var(--fb);color:var(--dim);margin-left:8px}
 .phrow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.phrow .phaddr{margin-right:0}
 .phcopy{flex:none}.phcopy.done{background:var(--green);border-color:var(--green);color:#0b0d11}
 .phpin{font:700 34px ui-monospace,Menlo,Consolas,monospace;letter-spacing:8px;color:var(--amber);line-height:1.1}
@@ -913,60 +1029,149 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .cog{font-size:17px;line-height:1;padding:6px 9px;border-radius:99px}.cog.on{border-color:var(--amber);color:var(--amber)}
 .txt{background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px}
 .tablist{display:grid;gap:6px;margin-top:12px;max-width:520px}
+.lbpg h3{margin:16px 0 6px;font-size:13.5px;font-weight:650}.lbpg:first-child h3{margin-top:0}
+.lbg{display:flex;flex-wrap:wrap;gap:8px}
+.lbfds{display:flex;flex-wrap:wrap;gap:10px 22px;margin-top:10px}.lbf{flex:1 1 200px;display:flex;flex-direction:column;gap:4px;font-size:13px}.lbf b{font-weight:650}.lbf span{color:var(--dim);font-size:12px}.lbf input{width:100%}
+.lbb{flex:1 1 150px;min-width:140px;max-width:230px;background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--c,var(--line2));border-radius:10px;padding:9px 11px;cursor:pointer;user-select:none;-webkit-user-select:none}
+.lbb b{display:block;font-size:13px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.lbb small{display:block;color:var(--mute);font-size:11.5px;margin-top:2px}
+.lbb:hover{border-color:var(--amber);border-left-color:var(--c,var(--amber))}.lbb.on{border-color:var(--green);border-left-color:var(--c,var(--green));box-shadow:0 0 0 1px rgba(61,220,132,.45);background:rgba(61,220,132,.09)}.lbb.on small{color:var(--green);font-weight:600}
+.lbb.na{opacity:.45;cursor:default}.lbb.na:hover{border-color:var(--line)}
+#lbpages.idle .lbb{opacity:.85}#lbpages.idle .lbb.na{opacity:.4}.lbb:active{transform:scale(.97)}
+.lbtoast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--card);border:1px solid var(--line2);border-radius:12px;padding:11px 18px;font-size:13.5px;z-index:30;box-shadow:0 8px 30px rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;color:var(--txt)}.lbtoast.on{opacity:1}
 .tabrow{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
 .tabrow.drag{border-color:var(--amber);box-shadow:0 4px 14px rgba(0,0,0,.25);position:relative;z-index:2}.tabrow.off .link{opacity:.5}
 .tabrow .hdl{cursor:grab;color:var(--mute);font-size:17px;padding:2px 6px;touch-action:none;user-select:none}.tabrow.drag .hdl{cursor:grabbing}
 .tabrow .mini{padding:3px 9px}
 .setsec h2{display:flex;align-items:center;gap:8px}
 .ph .pc-only{display:none!important}
-.ph .ht[data-go=settings]{order:11}
+.ph .ht[data-go=settings]{order:11}.ph .ht[data-go=lab]{order:7}
+/* ---- SX Studio look (2026-11-23): tech / sleek / modern. Saira for text, Orbitron for the name and headings,
+   both bundled (fonts/, SIL OFL) so it looks the same offline and on the phone. */
+@font-face{font-family:Saira;src:url(/fonts/saira.woff2?t=__TOKEN__) format('woff2');font-weight:100 900;font-display:swap}
+@font-face{font-family:Orbitron;src:url(/fonts/orbitron.woff2?t=__TOKEN__) format('woff2');font-weight:400 900;font-display:swap}
+:root{--fb:Saira,"Segoe UI",system-ui,sans-serif;--fd:Orbitron,Saira,"Segoe UI",sans-serif}
+body{font-family:var(--fb);font-size:14.5px;letter-spacing:.1px}
+.card h2,.modal h2,.pair h2,.lvside h3,.apside h3,.qbar h3{font-family:var(--fd);font-weight:600;letter-spacing:.5px;font-size:14px}
+.group h3,.gh h3,.pgrp h3,.phbox h3,.tw h4,.lvlist h4,.pkl h4,.lbpg h3{font-family:var(--fd);font-weight:500;letter-spacing:1.4px;font-size:10.5px;text-transform:uppercase}
+.lbpg h3{color:var(--dim)}
+.aubig,.lvbig,.phpin,.hd{font-family:var(--fd);letter-spacing:.5px}
+/* tabs on their own full-width row under the logo (2026-11-23: 11 tabs wrapped SX Player onto a 2nd line); too narrow = scrolls sideways */
+.tabs{order:5;margin:0;width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}.tabs::-webkit-scrollbar{display:none}.tabs{gap:2px}.tabs button{flex:none;padding:7px 10px;font-size:13px}@media (min-width:1300px){.tabs button{padding:7px 14px;font-size:13.5px}}header .hright{margin-left:auto}header{row-gap:10px;padding-bottom:12px}
+.tabs button{font-weight:600;letter-spacing:.3px}.tabs button.on{box-shadow:inset 0 -2px 0 var(--amber),0 0 14px rgba(255,176,32,.08)}
+.primary{letter-spacing:.4px}
+:root{--ch1:#ffffff;--ch2:#c9ced6;--ch3:#8d939c;--ch4:#e6e9ee}
+html.light{--ch1:#6a7280;--ch2:#3a404b;--ch3:#14171d;--ch4:#565e6b}
+svg.mk{width:auto;background:none;border:0;border-radius:0;fill:url(#sxc);overflow:visible}
+header .brandmk{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+header .brandmk svg{height:30px;filter:drop-shadow(0 0 10px rgba(255,176,32,.18))}
+header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4px;color:var(--txt2);margin:2px 0 0}
+.hero2{position:relative;overflow:hidden;border-radius:16px;border:1px solid var(--line);padding:30px 30px 26px;color:#e9ecf1;
+ background:radial-gradient(ellipse 60% 90% at 8% -10%,rgba(255,176,32,.22),transparent 60%),radial-gradient(ellipse 50% 80% at 100% 120%,rgba(90,169,255,.10),transparent 60%),linear-gradient(160deg,#10131a,#07080b)}
+.hero2::before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+ background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:26px 26px;
+ -webkit-mask-image:linear-gradient(90deg,#000,transparent 75%);mask-image:linear-gradient(90deg,#000,transparent 75%)}
+.hero2 .in{position:relative;display:flex;align-items:center;gap:26px;flex-wrap:wrap}
+.hero2 svg.mk{height:88px;fill:url(#sxcd);filter:drop-shadow(0 6px 18px rgba(0,0,0,.6)) drop-shadow(0 0 22px rgba(255,176,32,.15))}
+.hero2 .hname{font-family:var(--fd);font-size:30px;font-weight:700;letter-spacing:6px;line-height:1;
+ background:linear-gradient(180deg,#fff 0%,#c9ced6 48%,#8d939c 54%,#e6e9ee 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero2 .hsub{font-size:12px;letter-spacing:3px;color:#ffb020;text-transform:uppercase;margin-top:8px;font-weight:600}
+.hero2 .hver{color:#8b93a3;font-size:12.5px;margin-top:6px}
+.hero2 .brand img{max-height:74px;max-width:300px;display:block;mix-blend-mode:screen}
+.hero2 .brandtxt{color:#fff}
+.htiles{grid-template-columns:repeat(4,1fr);gap:10px;margin-top:0}
+.ht{position:relative;overflow:hidden;text-align:left;display:flex;flex-direction:column;justify-content:flex-start;align-items:stretch;background:var(--card);padding:14px 16px 15px;border-radius:12px;border:1px solid var(--line);transition:border-color .15s,transform .15s,background .15s}
+.ht::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber);opacity:0;transition:opacity .15s}
+.ht:hover{transform:translateY(-1px);background:var(--hover)}.ht:hover::before{opacity:1}
+.ht i{display:block;font-style:normal;font-family:var(--fd);font-size:9.5px;letter-spacing:1.6px;color:var(--mute);margin-bottom:7px;font-weight:600}
+.ht i.st{color:var(--amber)}.ht i.lv{color:var(--green)}
+.ht b{font-size:15px;font-weight:650;letter-spacing:.2px}
+.hsec{font-family:var(--fd);font-size:10.5px;letter-spacing:1.6px;color:var(--dim);text-transform:uppercase;margin:6px 2px -6px;font-weight:600}
+.tabrow .tname{flex:1;min-width:0;background:var(--well);color:var(--txt);border:1px solid transparent;border-radius:7px;padding:5px 8px;font:inherit;font-weight:600}
+.tabrow .tname:hover{border-color:var(--line)}.tabrow .tname:focus{border-color:var(--amber);outline:none}
+.tabrow .tdef{color:var(--mute);font-size:11.5px;white-space:nowrap}
+/* SX Player: arrange mode */
+#lbpages.arr .lbb{cursor:grab;touch-action:none;border-style:dashed;opacity:1!important}#lbpages.arr .lbb small{color:var(--mute)}
+#lbpages.arr .lbb.drag{opacity:.35!important;cursor:grabbing}
+.lbghost{position:fixed;z-index:60;pointer-events:none;transform:rotate(-2deg);box-shadow:0 12px 30px rgba(0,0,0,.5);border-color:var(--amber)!important;opacity:.95}
+.lbpg .pgbar{display:none;gap:4px;margin-left:8px}#lbpages.arr .lbpg .pgbar{display:inline-flex}
+.lbpg h3{display:flex;align-items:center}
+.arrbar{display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:rgba(255,176,32,.07);border:1px solid rgba(255,176,32,.4);font-size:13px;color:var(--txt2)}
+.arrbar.on{display:flex}
+@media (max-width:860px){.htiles{grid-template-columns:1fr 1fr}}
+@media (max-width:640px){.hero2{padding:20px 18px}.hero2 svg.mk{height:58px}.hero2 .hname{font-size:22px;letter-spacing:4px}.hero2 .brand{display:none}.htiles{grid-template-columns:1fr 1fr}header .brandmk svg{height:24px}header h1{font-size:12px;letter-spacing:3px}}
 </style>
 <script>(function(){try{var m=localStorage.getItem('sxh_theme')||'dark';if(m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches))document.documentElement.classList.add('light');}catch(e){}})();</script></head><body>
-<header><img class="logo" id="logo" src="/icon.png?t=__TOKEN__" alt="" style="cursor:pointer" title="Home"><h1 id="ttl" style="cursor:pointer" title="Home">SX Helper</h1>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button></nav>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;border:0;overflow:hidden"><defs>
+ <linearGradient id="sxc" gradientUnits="userSpaceOnUse" x1="0" y1="124" x2="0" y2="365"><stop offset="0" style="stop-color:var(--ch1)"/><stop offset=".45" style="stop-color:var(--ch2)"/><stop offset=".55" style="stop-color:var(--ch3)"/><stop offset="1" style="stop-color:var(--ch4)"/></linearGradient>
+ <linearGradient id="sxcd" gradientUnits="userSpaceOnUse" x1="0" y1="124" x2="0" y2="365"><stop offset="0" stop-color="#ffffff"/><stop offset=".45" stop-color="#c9ced6"/><stop offset=".55" stop-color="#8d939c"/><stop offset="1" stop-color="#e6e9ee"/></linearGradient>
+ <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
+</defs></svg>
+<header><div class="brandmk" id="logo" title="Home"><svg class="mk" viewBox="0 0 778 445" aria-label="SX"><use href="#sxm"/></svg><h1 id="ttl">STUDIO</h1></div>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
  <div class="view" id="v-home">
-  <section class="card">
-   <div class="hero"><img class="hlogo" src="/icon.png?t=__TOKEN__" alt=""><div><div class="hname">SX Helper</div><div class="hver" id="hver">&nbsp;</div></div><div class="grow"></div>
-    <div id="brand" class="brand"><div class="brandtxt">XSV<span>PRODUCTIONS</span></div></div></div>
-   <div class="htiles">
-    <button class="ht" data-go="rt"><b>1 &middot; Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Skip Flash</span></button>
-    <button class="ht" data-go="aim"><b>2 &middot; Aim Movers</b><span>Fit the dance floor and AROUND ROOM to tonight&rsquo;s venue</span></button>
-    <button class="ht" data-go="color"><b>3 &middot; Tonight&rsquo;s Color</b><span>The decor colour on the movers and uplights</span></button>
-    <button class="ht" data-go="pre"><b>4 &middot; Pre-show Check</b><span>One look before the guests arrive</span></button>
-    <button class="ht" data-go="rig"><b>Tonight&rsquo;s Rig</b><span>Which heads are hung tonight</span></button>
-    <button class="ht" data-go="skip"><b>Skip Flash</b><span>The heads SKIP FLASH uses</span></button>
-    <button class="ht" data-go="apc"><b>APC mini</b><span>Move pads and pick their colours</span></button>
-    <button class="ht" data-go="speed"><b>Speed Faders</b><span>Which fader drives which button</span></button>
-    <button class="ht" data-go="health"><b>Health Check</b><span>Find and fix problems in the show</span></button>
-    <button class="ht" data-go="auto"><b>Auto Show</b><span>The Helper changes your looks every few bars while you mix</span></button>
-    <button class="ht" data-go="settings"><b>&#9881; Settings</b><span>Google Drive sync &amp; import, phone &amp; iPad, tabs, light mode</span></button>
-   </div>
-  </section>
+  <section class="hero2"><div class="in">
+   <svg class="mk" viewBox="0 0 778 445" aria-label="SX"><use href="#sxm"/></svg>
+   <div><div class="hname">STUDIO</div><div class="hsub">Lighting control for ShowXpress</div><div class="hver" id="hver">&nbsp;</div></div><div class="grow"></div>
+   <div id="brand" class="brand"><div class="brandtxt">XSV<span>PRODUCTIONS</span></div></div></div></section>
+  <div class="hgrp"><div class="hsec">Before the gig</div></div>
+  <div class="htiles hgrp">
+   <button class="ht" data-go="rt"><i class="st">STEP 01</i><b>Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Skip Flash</span></button>
+   <button class="ht" data-go="aim"><i class="st">STEP 02</i><b>Aim Movers</b><span>Fit the dance floor and AROUND ROOM to tonight&rsquo;s venue</span></button>
+   <button class="ht" data-go="color"><i class="st">STEP 03</i><b>Tonight&rsquo;s Color</b><span>The decor colour on the movers and uplights</span></button>
+   <button class="ht" data-go="pre"><i class="st">STEP 04</i><b>Pre-show Check</b><span>One look before the guests arrive</span></button>
+  </div>
+  <div class="hgrp"><div class="hsec">Live</div></div>
+  <div class="htiles hgrp">
+   <button class="ht" data-go="lab"><i class="lv">PLAY</i><b>SX Player</b><span>Play your show&rsquo;s buttons straight to the lights, with ShowXpress closed</span></button>
+   <button class="ht" data-go="auto"><i class="lv">AUTO</i><b>Auto Show</b><span>Your looks change every few bars while you mix</span></button>
+  </div>
+  <div class="hgrp"><div class="hsec">Show tools</div></div>
+  <div class="htiles hgrp">
+   <button class="ht" data-go="rig"><i>RIG</i><b>Tonight&rsquo;s Rig</b><span>Which heads are hung tonight</span></button>
+   <button class="ht" data-go="skip"><i>RIG</i><b>Skip Flash</b><span>The heads SKIP FLASH uses</span></button>
+   <button class="ht" data-go="apc"><i>CONTROL</i><b>APC mini</b><span>Move pads and pick their colours</span></button>
+   <button class="ht" data-go="speed"><i>CONTROL</i><b>Speed Faders</b><span>Which fader drives which button</span></button>
+   <button class="ht" data-go="health"><i>SHOW</i><b>Health Check</b><span>Find and fix problems in the show</span></button>
+   <button class="ht" data-go="settings"><i>SETUP</i><b>&#9881; Settings</b><span>Google Drive, phone &amp; iPad, tabs, light mode</span></button>
+  </div>
  </div>
 
  <div class="view" id="v-settings">
   <section class="card"><h2>&#9881; Settings</h2><p class="sub" style="margin:0">Light or dark is set for each device. The tab order is the same on this computer, the phone and the iPad.</p></section>
   <section class="card setsec"><h2>Look</h2><p class="sub">Light is easier to read in daylight; dark is kinder in a dark venue.</p>
    <div class="seg" id="stheme"><button data-v="dark">&#127769; Dark</button><button data-v="light">&#9728;&#65039; Light</button><button data-v="auto">Same as this device</button></div></section>
-  <section class="card setsec"><div class="row"><div class="grow"><h2>Tabs</h2><p class="sub" style="margin:0">Drag &#9776; or use the arrows to change the order. Untick a tab to hide it (it leaves the Home page too).</p></div><button id="stabreset" class="mini">Reset</button></div><div id="stabs" class="tablist"></div></section>
+  <section class="card setsec"><div class="row"><div class="grow"><h2>Tabs</h2><p class="sub" style="margin:0">Drag &#9776; or use the arrows to change the order, and click a name to rename the tab (Enter to keep it, empty = its own name again). Untick a tab to hide it (it leaves the Home page too).</p></div><button id="stabreset" class="mini">Reset</button></div><div id="stabs" class="tablist"></div></section>
   <section class="card setsec" id="gdcard"><div class="row"><div class="grow"><h2>Google Drive</h2><p class="sub" id="gdacct" style="margin:0">Looking for Google Drive&hellip;</p></div>
    <div class="pc-only" style="display:flex;gap:6px;flex-wrap:wrap"><button id="gdapp" class="mini" style="display:none">Open Google Drive</button><button id="gddl" class="mini">Get Google Drive</button></div></div>
    <div class="row" style="margin-top:14px;align-items:flex-start"><div class="grow"><p class="sub" id="gdsub" style="margin:0">&nbsp;</p><div id="gdhint" class="summary"></div></div>
     <div style="display:flex;flex-direction:column;gap:6px"><button id="gdsync" class="primary" disabled>Sync to Google Drive</button><button id="gdimp" disabled>Import from Google Drive</button></div></div>
    <details class="pc-only"><summary>Google Drive folder and import backups</summary>
     <div class="row" style="margin-top:10px"><input id="gdfold" class="txt" style="flex:1;min-width:220px" placeholder="Found automatically"><button id="gdfoldset" class="mini">Use this folder</button><button id="gdfoldauto" class="mini">Find automatically</button></div>
-    <p class="sub" style="margin:6px 0 0">Google Drive&rsquo;s <b>My Drive</b> folder (the one with AWAAZ in it). Only needed if the Helper can&rsquo;t find Google Drive by itself.</p>
+    <p class="sub" style="margin:6px 0 0">Google Drive&rsquo;s <b>My Drive</b> folder (the one with AWAAZ in it). Only needed if SX Studio can&rsquo;t find Google Drive by itself.</p>
     <div class="row" style="margin-top:10px"><button id="gdbk" class="mini">Open import backups</button><span class="summary">The show as it was before each import (newest 3).</span></div></details></section>
-  <section class="card setsec" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use the Helper from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
+  <section class="card setsec" id="phcard"><div class="row"><div class="grow"><h2>&#128241; Phone &amp; iPad</h2><p class="sub" style="margin:0">Use SX Studio from your iPhone or iPad on the same Wi-Fi &mdash; rig setup, aim live with your finger, tonight&rsquo;s colour, the pre-show check and the Auto Show.</p></div>
    <label class="link"><input type="checkbox" id="phon"> Let my phone and iPad connect</label></div><div id="phbody"></div></section>
   <section class="card setsec pc-only"><h2>ShowXpress</h2>
    <label class="link"><input type="checkbox" id="sreopen"> After queued changes are done, open ShowXpress again</label>
    <div class="row" style="margin-top:12px"><button id="sopenshow" class="mini">Open the show folder</button><span class="summary" id="sshow"></span></div></section>
   <section class="card setsec pc-only"><h2>Updates</h2><div class="row"><div class="grow summary" id="supd">&nbsp;</div><button id="supdchk" class="mini">Check now</button></div>
-   <label class="link" style="margin-top:10px"><input type="checkbox" id="sautoupd"> Check for a new version when the Helper opens</label></section>
+   <label class="link" style="margin-top:10px"><input type="checkbox" id="sautoupd"> Check for a new version when SX Studio opens</label></section>
+ </div>
+
+ <div class="view" id="v-lab">
+  <section class="card"><div class="row" style="align-items:flex-start"><div class="grow"><h2>SX Player</h2>
+   <p class="sub" style="margin:0">Plays your show&rsquo;s scenes and movements straight to the DMX interface, with ShowXpress closed &mdash; nothing in the show is changed. Tap a button to start it, tap again to stop; on a MOVEMENTS page one replaces the other. A movement only moves what it&rsquo;s set to (usually pan/tilt), so tap a colour scene as well. While it plays, the <b>APC mini</b> pads and speed faders, the keyboard keys, <b>BPM</b> (tap, type or VirtualDJ) and the <b>Auto Show</b> all work.</p>
+   <details style="margin-top:8px"><summary>At a gig</summary><p class="sub" style="margin:8px 0 0"><b>Hand over to ShowXpress</b> stops the player and opens ShowXpress straight away, and ShowXpress carries on with what was playing (starting the player does the same the other way round). If the DMX interface gets unplugged the player waits and carries on when it&rsquo;s plugged back in; if the player itself stops, SX Studio starts it again; if someone opens ShowXpress, the player hands over to it. The laptop doesn&rsquo;t sleep while the player runs, and closing this window doesn&rsquo;t stop the lights &mdash; open SX Studio again from its icon. Scenes, chases and movements were checked against ShowXpress&rsquo;s own DMX output; which button wins when two use the same light isn&rsquo;t measured yet.</p></details></div>
+   <button id="lbarr" class="mini" title="Put the pages and buttons in your own order (only here - ShowXpress's live screen stays as it is)">&#8645; Arrange</button></div>
+   <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap" id="lbctl"></div><div id="lbmsg" class="summary" style="margin-top:8px"></div></section>
+  <section class="card" id="lbbpm" style="display:none"></section>
+  <section class="card" id="lbfd" style="display:none"></section>
+  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page. It&rsquo;s saved for this computer, the phone and the iPad &mdash; ShowXpress&rsquo;s own live screen stays as it is.<div class="grow"></div><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
+  <section class="card idle" id="lbpages"><p class="sub" style="margin:0">Loading&hellip;</p></section>
+  <div class="lbtoast" id="lbtoast"></div>
  </div>
 
  <div class="view" id="v-aim">
@@ -1119,7 +1324,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 
  <div class="view" id="v-auto">
   <section class="card">
-   <div class="row"><div class="grow"><h2>Auto Show</h2><p class="sub" style="margin:0">The Helper presses your <b>looks</b> in ShowXpress one after another, each for a number of bars &mdash; for the stretches when you&rsquo;re busy mixing. A look is a few buttons that play together (a movement, a colour, uplights&hellip;). Whatever you press yourself on the APC still works on top. Tap the BPM to the music and press <b>Bar 1 now</b> on a downbeat to line the changes up.</p></div><span id="austate" class="state ok" style="display:none"></span></div>
+   <div class="row"><div class="grow"><h2>Auto Show</h2><p class="sub" style="margin:0">SX Studio presses your <b>looks</b> in ShowXpress one after another, each for a number of bars &mdash; for the stretches when you&rsquo;re busy mixing. A look is a few buttons that play together (a movement, a colour, uplights&hellip;). Whatever you press yourself on the APC still works on top. Tap the BPM to the music and press <b>Bar 1 now</b> on a downbeat to line the changes up.</p></div><span id="austate" class="state ok" style="display:none"></span></div>
    <div id="auerr" class="warnbox"></div><div id="aurem" class="warnbox"></div>
    <div id="auplay" class="auplay"></div>
   </section>
@@ -1186,12 +1391,12 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 <div class="modal" id="modal"><div class="box"><h2 id="mt"></h2><p id="mp"></p><div class="row" style="justify-content:flex-end"><button id="mno">Cancel</button><button id="myes" class="primary" style="padding:9px 18px;font-size:14px"></button></div></div></div>
 <div class="busy" id="busy"><div class="spin"></div><span id="busyt">Working&hellip;</span></div>
 <div class="pair" id="pair"><div class="box"><img src="/icon.png" alt="" class="hlogo" style="width:64px;height:64px"><h2>Connect to the laptop</h2>
- <p class="sub">On the laptop, open <b>SX Helper</b>: press <b>&#9881;</b> (top right), and in <b>Phone &amp; iPad</b> press <b>Pair a phone</b>. Type the 6-digit code here.</p>
+ <p class="sub">On the laptop, open <b>SX Studio</b>: press <b>&#9881;</b> (top right), and in <b>Phone &amp; iPad</b> press <b>Pair a phone</b>. Type the 6-digit code here.</p>
  <input id="pairpin" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="------">
  <button id="pairgo" class="primary">Connect</button><div id="pairmsg" class="sub"></div>
  <p class="sub" style="font-size:12px;margin-top:8px">Tip: first add this page to your Home Screen (Share &rarr; <b>Add to Home Screen</b>), then open it from there and pair &mdash; the Home Screen icon keeps its own pairing.</p></div></div>
-<div class="offl" id="offl">Can&rsquo;t reach the laptop &mdash; trying again&hellip; (same Wi-Fi? Helper still open?)</div>
-<div class="gone" id="gone"><h2 style="color:var(--txt)">SX Helper has closed</h2><p>Open it again from its icon.</p></div>
+<div class="offl" id="offl">Can&rsquo;t reach the laptop &mdash; trying again&hellip; (same Wi-Fi? SX Studio still open?)</div>
+<div class="gone" id="gone"><h2 style="color:var(--txt)">SX Studio has closed</h2><p>Open it again from its icon.</p></div>
 <script>
 const PH=__PHONE__||/[?&]phone=1/.test(location.search);   // phone / iPad over the Wi-Fi (phone=1: try the phone layout on the computer)
 let T='__TOKEN__';const $=id=>document.getElementById(id);
@@ -1243,11 +1448,11 @@ function ask(t,p,yes){return new Promise(res=>{$('mt').textContent=t;$('mp').inn
 function busy(on,t){$('busy').style.display=on?'flex':'none';if(t)$('busyt').textContent=t;}
 function showResult(r,what){const box=$('result');box.className='card result '+(r.ok?'ok':'err');
  if(r.ok&&r.queued){$('rlog').textContent='';$('rtitle').innerHTML='<span style="color:var(--amber)">&#9203;</span> Queued: '+esc(r.label);
-  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; the Helper does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
+  $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; SX Studio does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
  const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto'];
- if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='clprev'?'Preview didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
+ if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='clprev'?'Preview didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'||what==='lab'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved'}[what]);
@@ -1296,16 +1501,16 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings'];
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}$('cog').classList.toggle('on',t==='settings');
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
-$('logo').onclick=$('ttl').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
+$('logo').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
 // ---------------- Skip Flash heads
 let S=null,sel=new Set();
@@ -1597,20 +1802,20 @@ async function remRefresh(t,auto){if(!REMBOX[t])return null;const sets=remSets(t
  if(!REMR[t]){box.className='remrow on';box.innerHTML='<span>Checking ShowXpress&hellip;</span>';}
  const doAuto=auto&&sxOpen&&!(AUS&&AUS.running)&&!PEND;
  const r=doAuto?await remGet('/api/remote/press',{titles:sets[0].titles,solo:true,idle:true}):await remGet('/api/remote');
- r.auto=doAuto;if(doAuto&&r.connected&&!r.skipped&&(r.pressedNow||[]).length)r.note='&#10003; Turned on by the Helper.';
+ r.auto=doAuto;if(doAuto&&r.connected&&!r.skipped&&(r.pressedNow||[]).length)r.note='&#10003; Turned on by SX Studio.';
  REMR[t]=r;if(curTab()===t)remDraw(t);return r;}
 function remDraw(t){const box=$(REMBOX[t]),r=REMR[t],sets=remSets(t);box.className='remrow on';if(!r){box.innerHTML='';return;}let h;
  if(r.ok===false&&!r.setup)h='<div class="grow">'+esc(r.error||'')+'</div><button class="mini" data-rem="retry">Try again</button>';
- else if(!r.ready)h='<div class="grow"><b>Let the Helper press '+esc(sets.map(s=>s.label).join(' / '))+' for you.</b> Turn on ShowXpress remote control once &mdash; it&rsquo;s saved in the show'+(sxOpen?' (done when ShowXpress next closes).':'.')+'</div><button class="mini primary" data-rem="enable">Turn on remote control</button>';
- else if(!r.open)h='<div class="grow">ShowXpress is closed. Open it and the Helper turns on <b>'+esc(sets[0].label)+'</b> by itself.</div><button class="mini" data-rem="launch">&#9654; Launch ShowXpress</button>';
+ else if(!r.ready)h='<div class="grow"><b>Let SX Studio press '+esc(sets.map(s=>s.label).join(' / '))+' for you.</b> Turn on ShowXpress remote control once &mdash; it&rsquo;s saved in the show'+(sxOpen?' (done when ShowXpress next closes).':'.')+'</div><button class="mini primary" data-rem="enable">Turn on remote control</button>';
+ else if(!r.open)h='<div class="grow">ShowXpress is closed. Open it and SX Studio turns on <b>'+esc(sets[0].label)+'</b> by itself.</div><button class="mini" data-rem="launch">&#9654; Launch ShowXpress</button>';
  else if(!r.connected)h='<div class="grow">'+esc(r.error||'')+'</div><button class="mini" data-rem="retry">Try again</button>';
  else{const on=new Set((r.pressed||[]).map(p=>p.title)),have=new Set(r.titles||[]),cur=sets.find(s=>s.titles.every(x=>on.has(x)));
-  h='<div class="grow">'+(r.note?r.note+' ':'')+(r.skipped?'<b style="color:var(--amber)">Your show is playing</b> ('+esc((r.playing||[]).slice(0,4).join(', '))+((r.playing||[]).length>4?'&hellip;':'')+') &mdash; the Helper didn&rsquo;t press anything, so it isn&rsquo;t cut. ':'')+
+  h='<div class="grow">'+(r.note?r.note+' ':'')+(r.skipped?'<b style="color:var(--amber)">Your show is playing</b> ('+esc((r.playing||[]).slice(0,4).join(', '))+((r.playing||[]).length>4?'&hellip;':'')+') &mdash; SX Studio didn&rsquo;t press anything, so it isn&rsquo;t cut. ':'')+
    (cur?'<b style="color:var(--green)">&#9679; '+esc(cur.label)+'</b> is on in ShowXpress.':on.size?'Playing: '+esc([...on].slice(0,5).join(', '))+(on.size>5?'&hellip;':''):'Nothing is playing in ShowXpress.')+'</div>'+
    sets.map((s,i)=>{const miss=s.titles.some(x=>!have.has(x));return '<button class="mini'+(cur===s?' son':'')+'" data-rem="set" data-i="'+i+'"'+(miss?' disabled title="Not in the show yet"':'')+'>'+esc(s.label)+'</button>';}).join('')+
    (on.size?'<button class="mini" data-rem="off">All off</button>':'');}
  box.innerHTML=h;box.querySelectorAll('[data-rem]').forEach(b=>b.onclick=()=>remAct(t,b.dataset.rem,+b.dataset.i));}
-async function remEnable(after){if(!await ask('Turn on ShowXpress remote control?','Lets the Helper press buttons in ShowXpress (RIG ID, DF CHECK, ROOM CHECK, Auto Show). It switches on <b>External App</b> in ShowXpress and remote access for every Live page, with a password only the Helper uses. Only this computer connects to it.'+(sxOpen?'<br><br>ShowXpress is open, so it&rsquo;s done when you next close it.':''),'Turn it on'))return;
+async function remEnable(after){if(!await ask('Turn on ShowXpress remote control?','Lets SX Studio press buttons in ShowXpress (RIG ID, DF CHECK, ROOM CHECK, Auto Show). It switches on <b>External App</b> in ShowXpress and remote access for every Live page, with a password only SX Studio uses. Only this computer connects to it.'+(sxOpen?'<br><br>ShowXpress is open, so it&rsquo;s done when you next close it.':''),'Turn it on'))return;
  await saveTo('/api/remote/enable',{},'Turning on the remote…',after,'remote');}
 async function remAct(t,k,i){const sets=remSets(t),r=REMR[t];
  if(k==='retry')return remRefresh(t,false);
@@ -1623,7 +1828,7 @@ async function remAct(t,k,i){const sets=remSets(t),r=REMR[t];
   REMR[t]=await remGet('/api/remote/press',{titles:s.titles,solo:true});remDraw(t);}}
 function remPoll(r,was){PEND=!!r.pend;const a=AUS;AUS=r.auto||null;auPill();if(curTab()==='auto'&&(!!(a&&a.running)!==!!(AUS&&AUS.running)))auPlay();
  if(r.rem){REMAT=Date.parse(r.rem.at)||0;if(REMSEEN!==null&&r.rem.at!==REMSEEN){const t=curTab(),m=r.rem;
-   const msg=m.ok?'&#10003; The Helper turned on <b>'+esc(m.label)+'</b> &mdash; check the beams.':m.skipped?'Your show was playing, so <b>'+esc(m.label)+'</b> wasn&rsquo;t turned on.':'';
+   const msg=m.ok?'&#10003; SX Studio turned on <b>'+esc(m.label)+'</b> &mdash; check the beams.':m.skipped?'Your show was playing, so <b>'+esc(m.label)+'</b> wasn&rsquo;t turned on.':'';
    if(REMBOX[t])remRefresh(t,false).then(x=>{if(x&&msg){x.note=msg;remDraw(t);}});}
   REMSEEN=r.rem.at;}else if(REMSEEN===null)REMSEEN='';
  if(!was&&r.open)remWait=Date.now();
@@ -1655,7 +1860,7 @@ function auMsg(h){$('aumsg').innerHTML=h||'';}
 function renderAuto(){if(!AU)return;
  if(showErr('auerr',AU)){['aulooks','auplay'].forEach(i=>$(i).innerHTML='');$('ausum').textContent='';updAuto();return;}
  const rb=$('aurem');
- if(!AU.ready){rb.style.display='block';rb.innerHTML='The ShowXpress remote is off, so the Auto Show can&rsquo;t press anything yet. <button class="mini primary" id="auen" style="margin-left:8px">Turn on remote control</button>';$('auen').onclick=()=>remEnable(loadAuto);}
+ if(!AU.ready&&!AU.player&&!(AUS&&AUS.running&&AUS.target==='player')){rb.style.display='block';rb.innerHTML='The ShowXpress remote is off, so the Auto Show can&rsquo;t press anything yet. <button class="mini primary" id="auen" style="margin-left:8px">Turn on remote control</button>';$('auen').onclick=()=>remEnable(loadAuto);}
  else rb.style.display='none';
  document.querySelectorAll('[data-ao]').forEach(b=>b.classList.toggle('on',b.dataset.ao===auC.order));$('austop').value=auC.stop;$('auclean').checked=!!auC.clean;
  auLooks();auPlay();$('foot').textContent='Show: '+AU.show+' · Auto Show settings are kept in the show folder (auto_show.json)';updAuto();}
@@ -1721,9 +1926,9 @@ function auPlay(){const el=$('auplay');if(!AU||!AU.ok||!auC){el.innerHTML='';ret
  if(!run){el.innerHTML='<div class="row"><div class="grow"><div class="aubig">Not playing</div><div class="sub" style="margin:2px 0 0">'+(act.length?act.length+' look'+(act.length>1?'s':'')+' ready &middot; '+(auC.order==='shuffle'?'shuffled':'in order'):'Add a look below to start.')+'</div>'+
    (s&&s.error?'<div style="color:var(--red);margin-top:4px">'+esc(s.error)+'</div>':'')+'</div>'+bpm+
    (act.length?'<select id="aufirst" style="width:auto">'+act.map(l=>'<option value="'+l.id+'">Start with '+esc(l.name)+'</option>').join('')+'</select>':'')+
-   '<button class="primary" id="austart"'+(act.length&&AU.ready?'':' disabled')+'>&#9654; Start Auto Show</button></div>';
+   '<button class="primary" id="austart"'+(act.length&&(AU.ready||AU.player)?'':' disabled')+'>&#9654; Start Auto Show</button></div>';
   $('austart').onclick=auStart;}
- else{el.innerHTML='<div class="row"><div class="grow"><div class="sub" style="margin:0;letter-spacing:1px;font-size:11.5px">NOW PLAYING</div><div class="aubig" id="auname"></div><div class="sub" id="aunext" style="margin:2px 0 0"></div><div id="auwarn" style="color:var(--amber);font-size:13px"></div></div><div class="aubeats" id="aubeats"><i></i><i></i><i></i><i></i></div></div>'+
+ else{el.innerHTML='<div class="row"><div class="grow"><div class="sub" style="margin:0;letter-spacing:1px;font-size:11.5px">NOW PLAYING</div><div class="aubig" id="auname"></div><div class="sub" id="aunext" style="margin:2px 0 0"></div><div id="auwarn" style="color:var(--amber);font-size:13px"></div><div class="sub" id="autgt" style="margin:2px 0 0"></div></div><div class="aubeats" id="aubeats"><i></i><i></i><i></i><i></i></div></div>'+
    '<div class="auprog"><i id="aupr"></i></div><div class="row"><button id="auprev" title="The look before">&#9198; Back</button><button id="aunextb" class="primary" style="padding:9px 18px;font-size:14px">&#9197; Next look</button><button id="auhold"></button><button id="ausync" title="Press on the first beat of a bar: the bar count starts again from here">Bar 1 now</button><div class="grow"></div>'+bpm+'<button id="austopb">&#9632; Stop</button></div>';
   const c=(id,cmd)=>$(id).onclick=async()=>{const r=await remGet('/api/auto/cmd',{cmd:typeof cmd==='function'?cmd():cmd});if(r.status){AUS=r.status;auDraw();auLooks();}if(!r.ok)auMsg('<span style="color:var(--red)">'+esc(r.error)+'</span>');};
   c('auprev','prev');c('aunextb','next');c('ausync','sync');c('auhold',()=>AUS&&AUS.held?'resume':'hold');
@@ -1737,6 +1942,8 @@ function auDraw(){const s=AUS;if(!s||!s.running||!$('auname'))return;
  $('aunext').innerHTML='bar <b>'+bar+'</b> of '+s.bars+' &middot; '+(s.held?'held &mdash; stays on this look until you resume':'next: <b>'+esc(s.next||s.name)+'</b> in '+fmtS(left/1000));
  $('aupr').style.width=(el===null?(s.bar-1)/s.bars*100:Math.min(100,el/tot*100))+'%';
  $('aubeats').querySelectorAll('i').forEach((x,k)=>{x.className=k<beat?'on'+(k===0?' one':''):'';});
+ const tg=$('autgt');if(tg){const h=s.target==='player'?'Playing on the <b>SX Player</b> (Lab)'+(s.src==='VirtualDJ'?' &middot; tempo from VirtualDJ':s.src==='tap'?' &middot; tapped tempo':''):'';if(tg.innerHTML!==h)tg.innerHTML=h;}
+ const ab=$('aubpm');if(ab&&s.target==='player'&&document.activeElement!==ab){const v=String(Math.round(s.bpm));if(ab.value!==v)ab.value=v;}
  $('auwarn').textContent=s.error||((s.missing||[]).length?'Not in the show: '+s.missing.join(', '):'');
  $('auhold').innerHTML=s.held?'&#9654; Resume':'&#9208; Hold';
  if(s.lookId!==auLastId){auLastId=s.lookId;auLooks();}}
@@ -1811,9 +2018,9 @@ function cpPush(){if(!CP||!CP.on||!CL||!CL.ok)return;const on=!!clHex,n1=on&&nea
  cpKick();}
 function cpKick(){if(!CP||CP.tm||CP.fl)return;const d=30-(Date.now()-CP.last);if(d>0)CP.tm=setTimeout(()=>{if(CP){CP.tm=0;cpFlush();}},d);else cpFlush();}
 async function cpFlush(){if(!CP||!CP.on||CP.fl)return;let l=((CP.z?'z ':'')+[...CP.pend.values()].join(' ')).trim();if(!l){if(!CP.ka)return;l='k';}
- const me=CP;CP.z=false;CP.ka=false;CP.pend.clear();CP.fl=true;CP.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,error:'Lost connection to the Helper.'};}
+ const me=CP;CP.z=false;CP.ka=false;CP.pend.clear();CP.fl=true;CP.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}
  if(CP!==me||!CP.on)return;CP.fl=false;
- if(!r.ok){const reo=$('clreo').checked;await cpStop(false);showResult({ok:false,error:'The preview on the lights stopped: '+(/^The DMX output stopped/.test(r.error||'')?'the DMX interface was unplugged, or the Helper lost it.':(r.error||'unknown error'))+(reo?' ShowXpress is opening again.':'')},'clprev');if(reo)sxLaunch();return;}
+ if(!r.ok){const reo=$('clreo').checked;await cpStop(false);showResult({ok:false,error:'The preview on the lights stopped: '+(/^The DMX output stopped/.test(r.error||'')?'the DMX interface was unplugged, or SX Studio lost it.':(r.error||'unknown error'))+(reo?' ShowXpress is opening again.':'')},'clprev');if(reo)sxLaunch();return;}
  if(CP.pend.size)cpKick();}
 function cpUi(){const on=!!CP;$('clpv').classList.toggle('on',on);$('clprev').style.display=on?'none':'';$('clprev').disabled=!CL||!CL.ok;}
 async function cpGo(){if(CP||LV||!CL||!CL.ok)return;
@@ -1846,7 +2053,7 @@ async function gdImport(){if(!G||!G.srcFound)return;
 $('gdimp').onclick=()=>gdImport();
 async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
  if(r.ok&&r.already){busy(false);
-  if(!await ask('ShowXpress is still running','The Helper sees ShowXpress running on the laptop. If you can see its window there, just use it.<br><br>If you <b>can&rsquo;t</b> see it, it got stuck while closing: <b>Force close</b> stops it and opens it again (anything not saved is lost).','Force close and open'))return;
+  if(!await ask('ShowXpress is still running','SX Studio sees ShowXpress running on the laptop. If you can see its window there, just use it.<br><br>If you <b>can&rsquo;t</b> see it, it got stuck while closing: <b>Force close</b> stops it and opens it again (anything not saved is lost).','Force close and open'))return;
   if(!await sxForce())return;busy(true,'Starting ShowXpress…');try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}}
  setTimeout(()=>busy(false),r.ok?3000:0);if(!r.ok)showResult(r,'sx');}
 async function sxForce(){busy(true,'Force closing ShowXpress…');let r;try{r=await api('/api/sx/close',{force:true});}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);
@@ -1856,14 +2063,14 @@ async function sxClose(){
  if(sxCloseT&&Date.now()-sxCloseT>8000){   // asked before and it's still running
   if(!await ask('ShowXpress didn&rsquo;t close','If ShowXpress is asking whether to save, answer it on the laptop.<br><br>If it has no window or is stuck, <b>Force close</b> stops it &mdash; anything not saved is lost.','Force close'))return;
   sxCloseT=0;await sxForce();return;}
- if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. If it asks whether to save the show, answer it in ShowXpress.','Close ShowXpress'))return;
+ if(!await ask('Close ShowXpress?','ShowXpress is asked to close the normal way. Its &ldquo;Do you really want to quit?&rdquo; is answered Yes for you; if it asks whether to save, that one is yours to answer in ShowXpress.','Close ShowXpress'))return;
  let r;try{r=await api('/api/sx/close',{});}catch(e){r={ok:false,error:'Lost connection.'}}if(!r.ok){showResult(r,'sx');return;}sxCloseT=r.none?0:Date.now();}
 $('sxgo').onclick=sxLaunch;$('sxstop').onclick=sxClose;
 async function chkUpd(){const u=await getJ('/api/update');$('hver').textContent='Version '+(u.current||'?')+(u.ok?(u.newer?' · version '+u.latest+' is available':' · up to date'):'');
  if(u.ok&&u.newer){const b=$('upd');b.style.display='';b.className='mini primary';b.textContent='⬆ Update to '+u.latest;b.onclick=()=>doUpd(u);}}
-async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'The Helper closes and the Mac installer opens &mdash; follow it, and the Helper opens again when it&rsquo;s done.':'The Helper closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
+async function doUpd(u){if(!await ask('Update to version '+esc(u.latest)+'?','Downloads it from GitHub and installs it. '+(u.mac?'SX Studio closes and the Mac installer opens &mdash; follow it, and SX Studio opens again when it&rsquo;s done.':'SX Studio closes and opens again by itself in a few seconds.')+' Your show isn&rsquo;t touched.','Update'))return;
  busy(true,'Downloading the update…');let r;try{r=await api('/api/update/install',{});}catch(e){r={ok:false,error:'Lost connection.'}}
- if(r.ok&&r.restarting){UPD=1;busy(true,u.mac?'Opening the installer — follow it, the Helper opens again when it’s done…':'Installing the update — the Helper opens again by itself…');return;}busy(false);showResult(r,'update');}
+ if(r.ok&&r.restarting){UPD=1;busy(true,u.mac?'Opening the installer — follow it, SX Studio opens again when it’s done…':'Installing the update — SX Studio opens again by itself…');return;}busy(false);showResult(r,'update');}
 {const bi=new Image();bi.onload=()=>{const b=$('brand');b.innerHTML='';bi.alt='XSV Productions';b.appendChild(bi);};bi.src='/brand.png?t='+T;}
 
 // ---------------- LIVE AIM: the Helper drives the DMX interface itself (dmx_out.ps1) while ShowXpress is closed
@@ -1883,9 +2090,9 @@ function lvPush(snap){if(!LV)return;for(const h of LV.heads){const p=lvPos(h,LV.
  for(const [i,v] of h.look)lvByte(h.addr+i,(!lit&&(i===h.dimI||i===h.shutI))?0:v);}lvKick();}
 function lvKick(){if(!LV||LV.tm||LV.fl)return;const d=30-(Date.now()-LV.last);if(d>0)LV.tm=setTimeout(()=>{if(LV){LV.tm=0;lvFlush();}},d);else lvFlush();}
 async function lvFlush(){if(!LV||!LV.on||LV.gone||LV.fl)return;let l=((LV.z?'z ':'')+[...LV.pend.values()].join(' ')).trim();if(!l){if(!LV.ka)return;l='k';}
- const me=LV;LV.z=false;LV.ka=false;LV.pend.clear();LV.fl=true;LV.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,gone:true,error:'Lost connection to the Helper.'};}
+ const me=LV;LV.z=false;LV.ka=false;LV.pend.clear();LV.fl=true;LV.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,gone:true,error:'Lost connection to SX Studio.'};}
  if(LV!==me||!LV.on)return;LV.fl=false;if(!r.ok){lvGone(r.error);return;}if(LV.pend.size)lvKick();}
-function lvGone(msg){LV.gone=true;if(/^The DMX output stopped/.test(msg||''))msg='Unplugged, or the Helper lost it.';const g=$('lvgone');g.className='lvgone on';
+function lvGone(msg){LV.gone=true;if(/^The DMX output stopped/.test(msg||''))msg='Unplugged, or SX Studio lost it.';const g=$('lvgone');g.className='lvgone on';
  g.innerHTML='<b>&#9888; The DMX output stopped.</b><span>'+esc(msg||'')+' Your aims so far are kept.</span><div class="grow"></div><button id="lvre" class="mini primary">Reconnect</button>';$('lvre').onclick=lvReconnect;}
 async function lvStart(mode){busy(true,'Connecting to the DMX interface…');let r;try{r=await api('/api/live/start',{mode});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
  if(!r.ok&&r.nova&&await ask('NovaStar is using the DMX interface','The NovaStar LED-screen software (NovaLCT) has a USB scanner that grabs the DMX interface. Pause it while you aim? NovaLCT starts it again by itself &mdash; your LED screens are not touched.','Pause it and continue')){
@@ -2017,6 +2224,149 @@ window.addEventListener('pagehide',()=>{if((LV||CP)&&PH)navigator.sendBeacon('/a
 // on the computer), Google Drive, phone & iPad, ShowXpress, updates
 const TABDEF=[...document.querySelectorAll('.tabs button')].map(b=>({id:b.dataset.tab,name:b.textContent}));
 let SET=null,SETV='';
+// ---------------- Lab: SX Player, stages 1+2 (user 2026-11-23). The Helper plays the show's scenes itself (player.ps1).
+let LB=null,LBS=null,LBT=0,LBbo=false,LBreo=false,LBerr='',LBgen=0,LBlastErr='',LBfdT={},LBfdS={},LBtest=false;
+const lbX=v=>Math.pow(2,(v-0.5)*4),lbXs=v=>{const x=lbX(v);return (x>=1?'\u00d7'+x.toFixed(x<2?2:1):'\u00d7'+x.toFixed(2))+(Math.abs(v-0.5)<0.01?' (normal)':'');};
+function lbFaders(){const fd=$('lbfd');if(!lbRun()||!LB||!LB.ok){fd.style.display='none';return;}
+ const fs=(LB.faders||[]).filter(f=>String(f.type)==='1');fd.style.display='';
+ if(fd.dataset.n!==String(fs.length)){fd.dataset.n=String(fs.length);
+  fd.innerHTML='<h2 style="margin:0">Speed faders</h2><p class="sub" style="margin:4px 0 0" id="lbmidi"></p><div class="lbfds">'+(fs.length?fs.map(f=>'<label class="lbf"><b>'+esc(f.caption||('Fader '+(f.k+1)))+'</b><input type="range" min="0" max="127" value="64" data-k="'+f.k+'"><span id="lbfv'+f.k+'">\u00d71.00 (normal)</span></label>').join(''):'<span class="sub">The show has no speed faders.</span>')+'</div>';
+  fd.querySelectorAll('input[type=range]').forEach(el=>{el.oninput=()=>{const k=+el.dataset.k,v=el.value/127;LBfdT[k]=Date.now();$('lbfv'+k).textContent=lbXs(v);
+   if(!LBfdS[k]){LBfdS[k]=setTimeout(()=>{LBfdS[k]=0;lbCmd({cmd:'fader',k:k,v:el.value/127},true);},60);}};});}}
+function lbFdDraw(st){if(!st)return;const m=$('lbmidi');
+ if(m)m.innerHTML=st.midi?'<span style="color:var(--green)">&#9679;</span> <b>'+esc(st.midi)+'</b> connected &mdash; pads, pad lights and faders work.':(LBtest?'Test copy: no MIDI (the APC is left alone).':'<span style="color:var(--amber)">&#9679;</span> No APC mini found &mdash; plug it in, then stop and start the player.');
+ (st.fd||[]).forEach((v,k)=>{const el=document.querySelector('#lbfd input[data-k="'+k+'"]');if(!el||Date.now()-(LBfdT[k]||0)<1500)return;const n=Math.round(v*127);if(+el.value!==n){el.value=n;$('lbfv'+k).textContent=lbXs(v);}});}
+let LBbt={bpm:0,beat:0,at:0},LBraf=0,LBdot=-1;
+function lbBpmCard(){const c=$('lbbpm');if(!lbRun()||!LB||!LB.ok){c.style.display='none';cancelAnimationFrame(LBraf);LBraf=0;return;}c.style.display='';
+ if(!c.dataset.ok){c.dataset.ok='1';
+  c.innerHTML='<div class="row" style="gap:14px;flex-wrap:wrap;align-items:center"><div><div class="sub" style="margin:0;letter-spacing:1px;font-size:11.5px">TEMPO</div><div class="aubig"><span id="lbbpmv">&ndash;</span> <small style="font-size:13px;color:var(--dim)">BPM</small></div><div class="sub" id="lbsrc" style="margin:0"></div></div>'+
+   '<div class="aubeats" id="lbbeats"><i></i><i></i><i></i><i></i></div><div class="grow"></div>'+
+   '<button id="lbtap" class="primary" style="padding:12px 26px;font-size:15px" title="Tap along with the beat">Tap</button>'+
+   '<button class="mini" id="lbbm" title="1 BPM slower">&minus;</button><input id="lbbin" class="num" type="number" min="40" max="250" step="0.1" style="width:76px"><button class="mini" id="lbbp" title="1 BPM faster">+</button>'+
+   '<button id="lbsync" title="Press on the first beat of a bar: BPM chases start again from their first step">Beat 1 now</button></div><p class="sub" id="lbos2l" style="margin:8px 0 0"></p>';
+  $('lbtap').onpointerdown=e=>{e.preventDefault();LBbt={bpm:LBbt.bpm,beat:Math.round(lbBeatNow()),at:Date.now()};lbCmd({cmd:'tap'},true);};
+  const setB=v=>{v=Math.max(40,Math.min(250,Math.round(v*10)/10));$('lbbin').value=v;lbCmd({cmd:'bpm',v:v},true);};
+  $('lbbin').onchange=e=>{const v=parseFloat(e.target.value);if(v>=40&&v<=250)setB(v);};
+  $('lbbm').onclick=()=>setB((LBbt.bpm||120)-1);$('lbbp').onclick=()=>setB((LBbt.bpm||120)+1);
+  $('lbsync').onclick=()=>lbCmd({cmd:'sync'},true);}
+ if(!LBraf){const f=()=>{LBraf=requestAnimationFrame(f);const n=((Math.floor(lbBeatNow())%4)+4)%4;if(n===LBdot)return;LBdot=n;
+   const bs=$('lbbeats');if(bs)bs.querySelectorAll('i').forEach((x,k)=>{x.className=k<=n&&LBbt.bpm?'on'+(k===0?' one':''):'';});};LBraf=requestAnimationFrame(f);}}
+function lbBeatNow(){return LBbt.bpm?LBbt.beat+(Date.now()-LBbt.at)*LBbt.bpm/60000:0;}
+function lbBpmDraw(st){if(!st||st.bpm==null||!$('lbbpmv'))return;
+ const nb=st.beat,now=lbBeatNow(),keep=LBbt.bpm===st.bpm&&Math.abs(now-nb)<0.6;LBbt={bpm:st.bpm,beat:keep?now:nb,at:Date.now()};
+ $('lbbpmv').textContent=(Math.round(st.bpm*10)/10).toString();
+ $('lbsrc').innerHTML=st.src==='VirtualDJ'?'from <b>VirtualDJ</b>':st.src==='tap'?'tapped':'set by hand';
+ const bi=$('lbbin');if(bi&&document.activeElement!==bi){const v=String(Math.round(st.bpm*10)/10);if(bi.value!==v)bi.value=v;}
+ const o=$('lbos2l');if(o)o.innerHTML=st.os2l?'<span style="color:var(--green)">&#9679;</span> <b>VirtualDJ</b> is connected ('+esc(st.os2l)+') &mdash; the beat follows the music.':
+  st.os2lPort?(LBtest?'Test copy: VirtualDJ link on test port '+st.os2lPort+' (not announced).':'<span style="color:var(--dim)">&#9675;</span> Waiting for VirtualDJ (OS2L, port '+st.os2lPort+') &mdash; with OS2L on in VirtualDJ it finds SX Studio by itself, on this computer or another one on the same Wi-Fi.'):
+  '<span style="color:var(--amber)">&#9679;</span> VirtualDJ link off'+(st.os2lErr?': '+esc(st.os2lErr)+'.':' (OS2L is turned off in ShowXpress&rsquo;s settings).');}
+function lbToast(h){const e=$('lbtoast');e.innerHTML=h;e.classList.add('on');clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove('on'),4000);}
+const lbRun=()=>!!(LBS&&LBS.running);
+function lbCol(c){return c==null||c<0?'':'rgb('+((c>>16)&255)+','+((c>>8)&255)+','+(c&255)+')';}
+function lbKind(b){return (b.key?'['+b.key.toUpperCase()+'] ':'')+lbKind0(b);}
+function lbKind0(b){return b.kind==='gpj'?'movement'+(b.bpm?' \u00b7 BPM':''):b.kind==='missing'?'scene file missing':(b.steps>1?b.steps+' steps':'scene')+(b.bpm?' \u00b7 BPM'+(b.flash?' flash':''):'');}
+// ---- arrange (user 2026-11-23): the user's own order of pages and buttons, only in this tab (settings.json playerLayout,
+// shared with the phone). Buttons stay on their own page - a MOVEMENTS page's "one replaces the other" depends on it.
+// Buttons the layout doesn't know yet (new in the show) go at the end of their page.
+let LBarr=false;
+function lbPages(){if(!LB||!LB.ok)return [];const lay=(SET&&SET.playerLayout)||{},po=(lay.pages||[]).map(String),od=lay.order||{};
+ const ix=(a,v,d)=>{const i=a.indexOf(v);return i<0?d:i;};
+ return LB.pages.filter(p=>p.buttons.length).slice().sort((a,b)=>ix(po,String(a.n),1e6+a.n)-ix(po,String(b.n),1e6+b.n))
+  .map(p=>{const o=(od[String(p.n)]||[]).map(String);return {p:p,bs:p.buttons.slice().sort((a,b)=>ix(o,a.sec,1e6)-ix(o,b.sec,1e6))};});}
+function lbArrange(on){LBarr=on;$('lbpages').classList.toggle('arr',on);$('lbarrbar').classList.toggle('on',on);$('lbarr').classList.toggle('son',on);
+ $('lbarr').innerHTML=on?'&#10003; Arranging':'&#8645; Arrange';}
+async function lbSaveLayout(lay){if(!lay){lay={pages:[],order:{}};document.querySelectorAll('#lbpages .lbpg').forEach(g=>{lay.pages.push(g.dataset.n);lay.order[g.dataset.n]=[...g.querySelectorAll('.lbb')].map(x=>x.dataset.sec);});}
+ SET=Object.assign(SET||{},{playerLayout:lay});$('lbpages').dataset.gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify(lay);
+ try{const r=await api('/api/settings/set',{playerLayout:lay});if(r.ok){SET=r.settings;$('lbpages').dataset.gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify(SET.playerLayout||{});}else lbToast('<span style="color:var(--amber)">The order wasn&rsquo;t saved.</span>');}
+ catch(e){lbToast('<span style="color:var(--amber)">The order wasn&rsquo;t saved &mdash; lost connection.</span>');}}
+$('lbarr').onclick=()=>lbArrange(!LBarr);$('lbarrdone').onclick=()=>lbArrange(false);
+$('lbarrreset').onclick=async()=>{if(!await ask('Back to ShowXpress&rsquo;s order?','The pages and buttons go back to the order they have in ShowXpress.','Reset'))return;await lbSaveLayout({pages:[],order:{}});renderLab();};
+$('lbpages').addEventListener('click',e=>{const b=e.target.closest('[data-pmv]');if(!b||!LBarr)return;e.stopPropagation();
+ const g=b.closest('.lbpg'),box=g.parentElement,sib=b.dataset.pmv==='-1'?g.previousElementSibling:g.nextElementSibling;if(!sib||!sib.classList.contains('lbpg'))return;
+ if(b.dataset.pmv==='-1')box.insertBefore(g,sib);else box.insertBefore(sib,g);lbSaveLayout();});
+$('lbpages').addEventListener('pointerdown',e=>{if(!LBarr||e.button>0)return;const el=e.target.closest('.lbb');if(!el)return;e.preventDefault();
+ const grid=el.parentElement,r=el.getBoundingClientRect(),gh=el.cloneNode(true),start=[...grid.children].indexOf(el),dx=e.clientX-r.left,dy=e.clientY-r.top;
+ gh.classList.add('lbghost');gh.style.width=r.width+'px';gh.style.height=r.height+'px';gh.style.margin='0';document.body.appendChild(gh);el.classList.add('drag');
+ const place=ev=>{gh.style.left=(ev.clientX-dx)+'px';gh.style.top=(ev.clientY-dy)+'px';};place(e);
+ const mv=ev=>{place(ev);
+  for(const c of grid.children){if(c===el)continue;const b=c.getBoundingClientRect();
+   if(ev.clientY>=b.top&&ev.clientY<=b.bottom&&ev.clientX>=b.left&&ev.clientX<=b.right){grid.insertBefore(el,ev.clientX>b.left+b.width/2?c.nextSibling:c);break;}}
+  if(ev.clientY<70)window.scrollBy(0,-14);else if(ev.clientY>innerHeight-70)window.scrollBy(0,14);};
+ const up=()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);
+  gh.remove();el.classList.remove('drag');if([...grid.children].indexOf(el)!==start)lbSaveLayout();};
+ window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up);});
+async function loadLab(){$('lbpages').innerHTML='<p class="sub" style="margin:0">Loading&hellip;</p>';LB=await getJ('/api/lab');try{LBS=await api('/api/lab/status');}catch(e){}renderLab();labPoll();}
+function renderLab(){const run=lbRun();
+ $('lbctl').innerHTML=run?'<span class="pill ok" style="margin-left:0">&#9679; Playing</span><button id="lboff" class="mini">Release all</button><button id="lbbo" class="mini">Blackout</button><div class="grow"></div>'+
+   (PH?'':'<label style="display:flex;gap:6px;align-items:center;color:var(--dim);font-size:13px"><input type="checkbox" id="lbreo"'+(LBreo?' checked':'')+'> Open ShowXpress again when I stop</label>')+'<button id="lbho" class="mini" title="Stops the player and opens ShowXpress straight away; it carries on with what was playing">&#8644; Hand over to ShowXpress</button><button id="lbstop" class="primary">&#9632; Stop the player</button>'
+  :'<button id="lbgo" class="primary"'+(LB&&LB.ok?'':' disabled')+'>&#9654; Start the player</button><span class="summary">or just tap a scene below &mdash; the player starts and plays it. ShowXpress closes while the player runs (only one program can use the DMX interface).</span><div class="grow"></div><button id="lbreload" class="mini">Reload the show</button>';
+ lbFaders();lbBpmCard();
+ if(run){$('lboff').onclick=()=>lbCmd({cmd:'alloff'});$('lbbo').onclick=()=>lbCmd({cmd:'bo',on:!LBbo});$('lbstop').onclick=lbStop;if($('lbho'))$('lbho').onclick=lbHandoff;if($('lbreo'))$('lbreo').onchange=e=>LBreo=e.target.checked;}
+ else{$('lbgo').onclick=()=>lbGo();$('lbreload').onclick=loadLab;}
+ const pg=$('lbpages');pg.classList.toggle('idle',!run);
+ if(!LB||!LB.ok){pg.innerHTML='<p class="sub" style="margin:0;color:var(--red)">'+esc((LB&&LB.error)||'Could not read the show.')+'</p>';drawLab();return;}
+ const gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify((SET&&SET.playerLayout)||{});
+ if(!pg.querySelector('.lbb')||pg.dataset.gen!==gen){pg.dataset.gen=gen;
+  pg.innerHTML=lbPages().map(({p,bs})=>'<div class="lbpg" data-n="'+p.n+'"><h3>'+esc(p.name||('Page '+p.n))+'<span class="pgbar"><button class="mini" data-pmv="-1" title="Move this page up">&#9650;</button><button class="mini" data-pmv="1" title="Move this page down">&#9660;</button></span></h3><div class="lbg">'+bs.map(b=>{const c=lbCol(b.color);
+   return '<div class="lbb'+(b.kind==='missing'?' na':'')+'" data-sec="'+esc(b.sec)+'" data-k="'+esc(lbKind(b))+'" title="'+esc(b.file)+'"'+(c?' style="--c:'+c+'"':'')+'><b>'+esc(b.title)+'</b><small>'+esc(lbKind(b))+'</small></div>';}).join('')+'</div></div>').join('')||'<p class="sub" style="margin:0">No live buttons in the show.</p>';}
+ drawLab();}
+function drawLab(){const st=LBS&&LBS.running&&LBS.status,on={};if(st&&st.on)st.on.forEach(x=>on[x.slot]=x);
+ document.querySelectorAll('#lbpages .lbb').forEach(el=>{const x=on[el.dataset.sec];el.classList.toggle('on',!!x);const s=el.querySelector('small'),tx=x?(x.mv?'\u25b6 moving':x.of>1?'\u25b6 step '+x.step+' of '+x.of:'\u25b6 on'):el.dataset.k;if(s.textContent!==tx)s.textContent=tx;});
+ lbFdDraw(st);lbBpmDraw(st);if(st)LBbo=!!st.bo;const bb=$('lbbo');if(bb){bb.classList.toggle('son',LBbo);bb.textContent=LBbo?'\u25cf Blackout is ON':'Blackout';}
+ const se=st&&st.err?'<span style="color:var(--red)">Couldn&rsquo;t play '+esc(st.err)+'</span>':'';if(se&&se!==LBlastErr)lbToast(se);LBlastErr=se;
+ const lo=st&&st.iface==='lost'?'<div style="color:var(--red);font-weight:600">&#9888; The DMX interface is unplugged &mdash; the lights aren&rsquo;t getting the show. Plug its USB cable back in: the player carries on by itself.</div>':'';
+ const wn=st&&st.warn&&st.warn.length?'<details style="margin-top:6px;color:var(--amber)"><summary>Show check: '+st.warn.length+' problem'+(st.warn.length>1?'s':'')+' in the show</summary>'+st.warn.map(w=>'<div>'+esc(w)+'</div>').join('')+'</details>':'';
+ const h=lo+(se||LBerr)+wn;if($('lbmsg').innerHTML!==h)$('lbmsg').innerHTML=h;}
+let LBev=null;
+function lbEvent(e){if(!e)return;if(LBev===null){LBev=e.n;return;}if(e.n===LBev)return;LBev=e.n;
+ const c=e.kind==='back'?'var(--green)':e.kind==='lost'||e.kind==='gone'?'var(--red)':'var(--amber)';lbToast('<span style="color:'+c+'">'+esc(e.text)+'</span>');
+ if(e.kind==='handoff'||e.kind==='gone'||e.kind==='restart')LBerr='<span style="color:'+c+'">'+esc(e.text)+'</span>';}
+async function labPoll(){clearTimeout(LBT);LBT=0;if(!$('v-lab').classList.contains('on'))return;
+ const g=LBgen,was=lbRun();let r=null;try{r=await api('/api/lab/status');}catch(e){}
+ if(g===LBgen&&r&&r.ok){LBS=r;const pe=LBev;lbEvent(r.event);if(was!==lbRun()){if(was&&LBev===pe)LBerr='<span style="color:var(--amber)">The player stopped &mdash; SX Studio lost it.</span>';renderLab();}else drawLab();}
+ if(!LBT)LBT=setTimeout(labPoll,lbRun()?400:2000);}
+async function lbCmd(b,quiet){let r;try{r=await api('/api/lab/cmd',b);}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}
+ if(quiet&&r.ok)return;
+ if(r.ok){}else if(r.gone){LBgen++;LBS={ok:true,running:false};LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);renderLab();return;}else{LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);}
+ drawLab();clearTimeout(LBT);LBT=setTimeout(labPoll,120);}
+$('lbpages').addEventListener('click',e=>{const el=e.target.closest('.lbb');if(!el||LBarr)return;LBerr='';
+ const b=LB.pages.flatMap(p=>p.buttons).find(x=>x.sec===el.dataset.sec);if(!b)return;
+ if(b.kind==='missing'){LBerr='<span style="color:var(--amber)">'+esc(b.title)+': its file is missing.</span>';lbToast(LBerr);drawLab();return;}
+ if(!lbRun()){lbGo(b.sec);return;}
+ const on=el.classList.contains('on'),pg=LB.pages.find(p=>p.buttons.includes(b));
+ if(!on&&pg&&pg.swap)pg.buttons.forEach(x=>{const o=document.querySelector('.lbb[data-sec="'+x.sec+'"]');if(o)o.classList.remove('on');});
+ el.classList.toggle('on',!on);lbCmd({cmd:'press',sec:b.sec});});
+document.addEventListener('keydown',e=>{if(!$('v-lab').classList.contains('on')||!lbRun()||e.ctrlKey||e.altKey||e.metaKey||e.repeat)return;
+ if(/^(INPUT|TEXTAREA|SELECT)$/.test((e.target&&e.target.tagName)||'')&&e.target.type!=='range')return;if($('modal').style.display==='flex'||$('busy').style.display==='flex')return;
+ const k=(e.key||'').toLowerCase();if(k.length!==1||!/[a-z0-9]/.test(k))return;
+ if(!LB||!LB.pages.some(p=>p.buttons.some(x=>(x.key||'').toLowerCase()===k)))return;e.preventDefault();lbCmd({cmd:'key',key:k});});
+async function lbGo(first){if(lbRun())return;
+ if(LV||CP){lbToast('<span style="color:var(--amber)">Aim live or the colour preview is using the DMX interface &mdash; finish that first.</span>');return;}
+ let carry=[];if(sxOpen){try{carry=(await api('/api/lab/snap',{})).titles||[];}catch(e){}}
+ const c=await sxCloseLive('Close ShowXpress to start the player?','Only one program can use the DMX interface, so ShowXpress closes while the SX Player runs. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.'+(carry.length?'<br><br>The player carries on with what ShowXpress is playing now: <b>'+carry.map(esc).join(', ')+'</b>.':'')+'<br><br>It can open again when you stop, or straight away with <b>Hand over to ShowXpress</b>.','Close and start','Start the player','lab');
+ if(!c.go)return;
+ busy(true,'Connecting to the DMX interface…');let r;try{r=await api('/api/lab/start',{});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+ if(!r.ok&&r.nova&&await ask('NovaStar is using the DMX interface','The NovaStar LED-screen software (NovaLCT) has a USB scanner that grabs the DMX interface. Pause it while the player runs? NovaLCT starts it again by itself &mdash; your LED screens are not touched.','Pause it and continue')){
+  busy(true,'Pausing NovaStar and connecting…');try{r=await api('/api/lab/start',{stopNova:true});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);}
+ if(!r.ok){if(c.reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'lab');return;}
+ LBgen++;LBreo=c.reo;LBtest=!!r.test;LBbo=false;LBS={ok:true,running:true,status:null};LBerr=r.test?'Test copy: no real interface &mdash; the output goes to _dmx_frame.txt.':'Playing on <b>'+esc(r.iface||'the DMX interface')+'</b>. Tap a button to start or stop it.';
+ if(r.list&&r.list.ok){LB=r.list;$('lbpages').dataset.gen='';}else if(!$('lb'+'pages').querySelector('.lbb'))await loadLab();renderLab();
+ if(r.carried&&r.carried.length)LBerr+=' Carried on from ShowXpress: <b>'+r.carried.map(esc).join(', ')+'</b>.';
+ const fb=typeof first==='string'&&first&&LB&&LB.ok&&LB.pages.flatMap(p=>p.buttons).find(x=>x.sec===first);
+ if(fb&&!(r.carried||[]).includes(fb.title)){const el=document.querySelector('.lbb[data-sec="'+first+'"]');if(el)el.classList.add('on');await lbCmd({cmd:'press',sec:first});}
+ labPoll();}
+async function lbStop(){const reo=!PH&&$('lbreo')&&$('lbreo').checked,st=LBS&&LBS.status;
+ if(st&&((st.on&&st.on.length)||(typeof AUS!=='undefined'&&AUS&&AUS.running&&AUS.target==='player'))&&!await ask('Stop the player?','The lights go out.'+(reo?' ShowXpress opens again.':'')+'<br><br>To keep the show going, use <b>Hand over to ShowXpress</b> instead.','Stop the player'))return;
+ LBgen++;busy(true,'Stopping the player…');try{await api('/api/lab/stop',{});}catch(e){}busy(false);
+ LBS={ok:true,running:false};LBbo=false;LBerr='Stopped. The lights are out.';renderLab();labPoll();if(reo)await sxLaunch();}
+async function lbHandoff(){
+ if(!await ask('Hand over to ShowXpress?','The player stops and ShowXpress opens straight away. It carries on with what is playing now'+(typeof AUS!=='undefined'&&AUS&&AUS.running?' (the Auto Show moves over to it)':'')+'.<br><br>The lights are dark for a few seconds while ShowXpress starts.','Hand over'))return;
+ LBgen++;LBev=null;busy(true,'Handing over to ShowXpress…');let r;try{r=await api('/api/lab/handoff',{});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+ LBS={ok:true,running:false};LBbo=false;
+ LBerr=r.ok?(r.test?'(test copy) ':'')+'Handed over: ShowXpress is starting'+(r.auto?' and the Auto Show carries on in it.':r.titles&&r.titles.length?' &mdash; it will play <b>'+r.titles.map(esc).join(', ')+'</b> once it&rsquo;s ready.':'.'):'<span style="color:var(--red)">The player stopped, but ShowXpress didn&rsquo;t open: '+esc(r.error||'')+' Press Launch ShowXpress at the top.</span>';
+ renderLab();labPoll();}
+
+
 function themeMode(){try{return localStorage.getItem('sxh_theme')||'dark';}catch(e){return 'dark';}}
 function applyTheme(){const m=themeMode(),l=m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches);
  document.documentElement.classList.toggle('light',l);const mt=document.querySelector('meta[name=theme-color]');if(mt)mt.content=l?'#eef0f4':'#0e1014';
@@ -2024,19 +2374,25 @@ function applyTheme(){const m=themeMode(),l=m==='light'||(m==='auto'&&matchMedia
 try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);}catch(e){}
 document.querySelectorAll('#stheme button').forEach(b=>b.onclick=()=>{try{localStorage.setItem('sxh_theme',b.dataset.v);}catch(e){}applyTheme();});
 function tabOrder(){const o=((SET&&SET.tabOrder)||[]).filter(id=>TABDEF.some(t=>t.id===id));TABDEF.forEach(t=>{if(!o.includes(t.id))o.push(t.id);});return o;}
+const tabDef=id=>(TABDEF.find(t=>t.id===id)||{name:id}).name,tabName=id=>((SET&&SET.tabNames&&SET.tabNames[id])||tabDef(id));
 function applyTabs(){const nav=document.querySelector('.tabs'),hid=new Set((SET&&SET.tabHidden)||[]);
- tabOrder().forEach(id=>{const b=nav.querySelector('[data-tab="'+id+'"]');if(b){nav.appendChild(b);b.style.display=hid.has(id)?'none':'';}
-  document.querySelectorAll('.ht[data-go="'+id+'"]').forEach(x=>x.style.display=hid.has(id)?'none':'');});}
+ tabOrder().forEach(id=>{const b=nav.querySelector('[data-tab="'+id+'"]'),nm=tabName(id);if(b){nav.appendChild(b);b.style.display=hid.has(id)?'none':'';if(b.textContent!==nm)b.textContent=nm;}
+  document.querySelectorAll('.ht[data-go="'+id+'"]').forEach(x=>{x.style.display=hid.has(id)?'none':'';const t=x.querySelector('b');if(t&&t.textContent!==nm)t.textContent=nm;});});
+ // a Home group whose tiles are all hidden goes too (with its heading)
+ document.querySelectorAll('.htiles.hgrp').forEach(g=>{const v=[...g.children].some(x=>x.style.display!=='none');g.style.display=v?'':'none';const h=g.previousElementSibling;if(h&&h.classList.contains('hgrp'))h.style.display=v?'':'none';});}
 function renderTabs(){const o=tabOrder(),hid=new Set((SET&&SET.tabHidden)||[]),n=o.length;
- $('stabs').innerHTML=o.map((id,i)=>'<div class="tabrow'+(hid.has(id)?' off':'')+'" data-id="'+id+'"><span class="hdl" title="Drag to move">&#9776;</span>'+
-  '<label class="link grow" style="color:var(--txt)"><input type="checkbox" data-show="'+id+'"'+(hid.has(id)?'':' checked')+'> '+esc(TABDEF.find(t=>t.id===id).name)+'</label>'+
-  '<button class="mini" data-mv="-1" title="Move up"'+(i?'':' disabled')+'>&#9650;</button><button class="mini" data-mv="1" title="Move down"'+(i<n-1?'':' disabled')+'>&#9660;</button></div>').join('');}
-async function saveTabs(order,hidden){SET=Object.assign(SET||{},{tabOrder:order,tabHidden:hidden});applyTabs();renderTabs();
- try{const r=await api('/api/settings/set',{tabOrder:order,tabHidden:hidden});if(r.ok){SET=r.settings;applyTabs();}}catch(e){}}
+ $('stabs').innerHTML=o.map((id,i)=>{const d=tabDef(id),nm=tabName(id);return '<div class="tabrow'+(hid.has(id)?' off':'')+'" data-id="'+id+'"><span class="hdl" title="Drag to move">&#9776;</span>'+
+  '<input type="checkbox" data-show="'+id+'"'+(hid.has(id)?'':' checked')+' title="Show this tab">'+
+  '<input class="tname" data-name="'+id+'" value="'+esc(nm)+'" maxlength="24" placeholder="'+esc(d)+'" title="Type a new name for this tab">'+(nm!==d?'<span class="tdef">'+esc(d)+'</span>':'')+
+  '<button class="mini" data-mv="-1" title="Move up"'+(i?'':' disabled')+'>&#9650;</button><button class="mini" data-mv="1" title="Move down"'+(i<n-1?'':' disabled')+'>&#9660;</button></div>';}).join('');}
+async function saveTabs(order,hidden,names){const o={tabOrder:order,tabHidden:hidden};if(names)o.tabNames=names;SET=Object.assign(SET||{},o);applyTabs();renderTabs();
+ try{const r=await api('/api/settings/set',o);if(r.ok){SET=r.settings;applyTabs();if(names)renderTabs();}}catch(e){}}
 const rowsNow=()=>[...$('stabs').children].map(r=>r.dataset.id),hidNow=()=>[...$('stabs').querySelectorAll('[data-show]')].filter(c=>!c.checked).map(c=>c.dataset.show);
+const namesNow=()=>{const o={};$('stabs').querySelectorAll('.tname').forEach(x=>{const v=x.value.replace(/[<>]/g,'').trim().slice(0,24);if(v&&v!==tabDef(x.dataset.name))o[x.dataset.name]=v;});return o;};
 $('stabs').addEventListener('click',e=>{const b=e.target.closest('[data-mv]');if(!b)return;const o=rowsNow(),i=o.indexOf(b.closest('.tabrow').dataset.id),j=i+(+b.dataset.mv);
  if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];saveTabs(o,hidNow());});
-$('stabs').addEventListener('change',e=>{if(e.target.dataset.show)saveTabs(rowsNow(),hidNow());});
+$('stabs').addEventListener('change',e=>{if(e.target.dataset.show)saveTabs(rowsNow(),hidNow());else if(e.target.dataset.name)saveTabs(rowsNow(),hidNow(),namesNow());});
+$('stabs').addEventListener('keydown',e=>{if(e.target.dataset.name&&e.key==='Enter'){e.preventDefault();e.target.blur();}else if(e.target.dataset.name&&e.key==='Escape'){e.target.value=tabName(e.target.dataset.name);e.target.blur();}});
 $('stabs').addEventListener('pointerdown',e=>{const h=e.target.closest('.hdl');if(!h)return;e.preventDefault();const row=h.closest('.tabrow'),box=$('stabs'),start=rowsNow().join();
  row.classList.add('drag');
  const mv=ev=>{let before=null;for(const r of box.children){if(r===row)continue;const bb=r.getBoundingClientRect();if(ev.clientY<bb.top+bb.height/2){before=r;break;}}
@@ -2044,8 +2400,8 @@ $('stabs').addEventListener('pointerdown',e=>{const h=e.target.closest('.hdl');i
  const up=()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);row.classList.remove('drag');
   if(rowsNow().join()!==start)saveTabs(rowsNow(),hidNow());};
  window.addEventListener('pointermove',mv);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up);});
-$('stabreset').onclick=()=>saveTabs(TABDEF.map(t=>t.id),[]);
-async function loadSet(){const r=await getJ('/api/settings');if(!r.ok)return;SET=r.settings;SETV=r.ver||'';applyTabs();renderSet();}
+$('stabreset').onclick=async()=>{if(SET&&SET.tabNames&&Object.keys(SET.tabNames).length&&!await ask('Reset the tabs?','Every tab gets its first place and name back, and hidden tabs show again.','Reset'))return;saveTabs(TABDEF.map(t=>t.id),[],{});};
+async function loadSet(){const r=await getJ('/api/settings');if(!r.ok)return;SET=r.settings;SETV=r.ver||'';applyTabs();renderSet();if(LB&&LB.ok)renderLab();}
 function renderSet(){if(!SET)return;applyTheme();renderTabs();$('sreopen').checked=SET.reopen!==false;$('sautoupd').checked=SET.autoUpd!==false;
  if(G&&G.show)$('sshow').textContent=G.show;if(!$('supd').dataset.done)$('supd').innerHTML='Version <b>'+esc(SETV)+'</b>';}
 async function setOne(o,what){let r;try{r=await api('/api/settings/set',o);}catch(e){r={ok:false,error:'Lost connection.'};}
@@ -2120,19 +2476,23 @@ try {
     while (-not $task.AsyncWaitHandle.WaitOne(1000)) {
       try { Step-Queue } catch {}
       try { Step-Pending } catch {}
-      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto)) { $l.Stop(); break }
+      Step-PlayerKeep
+      try { Step-PlayerWatch } catch {}
+      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto) -and -not (Test-Player)) { $l.Stop(); break }
     }
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
+    Step-PlayerKeep   # busy windows (the Lab polls 2-3x a second) never reach the idle loop above
+    try { Step-PlayerWatch } catch {}
     try {
       $path = $req.Url.AbsolutePath
       # a phone (through the Wi-Fi relay) needs the phone key; everything else needs this window's key
       $fromPhone = [bool]"$($req.Headers['X-SXH-Phone'])"
       if ($fromPhone) {
-        if (-not $script:ph.on) { Send-Text $ctx 403 'text/plain' 'Phone access is turned off in SX Helper.'; continue }
+        if (-not $script:ph.on) { Send-Text $ctx 403 'text/plain' 'Phone access is turned off in SX Studio.'; continue }
         if ($phoneNever -contains $path) { Send-Text $ctx 403 'text/plain' 'Only on the computer.'; continue }
         if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and ($req.QueryString['t'] -ceq $script:ph.key -or (Get-PhoneCookieKey $req)))) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
-      } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open SX Helper from its icon.'; continue }
+      } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open SX Studio from its icon.'; continue }
       $last = Get-Date
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
@@ -2168,7 +2528,7 @@ try {
           $now = Get-Date
           if (-not $fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Pairing is for phones.' }; break }
           if ($now -lt $script:pinLock) { Send-Json $ctx @{ ok = $false; error = 'Too many wrong codes. On the laptop, press "Pair a phone" again for a new code.' }; break }
-          if (-not $script:pin -or $now -gt $script:pinUntil) { Send-Json $ctx @{ ok = $false; error = 'No code is showing on the laptop. In SX Helper on the laptop, press the cogwheel (top right) and press "Pair a phone".' }; break }
+          if (-not $script:pin -or $now -gt $script:pinUntil) { Send-Json $ctx @{ ok = $false; error = 'No code is showing on the laptop. In SX Studio on the laptop, press the cogwheel (top right) and press "Pair a phone".' }; break }
           if ("$($body.pin)".Trim() -ceq $script:pin) { $script:pinFails = 0; Save-Phone; Set-PhoneCookie $ctx; Send-Json $ctx @{ ok = $true; key = $script:ph.key }; break }
           $script:pinFails++
           if ($script:pinFails -ge 5) { $script:pin = ''; $script:pinLock = $now.AddSeconds(60) }
@@ -2176,11 +2536,17 @@ try {
           Send-Json $ctx @{ ok = $false; error = 'That code is not right. Check the 6 digits on the laptop.' }
         }
         '/brand.png'   {
-          $bp = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ShowXpress Helper/brand.png'), (Join-Path $HOME 'AwaazTools/brand.png'), (Join-Path $here 'brand.png')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          $bp = @((Join-Path ([Environment]::GetFolderPath('ApplicationData')) 'ShowXpress Helper/brand.png'), (Join-Path $HOME 'AwaazTools/brand.png'), (Join-Path $here 'brand.png'), (Join-Path $here '../assets/brand.png')) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
           if ($bp) { Send-Png $ctx $bp } else { Send-Text $ctx 404 'text/plain' 'no brand image' }
         }
+        { $_ -eq '/fonts/saira.woff2' -or $_ -eq '/fonts/orbitron.woff2' } {
+          # SX Studio's fonts (SIL Open Font License, see fonts/OFL-*.txt), bundled so it looks the same offline
+          $fp = @((Join-Path $here "fonts/$(Split-Path -Leaf $path)"), (Join-Path $here "../assets/fonts/$(Split-Path -Leaf $path)")) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+          if ($fp) { $fb = [IO.File]::ReadAllBytes($fp); $ctx.Response.ContentType = 'font/woff2'; $ctx.Response.Headers.Add('Cache-Control', 'max-age=86400'); $ctx.Response.ContentLength64 = $fb.Length; $ctx.Response.OutputStream.Write($fb, 0, $fb.Length); $ctx.Response.Close() }
+          else { Send-Text $ctx 404 'text/plain' 'no font' }
+        }
         '/icon.png'    { $ip = Join-Path $here 'aim_movers_1024.png'; if (-not (Test-Path $ip)) { $ip = Join-Path $here '../assets/aim_movers_1024.png' } if (Test-Path $ip) { $ib = [IO.File]::ReadAllBytes($ip); $ctx.Response.ContentType = 'image/png'; $ctx.Response.ContentLength64 = $ib.Length; $ctx.Response.OutputStream.Write($ib, 0, $ib.Length); $ctx.Response.Close() } else { Send-Text $ctx 404 'text/plain' 'no icon' } }
-        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen); q = (Get-QueueInfo); live = (Test-Live); auto = (Get-AutoStatus); pend = [bool]$script:pend; rem = $script:remLast } }
+        '/api/sx'      { Send-Json $ctx @{ open = (Test-SxOpen); q = (Get-QueueInfo); live = (Test-Live); play = (Test-Player); auto = (Get-AutoStatus); pend = [bool]$script:pend; rem = $script:remLast } }
         '/api/remote'  { Send-Json $ctx (Invoke-Remote 'State') }
         '/api/remote/press' {
           $ts = @($body.titles | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
@@ -2197,7 +2563,7 @@ try {
           $r = Invoke-Engine '-Action AutoGet' $remoteEngine
           $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
           if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }) }; break }
-          $st = Get-AutoStatus; Send-Text $ctx 200 'application/json; charset=utf-8' ($j.Substring(0, $j.Length - 1) + ',"status":' + $(if ($st) { $st | ConvertTo-Json -Depth 4 -Compress } else { 'null' }) + '}')
+          $st = Get-AutoStatus; Send-Text $ctx 200 'application/json; charset=utf-8' ($j.Substring(0, $j.Length - 1) + ',"player":' + $(if (Test-Player) { 'true' } else { 'false' }) + ',"status":' + $(if ($st) { $st | ConvertTo-Json -Depth 4 -Compress } else { 'null' }) + '}')
         }
         '/api/auto/status' { Send-Json $ctx @{ ok = $true; status = (Get-AutoStatus) } }
         '/api/auto/save' {
@@ -2219,6 +2585,7 @@ try {
         }
         '/api/live/start' {
           if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; sxopen = $true; error = 'ShowXpress is open - it has to be closed while you aim live (only one program can use the DMX interface).'; out = '' }; break }
+          if (Test-Player) { Send-Json $ctx @{ ok = $false; error = 'The SX Player (Lab) is using the DMX interface. Stop it in the Lab first.'; out = '' }; break }
           $mo = if ("$($body.mode)" -eq 'room') { ' -Mode Room' } else { '' }
           $r = Invoke-Engine "-Action LiveInfo$mo"
           $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
@@ -2250,6 +2617,86 @@ try {
           try { $script:liveP.StandardInput.WriteLine($ln); Send-Json $ctx @{ ok = $true } } catch { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The DMX output stopped.' } }
         }
         '/api/live/stop' { Stop-Live; $script:liveHold = [datetime]::MinValue; Send-Json $ctx @{ ok = $true } }
+        '/api/lab'        { Send-EngineJson $ctx (Invoke-Engine '-List' $playerEngine) }
+        '/api/lab/status' { Send-Json $ctx @{ ok = $true; running = (Test-Player); status = (Get-PlayerStatus); event = $script:playEvent } }
+        '/api/lab/snap' {
+          # before ShowXpress closes for the player: remember what it's playing, so the player carries on with it
+          $script:carry = $null
+          if ((Test-SxOpen) -and -not (Test-Auto)) {
+            $x = Invoke-Remote 'State'
+            if ($x.connected) { $script:carry = @{ at = Get-Date; titles = @(@($x.pressed) | Where-Object { "$($_.page)" -notmatch '^\s*setup\s*$' -and "$($_.title)" -match $titleRx } | ForEach-Object { "$($_.title)" } | Select-Object -Unique) } }
+          }
+          Send-Json $ctx @{ ok = $true; titles = $(if ($script:carry) { @($script:carry.titles) } else { @() }) }
+        }
+        '/api/lab/handoff' {
+          if (-not (Test-Player)) { $r = Start-Sx; Send-Json $ctx @{ ok = [bool]$r.ok; error = "$($r.error)"; titles = @(); test = [bool]$TestRoot }; break }
+          Send-Json $ctx (Invoke-Handoff $true 'Handed over to ShowXpress.')
+        }
+        '/api/lab/start' {
+          if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; sxopen = $true; error = 'ShowXpress is open - it has to be closed while the SX Player plays (only one program can use the DMX interface).'; out = '' }; break }
+          if (Test-Live) { Send-Json $ctx @{ ok = $false; error = 'Aim live or the colour preview is using the DMX interface. Finish that first.'; out = '' }; break }
+          $r = Invoke-Engine '-List' $playerEngine
+          $j = $null; if ($r.ok) { try { $j = (($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1) | ConvertFrom-Json } catch {} }
+          if (-not $j -or -not $j.ok) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { $r.error } else { 'Could not read the show.' }); out = '' }; break }
+          $script:labMap = @{}
+          foreach ($pg in @($j.pages)) { foreach ($b in @($pg.buttons)) { $script:labMap["$($b.sec)"] = $b } }
+          if ($body.stopNova -and -not $onMac) { Get-Process MarsServerProvider -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 800 }
+          $s = Start-Player "$($j.show)"
+          if (-not $s.ok -and -not $onMac -and "$($s.error)" -like '*was not found*' -and (Get-Process MarsServerProvider -ErrorAction SilentlyContinue)) {
+            $s.nova = $true; $s.error = 'The NovaStar LED-screen software (NovaLCT) is holding the DMX interface. Its USB scanner can be paused while the player runs - NovaLCT starts it again by itself.'
+          }
+          $s.test = [bool]$TestRoot
+          # an Auto Show waiting for ShowXpress carries on on the player (same look)
+          if ($s.ok -and (Test-Auto) -and -not $script:autoPl) { $as = Get-AutoStatus; [void](Start-Auto "$(if ($as) { $as.lookId })"); $s.auto = $true }
+          # carry on with what ShowXpress was playing (snapshot from /api/lab/snap, taken just before it closed)
+          $s.carried = @()
+          if ($s.ok -and -not $s.auto -and $script:carry -and ((Get-Date) - $script:carry.at).TotalSeconds -lt 300) {
+            foreach ($tt in @($script:carry.titles)) { if (Send-Player "ton $tt") { $s.carried += $tt } }
+          }
+          if ($s.ok) { $s.list = $j }   # the window redraws its buttons from this: edits saved in ShowXpress show up on every start
+          if ($s.ok) { $script:carry = $null; if ($script:pend -and $script:pend.label -eq 'what the SX Player was playing') { $script:pend = $null } }
+          Send-Json $ctx $s
+        }
+        '/api/lab/cmd' {
+          if (-not (Test-Player)) { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The SX Player stopped.' }; break }
+          $c = "$($body.cmd)"; $line = ''; $err = ''
+          if ($c -eq 'press') {
+            $b = $script:labMap["$($body.sec)"]
+            if (-not $b -or "$($b.sec)" -notmatch '^page\d+_button\d+$') { $err = 'That button is not in the show any more - press Reload.' }
+            else { $line = "press $($b.sec)" }
+          }
+          elseif ($c -eq 'fader') {
+            $k = 0; $v = 0.0
+            if (-not [int]::TryParse("$($body.k)", [ref]$k) -or $k -lt 0 -or $k -gt 15 -or -not [double]::TryParse("$($body.v)", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v)) { $err = 'Bad fader value.' }
+            else { $line = "fader $k " + ([math]::Max(0, [math]::Min(1, $v))).ToString('0.####', [Globalization.CultureInfo]::InvariantCulture) }
+          }
+          elseif ($c -eq 'tap' -or $c -eq 'sync') { $line = $c }
+          elseif ($c -eq 'bpm') {
+            $v = 0.0
+            if ([double]::TryParse("$($body.v)", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$v) -and $v -ge 40 -and $v -le 250) { $line = 'bpm ' + $v.ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) }
+            else { $err = 'The BPM has to be 40 to 250.' }
+          }
+          elseif ($c -eq 'key') { $kk = "$($body.key)".ToLower(); if ($kk -match '^[a-z0-9]$') { $line = "key $kk" } else { $err = 'Bad key.' } }
+          elseif ($c -eq 'on' -or $c -eq 'off') {
+            $b = $script:labMap["$($body.sec)"]
+            if (-not $b -or "$($b.sec)" -notmatch '^page\d+_button\d+$') { $err = 'That button is not in the show any more - press Reload.' }
+            elseif ($c -eq 'off') { $line = "off $($b.sec)" }
+            elseif ($b.kind -notin 'scex', 'gpj' -or -not (Test-Path -LiteralPath "$($b.path)")) { $err = "The file for $($b.title) is missing." }
+            else { $line = "on $($b.sec) $($b.path)" }
+          }
+          elseif ($c -eq 'alloff') { $line = 'alloff' }
+          elseif ($c -eq 'bo') { $line = "bo $(if ($body.on) { 1 } else { 0 })" }
+          else { $err = 'Unknown player command.' }
+          if ($err) { Send-Json $ctx @{ ok = $false; error = $err }; break }
+          if (-not (Send-Player $line)) { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The SX Player stopped.' }; break }
+          Send-Json $ctx @{ ok = $true }
+        }
+        '/api/lab/stop' {
+          Stop-Player
+          # an Auto Show on the player goes back to ShowXpress (it waits there until ShowXpress is open)
+          if ((Test-Auto) -and $script:autoPl) { $as = Get-AutoStatus; [void](Start-Auto "$(if ($as) { $as.lookId })") }
+          Send-Json $ctx @{ ok = $true }
+        }
         '/api/live/save' {
           # stop the output, write the aims into the aim scene, Apply (size from the Aim tab), run anything queued, reopen ShowXpress
           Stop-Live
@@ -2274,6 +2721,8 @@ try {
           $st = Get-Settings
           if ($null -ne $body.tabOrder) { $st.tabOrder = @($body.tabOrder | ForEach-Object { "$_" }) }
           if ($null -ne $body.tabHidden) { $st.tabHidden = @($body.tabHidden | ForEach-Object { "$_" }) }
+          if ($null -ne $body.tabNames) { $st.tabNames = Get-TabNames $body.tabNames }
+          if ($null -ne $body.playerLayout) { $st.playerLayout = Get-PlayerLayout $body.playerLayout }
           if (-not $fromPhone) {
             if ($null -ne $body.reopen) { $st.reopen = [bool]$body.reopen; $script:qReopen = $st.reopen }
             if ($null -ne $body.autoUpd) { $st.autoUpd = [bool]$body.autoUpd }
@@ -2288,7 +2737,7 @@ try {
         }
         '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }
         '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }
-        '/api/sx/launch' { Send-Json $ctx (Start-Sx) }
+        '/api/sx/launch' { Stop-Player; Send-Json $ctx (Start-Sx) }
         '/api/sx/close' {
           if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
           $ps = @(Get-SxProcess)
@@ -2303,7 +2752,13 @@ try {
             $apps = @($ps | ForEach-Object { if ("$($_.Path)" -match '^(.+?\.app)/') { $Matches[1] } } | Select-Object -Unique)
             if ($ps.Count -and -not $apps.Count) { $a = Find-SxMacApp; if ($a) { $apps = @($a.FullName) } }
             foreach ($ap in $apps) { & osascript -e "tell application `"$ap`" to quit" 2>$null }
-          } else { foreach ($p in $ps) { [void]$p.CloseMainWindow() } }
+          } else {
+            foreach ($p in $ps) { [void]$p.CloseMainWindow() }
+            # "Do you really want to quit?" gets Yes by itself; "Do you want to save ...?" stays with the user (sx_quit.ps1)
+            if (-not $TestRoot -and (Test-Path -LiteralPath $quitEngine)) {
+              try { Start-Process -FilePath $psExe -WindowStyle Hidden -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$quitEngine`"", '-Pids', (@($ps | ForEach-Object { $_.Id }) -join ','), '-Seconds', '120' } catch {}
+            }
+          }
           Send-Json $ctx @{ ok = $true; out = '  ShowXpress was asked to close'; error = '' }
         }
         '/api/update'  { if ($req.QueryString['fresh']) { $script:updInfo = $null }; Send-Json $ctx (Get-Update) }
@@ -2318,7 +2773,7 @@ try {
             $tmp = [IO.Path]::GetTempPath()
             $flag = Join-Path $tmp 'sxh_updating'; $us = Join-Path $tmp 'sxh_update.sh'
             [IO.File]::WriteAllText($flag, "$($u.latest)")
-            [IO.File]::WriteAllText($us, "sleep 2`nopen -W '$dl'`nsleep 1`nrm -f '$flag'`nopen '/Applications/SX Helper.app'`n")
+            [IO.File]::WriteAllText($us, "sleep 2`nopen -W '$dl'`nsleep 1`nrm -f '$flag'`nopen '/Applications/SX Studio.app'`n")
             & /bin/bash -c "nohup /bin/bash '$us' >/dev/null 2>&1 &"
             Send-Json $ctx @{ ok = $true; restarting = $true; out = ''; error = '' }
             $l.Stop(); break
@@ -2374,6 +2829,7 @@ try {
 } finally {
   Stop-PhoneRelay
   Stop-Live
+  Stop-Player
   Stop-Auto
   Remove-Item -LiteralPath $autoStat -ErrorAction SilentlyContinue
   try { $l.Close() } catch {}

@@ -1,5 +1,5 @@
-﻿; SX Helper (was AIM MOVERS) - Windows installer (Inno Setup 6). Per-user install, no admin needed.
-;   build:  set AIM_VERSION=1.1.0  &  ISCC windows\aim_movers.iss   -> build\windows\SX-Helper-windows-setup-<version>.exe
+﻿; SX Studio (was SX Helper, before that AIM MOVERS) - Windows installer (Inno Setup 6). Per-user install, no admin needed.
+;   build:  set AIM_VERSION=1.1.0  &  ISCC windows\aim_movers.iss   -> build\windows\SX-Studio-windows-setup-<version>.exe
 #define AppVer GetEnv("AIM_VERSION")
 #if AppVer == ""
   #define AppVer "1.0.0"
@@ -11,10 +11,10 @@
 
 [Setup]
 AppId={{6B0F3C1E-7A41-4E7B-9C4C-2E1A5D8F4A31}
-AppName=SX Helper
+AppName=SX Studio
 AppVersion={#AppVer}
-AppVerName=SX Helper {#AppVer}
-AppPublisher=SX Helper
+AppVerName=SX Studio {#AppVer}
+AppPublisher=XSV Productions
 DefaultDirName={localappdata}\Programs\ShowXpress Helper
 ; same AppId as AIM MOVERS so it upgrades in place, but into the new folder (old folder + shortcuts removed below)
 UsePreviousAppDir=no
@@ -22,16 +22,16 @@ DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 OutputDir=..\build\windows
-OutputBaseFilename=SX-Helper-windows-setup-{#AppVer}
+OutputBaseFilename=SX-Studio-windows-setup-{#AppVer}
 SetupIconFile=..\assets\aim_movers.ico
 UninstallDisplayIcon={app}\aim_movers.ico
-UninstallDisplayName=SX Helper
+UninstallDisplayName=SX Studio
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 
 [Tasks]
-Name: "desktopicon"; Description: "Put SX Helper on the Desktop"
+Name: "desktopicon"; Description: "Put SX Studio on the Desktop"
 
 [Files]
 Source: "..\src\df_aim.ps1";       DestDir: "{app}"; Flags: ignoreversion
@@ -39,6 +39,7 @@ Source: "..\src\df_aim_gui.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\skip_flash.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\rig.ps1";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\flip.ps1";         DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\player.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\apc.ps1";          DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\speed.ps1";        DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\health.ps1";       DestDir: "{app}"; Flags: ignoreversion
@@ -49,12 +50,18 @@ Source: "..\src\gdrive.ps1";       DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\version.txt";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\show_common.ps1";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\sx_remote.ps1";    DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\sx_quit.ps1";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\dmx_out.ps1";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\showxpress_helper.vbs";  DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\aim_movers.ico";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\aim_movers_1024.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\brand.png";           DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\fonts\*";             DestDir: "{app}\fonts"; Flags: ignoreversion
 
 [InstallDelete]
+; old shortcuts from when it was called SX Helper (user 2026-11-23: renamed SX Studio; the folders keep the old name)
+Type: files; Name: "{autodesktop}\SX Helper.lnk"
+Type: files; Name: "{autoprograms}\SX Helper.lnk"
 ; old shortcuts from when it was called ShowXpress Helper (user 2026-11-22: renamed SX Helper; the folders keep the old name)
 Type: files; Name: "{autodesktop}\ShowXpress Helper.lnk"
 Type: files; Name: "{autoprograms}\ShowXpress Helper.lnk"
@@ -64,17 +71,17 @@ Type: files; Name: "{autoprograms}\AIM MOVERS.lnk"
 Type: filesandordirs; Name: "{localappdata}\Programs\AIM MOVERS"
 
 [Icons]
-Name: "{autoprograms}\SX Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers, tonight's rig, APC pads and speed faders for ShowXpress"
-Name: "{autodesktop}\SX Helper"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Aim the movers, tonight's rig, APC pads and speed faders for ShowXpress"; Tasks: desktopicon
+Name: "{autoprograms}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Lighting control for ShowXpress - XSV Productions"
+Name: "{autodesktop}\SX Studio"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\aim_movers.ico"; Comment: "Lighting control for ShowXpress - XSV Productions"; Tasks: desktopicon
 
 [Run]
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open SX Helper now"; Flags: postinstall nowait skipifsilent
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\showxpress_helper.vbs"""; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "{#StopGui}"; Flags: runhidden; RunOnceId: "StopGui"
 
 [Code]
-// close a running SX Helper / AIM MOVERS so an update takes effect straight away
+// close a running SX Studio (SX Helper / AIM MOVERS) so an update takes effect straight away
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   R: Integer;

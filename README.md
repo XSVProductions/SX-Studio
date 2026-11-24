@@ -1,8 +1,8 @@
 <p align="center"><img src="assets/aim_movers_1024.png" width="120" alt=""></p>
 
-# SX Helper
+# SX Studio
 
-A small Windows + Mac app for **ShowXpress** that gets the moving heads ready for each new venue. It used to be called ShowXpress Helper (and before that AIM MOVERS).
+**SX Studio** by XSV Productions: a Windows + Mac app for **ShowXpress** that gets the lights ready for each venue and can play the show itself (the SX Player). It used to be called SX Helper (before that ShowXpress Helper, and AIM MOVERS).
 
 Its main tabs:
 
@@ -11,8 +11,8 @@ Its main tabs:
 - **Skip Flash:** you tap the heads that are set up tonight, and the **SKIP FLASH** scene is rebuilt with only those heads. A head that isn't hung leaves a dark gap in the chase, so leaving it out keeps the flash smooth.
 - **APC mini:** shows the 8x8 pad grid in each pad's own colours, with the scene and page each pad plays and what the four faders do. Tap a pad, then tap another one to move it there (or swap the two). It flags pads that fire two buttons, mappings outside the 64 pads, and pads whose scene is missing.
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
-- **Auto Show:** the Helper presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
-- **Phone & iPad:** the same Helper on your iPhone or iPad over the Wi-Fi, with touch-friendly screens and Aim live by finger. See [Phone & iPad](#phone--ipad).
+- **Auto Show:** SX Studio presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
+- **Phone & iPad:** the same SX Studio on your iPhone or iPad over the Wi-Fi, with touch-friendly screens and Aim live by finger. See [Phone & iPad](#phone--ipad).
 - **Health Check:** a scan for problems that have caused trouble before. It looks for buttons whose scene is missing, scenes that use deleted fixtures, `beats = 0`, speed faders that don't exist, APC pads that fire two buttons, buttons stacked on the same spot, and colour chases that jump back across the colour wheel when they loop. Each problem comes with a recommended fix, and many can be fixed with one click. Every fix can be reverted.
 
 > Built for a show using Chauvet Intimidator Hybrid 140SR / 251SR heads, with the scenes `DF AIM (ADJUST)`, `CENTER SPOT` and `SKIP FLASH`.
@@ -23,16 +23,16 @@ Get the latest installer from **[Releases](../../releases/latest)**:
 
 | | File | First run |
 |---|---|---|
-| **Windows** | `SX-Helper-windows-setup-x.y.z.exe` | If Windows SmartScreen appears: **More info -> Run anyway**. |
-| **Mac** | `SX-Helper-mac-x.y.z.pkg` | If macOS blocks it: **System Settings -> Privacy & Security -> Open Anyway** (or right-click the file -> Open). When SX Helper opens for the first time, it offers to install PowerShell 7 (free, from Microsoft). |
+| **Windows** | `SX-Studio-windows-setup-x.y.z.exe` | If Windows SmartScreen appears: **More info -> Run anyway**. |
+| **Mac** | `SX-Studio-mac-x.y.z.pkg` | If macOS blocks it: **System Settings -> Privacy & Security -> Open Anyway** (or right-click the file -> Open). When SX Studio opens for the first time, it offers to install PowerShell 7 (free, from Microsoft). |
 
 The installers aren't code-signed, which is why Windows and macOS ask the first time. Installing over AIM MOVERS replaces it, including its shortcuts.
 
 **What gets installed**
-- **Windows:** "SX Helper" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
-- **Mac:** *SX Helper* in Applications, plus an *SX Helper* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
+- **Windows:** "SX Studio" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
+- **Mac:** *SX Studio* in Applications, plus an *SX Studio* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
 
-The Helper always opens on its **Home** page: the tabs, a **⚙ Settings** button (top right), **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to the Helper's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
+SX Studio always opens on its **Home** page: the tabs, a **⚙ Settings** button (top right), **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to SX Studio's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
 
 ## Weekly use
 
@@ -48,15 +48,15 @@ If you edit a trimmed scene in ShowXpress, the edited version counts as the full
    - **Step 1:** aim every head at the center of the dancefloor.
    - **Step 2 (optional):** aim a head at the same corner (front-left as seen from the DJ) to set its size.
 2. Save, and close ShowXpress.
-3. Open **SX Helper**, check the heads, set the overall size, and press **Apply to show**.
+3. Open **SX Studio**, check the heads, set the overall size, and press **Apply to show**.
 4. Open ShowXpress again. **DF CHECK 140 + 251** come on by themselves (with the remote on, see below). The beams should trace the floor corners.
 
-**Aim live** - the quicker way (Windows and Mac). Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and the Helper drives the DMX interface itself, so the real head follows your mouse as you drag:
+**Aim live** - the quicker way (Windows and Mac). Press **Aim live** on the Aim Movers tab. ShowXpress closes (save first), and SX Studio drives the DMX interface itself, so the real head follows your mouse as you drag:
 - Only the selected head is lit. Speed **Fine / Normal / Fast**, **Shift** = finer, **Ctrl** = faster, **arrow keys** nudge.
 - **N / P** (or Tab) = next / previous head, **1 / 2** = center / corner step. **Flip** left/right or up/down per head if it moves the wrong way.
 - **Save & finish** writes the aims into DF AIM (ADJUST) (or ROOM AIM), applies them, and opens ShowXpress again.
 - On the Mac it uses the driver that comes with ShowXpress for Mac, so ShowXpress has to be installed there (in Applications, or its ShowXpress folder in Applications).
-- Only one program can use the interface. If the NovaStar LED software (NovaLCT) is holding it, the Helper offers to pause its USB scanner.
+- Only one program can use the interface. If the NovaStar LED software (NovaLCT) is holding it, SX Studio offers to pause its USB scanner.
 
 **One head per T-bar:** aim just one head of each T-bar pair (set up in Rig Test). The head next to it gets the same aim, unless you aim it too.
 
@@ -73,10 +73,10 @@ Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save t
 
 **Rig Test** - **RIG ID** comes on in ShowXpress by itself when you open the tab (or press it on the SETUP page), tap each truss spot in the tab and pick the look you see, then **Save to 2D view**. RIG ID gives 140 #1-#8 a solid colour (white, deep red, light green, yellow, green, sky blue, blue, purple) and #9-#16 the same colours pulsing; the swatches in the tab match the real beams. If the tab says the RIG ID scene is the old one, close ShowXpress and press **Update RIG ID**. It moves the 140s in the 2D view (blinder top center, uplight bottom center) and, ticked by default, also saves Tonight's Rig and SKIP FLASH. *Bigger event* adds a top-middle and a bottom-middle tower.
 
-**Pre-show Check** - one list of what to look at before the guests arrive. Where the Helper can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
+**Pre-show Check** - one list of what to look at before the guests arrive. Where SX Studio can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
 
 **Skip Flash**
-1. Close ShowXpress, open **SX Helper** and go to the **Skip Flash** tab.
+1. Close ShowXpress, open **SX Studio** and go to the **Skip Flash** tab.
 2. Tap the heads you have tonight (amber = in use). **All** / **None** work per model.
 3. Press **Save to SKIP FLASH**.
 
@@ -98,20 +98,20 @@ The backups are kept in `health_fixes.json` in the show folder. If you change th
 
 ShowXpress doesn't send its beat to other apps, so the Auto Show counts bars from its own BPM. The looks are saved in `auto_show.json` in the show folder.
 
-**ShowXpress remote:** RIG ID, DF CHECK, ROOM CHECK and the Auto Show use ShowXpress's *External App* remote (on this computer only). The first time, press **Turn on remote control** in any of those tabs; the Helper switches it on in the show with a password only it uses. The Helper never presses anything while something outside the SETUP page is playing, so a running show isn't cut.
+**ShowXpress remote:** RIG ID, DF CHECK, ROOM CHECK and the Auto Show use ShowXpress's *External App* remote (on this computer only). The first time, press **Turn on remote control** in any of those tabs; SX Studio switches it on in the show with a password only it uses. SX Studio never presses anything while something outside the SETUP page is playing, so a running show isn't cut.
 
-SX Helper never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, the Helper does them and opens ShowXpress again.
+SX Studio never writes anything while ShowXpress is open. Changes you save while it's open are queued (bar at the top). The moment ShowXpress closes, SX Studio does them and opens ShowXpress again.
 
 ## Phone & iPad
 
-The Helper also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Skip Flash), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so the Helper has to be open on it.
+SX Studio also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Skip Flash), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so SX Studio has to be open on it.
 
 1. On the laptop, press **⚙** (top right) and go to **Phone & iPad** and tick **Let my phone and iPad connect**. The first time, Windows asks whether PowerShell may use the network: tick **Private networks** and press **Allow**. On a Mac, allow **pwsh** to accept incoming connections if macOS asks.
 2. On the iPhone or iPad, open **Safari** and go to the address shown there, e.g. `http://DJ-LAPTOP.local:47322`. The `.local` address stays the same at every venue; the number address changes with the network.
 3. **Share -> Add to Home Screen**, then open it from the Home Screen icon.
-4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once and stays paired: after a restart of the phone, the laptop or the Helper it connects straight away. **Unpair all phones** locks them all out again.
+4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once and stays paired: after a restart of the phone, the laptop or SX Studio it connects straight away. **Unpair all phones** locks them all out again.
 
-**Demo (no laptop needed):** https://xsvproductions.github.io/showxpress-helper/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever the Helper's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
+**Demo (no laptop needed):** https://xsvproductions.github.io/showxpress-helper/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever SX Studio's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
 
 **Aim live from the floor:** stand on the dance floor and drag your finger in the box to move the head. **Fine / Normal / Fast** set the speed, and **Next head** moves on. On an iPad with a keyboard or trackpad, the keys and mouse work as they do on the laptop. If the phone locks or loses Wi-Fi during live aim, the heads go dark after 30 s. Press **Reconnect**, and your aims so far are kept.
 
@@ -125,12 +125,12 @@ Press **⚙** at the top right (or the **Settings** tile on Home):
 
 - **Look:** Dark, Light or *Same as this device*. Each computer, phone and iPad keeps its own.
 - **Tabs:** drag ☰ or use the arrows to change the tab order, and untick a tab to hide it (from Home too). The order is the same on the laptop, the phone and the iPad. **Reset** brings back the normal order.
-- **Google Drive:** whether Google Drive for desktop is installed and signed in, **Open Google Drive** / **Get Google Drive** to sign in or install it, Sync and Import, the My Drive folder if the Helper can't find it by itself, and the import backups.
+- **Google Drive:** whether Google Drive for desktop is installed and signed in, **Open Google Drive** / **Get Google Drive** to sign in or install it, Sync and Import, the My Drive folder if SX Studio can't find it by itself, and the import backups.
 - **Phone & iPad:** turn phone access on, pair, unpair.
 - **ShowXpress:** open ShowXpress again after queued changes, and open the show folder.
-- **Updates:** the version, **Check now**, and whether to check when the Helper opens.
+- **Updates:** the version, **Check now**, and whether to check when SX Studio opens.
 
-They're kept in `%APPDATA%\ShowXpress Helper\settings.json` (Mac: `~/AwaazTools/settings.json`). The Helper can't sign in to Google itself: signing in is done in the Google Drive app.
+They're kept in `%APPDATA%\ShowXpress Helper\settings.json` (Mac: `~/AwaazTools/settings.json`). SX Studio can't sign in to Google itself: signing in is done in the Google Drive app.
 
 ## Google Drive
 
@@ -142,7 +142,7 @@ On the Mac, copy the show from Google Drive into `~/TheLightingController/LightS
 
 ## Show folder
 
-SX Helper looks for the show in this order:
+SX Studio looks for the show in this order:
 1. The folder written in `show_path.txt`:
    - **Windows:** `%APPDATA%\ShowXpress Helper\show_path.txt` (optional; the old `%APPDATA%\AIM MOVERS\show_path.txt` still works)
    - **Mac:** `~/AwaazTools/show_path.txt` (optional)

@@ -20,7 +20,7 @@ if ($Action -eq 'Fix') {
     'sleep'   { Invoke-Pc @('/change', 'standby-timeout-ac', '0'); "  CHANGED  the laptop never goes to sleep on the charger now" }
     'usb'     { Invoke-Pc @('/setacvalueindex', 'SCHEME_CURRENT', '2a737441-1930-4402-8d77-b2bebba308a3', '48e6b7a6-50f5-4782-a5d4-53bb8f07e226', '0'); Invoke-Pc @('/setactive', 'SCHEME_CURRENT')
                 "  CHANGED  USB power saving (selective suspend) is off on the charger" }
-    'restart' { & shutdown.exe /r /t 60 /c "SX Helper: restarting for Windows updates in 1 minute. Save your work." | Out-Null; "  CHANGED  Windows restarts in 1 minute (cancel: run 'shutdown /a')" }
+    'restart' { & shutdown.exe /r /t 60 /c "SX Studio: restarting for Windows updates in 1 minute. Save your work." | Out-Null; "  CHANGED  Windows restarts in 1 minute (cancel: run 'shutdown /a')" }
     default   { throw "Unknown fix '$FixId'. NOTHING was changed." }
   }
   return

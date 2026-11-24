@@ -17,6 +17,9 @@
 #   -Action Auto -StatusFile f [-Titles <look id>]   AUTO SHOW player (the Helper starts it and talks to it on stdin):
 #        plays the looks from auto_show.json, each for its number of bars at the BPM, and writes its state to f.
 #        stdin: next | prev | go <id> | hold | resume | sync | bpm <n> | reload | q (or stdin closed = stop)
+#        -Pipe <name> -PlayerStatus <file> (stage 4 of the SX Player, user 2026-11-23): play the looks on the Helper's
+#        SX Player instead of ShowXpress - buttons go on/off over the player's pipe (by title, like ShowXpress), what is
+#        on comes from the player's state file, and the BPM follows the player's beat clock (tap / VirtualDJ).
 # Buttons are found by TITLE; when two buttons share a title ShowXpress only reaches the first one.
 # Connections are short (connect, press, close): ShowXpress asks a connected app for beats (BEAT_ON) and we don't
 # want to sit on that during a show.
@@ -30,7 +33,9 @@ param(
   [switch]$Idle,
   [string]$ConfigFile = '',
   [string]$StatusFile = '',
-  [string]$TestRoot = ''
+  [string]$TestRoot = '',
+  [string]$Pipe = '',
+  [string]$PlayerStatus = ''
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'show_common.ps1')
@@ -90,7 +95,7 @@ function Open-Sx($setup) {
   Send-Sx $o "HELLO|ShowXpressHelper|$($setup.password)"
   $r = Read-Sx $o { param($l) $l -eq 'HELLO' -or $l -like 'ERROR*' } 2500
   $h = @($r | Where-Object { $_ -eq 'HELLO' -or $_ -like 'ERROR*' }) | Select-Object -First 1
-  if ($h -ne 'HELLO') { $c.Close(); if ($h) { throw "ShowXpress refused the Helper ($h). Turn the remote on again from the Helper." }; return $null }
+  if ($h -ne 'HELLO') { $c.Close(); if ($h) { throw "ShowXpress refused SX Studio ($h). Turn the remote on again from SX Studio." }; return $null }
   $o
 }
 function Get-SxList($o) {
@@ -178,7 +183,7 @@ if ($Action -eq 'Enable') {
   if (-not $setup.allowed) { Set-IniKey $ini 'live' 'allow_live_mobile' 'yes'; $out += '  Live: external control turned on' }
   if (-not $setup.hasPassword) {
     $pw = -join (1..10 | ForEach-Object { 'abcdefghjkmnpqrstuvwxyz23456789'[(Get-Random -Maximum 31)] })
-    Set-IniKey $ini 'live' 'live_mobile_password' $pw @('allow_live_mobile'); $out += '  Live: password set (the Helper reads it from the show)'
+    Set-IniKey $ini 'live' 'live_mobile_password' $pw @('allow_live_mobile'); $out += '  Live: password set (SX Studio reads it from the show)'
   }
   foreach ($s in $setup.info.Sections) {
     if ($s[0] -match '^page\d+$' -and "$($s[1]['live_mobile'])" -ne 'yes') { Set-IniKey $ini $s[0] 'live_mobile' 'yes' @('name', 'swap', 'nb_buttons'); $out += "  Page $($s[1]['name']): can be reached" }
@@ -225,6 +230,39 @@ if ($Action -eq 'Auto') {
   $curId = ''; $lookStart = 0.0; $need = $true; $first = $true; $lastTry = -99999.0; $sxPid = 0; $lastOpen = -99999.0
   $hist = New-Object Collections.Generic.List[string]; $bag = New-Object Collections.Generic.List[string]; $nextId = ''
   $swapPg = @{}; $swapOf = @{}
+  $usePl = [bool]$Pipe; $S.target = $(if ($usePl) { 'player' } else { 'showxpress' }); $S.src = ''
+  $script:plW = $null; $script:plC = $null; $lastPl = -99999.0
+  if ($usePl) {
+    # the SX Player instead of ShowXpress: the same Invoke-Look / Stop-Player code, other plumbing
+    function Get-PlStatus { if (-not $PlayerStatus -or -not (Test-Path -LiteralPath $PlayerStatus)) { return $null }; try { [IO.File]::ReadAllText($PlayerStatus) | ConvertFrom-Json } catch { $null } }
+    function Send-PlLine([string]$l) {
+      for ($try = 0; $try -lt 2; $try++) {
+        try {
+          if (-not $script:plW) {
+            $c = New-Object IO.Pipes.NamedPipeClientStream('.', $Pipe, [IO.Pipes.PipeDirection]::Out); $c.Connect(2000)
+            $w = New-Object IO.StreamWriter($c, (New-Object Text.UTF8Encoding($false))); $w.AutoFlush = $true; $script:plC = $c; $script:plW = $w
+          }
+          $script:plW.WriteLine($l); return
+        } catch { try { if ($script:plC) { $script:plC.Dispose() } } catch {}; $script:plW = $null; $script:plC = $null }
+      }
+      throw 'The SX Player isn''t answering.'
+    }
+    function Connect-Sx($setup) {
+      $st = Get-PlStatus; if (-not $st) { return @{ error = 'The SX Player stopped - start it again on the Lab tab.' } }
+      $on = @{}; foreach ($o in @($st.on)) { if ($o) { $on["$($o.slot)"] = 1 } }
+      $seen = @{}
+      $list = @(foreach ($b in $setup.info.Buttons) { if ($b.Title -and -not $seen[$b.Title]) { $seen[$b.Title] = 1; [pscustomobject]@{ title = $b.Title; page = $b.PageName; pressed = [bool]$on[$b.Sec] } } })
+      @{ cn = 'player'; list = $list; error = '' }
+    }
+    function Send-Cmds($x, $setup, $cmds) {
+      foreach ($c in @($cmds)) {
+        $t = $c.Substring($c.IndexOf('|') + 1); $on = $c.StartsWith('BUTTON_PRESS')
+        Send-PlLine $(if ($on) { "ton $t" } else { "toff $t" })
+        foreach ($b in $x.list) { if ($b.title -eq $t) { $b.pressed = $on } }
+      }
+    }
+    function Close-Sx($x) { }
+  }
   foreach ($sec in $setup.info.Sections) { if ($sec[0] -match '^page(\d+)$' -and "$($sec[1]['swap'])" -eq 'yes') { $swapPg[[int]$matches[1]] = $true } }
   foreach ($b in $setup.info.Buttons) { if ($b.Title -and -not $swapOf.ContainsKey($b.Title)) { $swapOf[$b.Title] = $(if ($swapPg[$b.Page]) { [int]$b.Page } else { 0 }) } }
   function Get-Eff($l) {
@@ -299,7 +337,8 @@ if ($Action -eq 'Auto') {
     $S.running = $false; Write-Status
   }
 
-  if (-not $setup.ready) { $S.running = $false; $S.error = 'The ShowXpress remote is off - turn it on first.'; Write-Status; return }
+  if (-not $usePl -and -not $setup.ready) { $S.running = $false; $S.error = 'The ShowXpress remote is off - turn it on first.'; Write-Status; return }
+  if ($usePl) { $ps0 = Get-PlStatus; if ($ps0 -and $ps0.bpm -ge 40) { $cfg.bpm = [math]::Round([double]$ps0.bpm, 1) } }   # the player's tempo wins
   $a0 = @(Get-Active)
   if (-not $a0.Count) { $S.running = $false; $S.error = 'No look to play - add a look with at least one button and switch it on.'; Write-Status; return }
   $startId = "$Titles"   # -Titles <look id> = start with that look
@@ -321,10 +360,11 @@ if ($Action -eq 'Auto') {
           'go'     { if (Get-Look $arg) { Set-Cur $arg } }
           'hold'   { $S.held = $true }
           'resume' { $S.held = $false; $lookStart = $now }
-          'sync'   { $lookStart = $now }
+          'sync'   { $lookStart = $now; if ($usePl) { try { Send-PlLine 'sync' } catch {} } }
           'bpm'    { $b = 0.0; if ([double]::TryParse($arg, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$b) -and $b -ge 40 -and $b -le 220) {
-                       $el = ($now - $lookStart) * $cfg.bpm / $b; $cfg.bpm = [math]::Round($b, 1); $lookStart = $now - $el } }
-          'reload' { $old = $cfg.bpm; $cfg = Read-AutoCfg; $setup = Get-Setup
+                       $el = ($now - $lookStart) * $cfg.bpm / $b; $cfg.bpm = [math]::Round($b, 1); $lookStart = $now - $el
+                       if ($usePl) { try { Send-PlLine ('bpm ' + $b.ToString([Globalization.CultureInfo]::InvariantCulture)) } catch {} } } }
+          'reload' { $old = $cfg.bpm; $cfg = Read-AutoCfg; $setup = Get-Setup; if ($usePl) { $cfg.bpm = $old }   # on the player its beat clock keeps the tempo
                      if (-not (Get-Look $curId)) { $a = @(Get-Active); if ($a.Count) { Set-Cur $a[0].id } }
                      else { $need = $true; $lastTry = -99999.0; $nextId = Get-NextId $curId; if ($cfg.bpm -ne $old) { $lookStart = $now - ($now - $lookStart) * $old / $cfg.bpm } } }
         }
@@ -339,10 +379,20 @@ if ($Action -eq 'Auto') {
       # ---- ShowXpress opened again (a fresh start has nothing pressed): play the current look again
       if ($now - $lastOpen -gt 2000) {
         $lastOpen = $now; $sp = 0
-        if ($TestRoot) { if (Test-Open) { $sp = 1 } } else { $pr = @(Get-SxProcess) | Select-Object -First 1; if ($pr) { $sp = $pr.Id } }
+        if ($usePl) { if (Test-Path -LiteralPath $PlayerStatus) { $sp = 1 } }
+        elseif ($TestRoot) { if (Test-Open) { $sp = 1 } } else { $pr = @(Get-SxProcess) | Select-Object -First 1; if ($pr) { $sp = $pr.Id } }
         if ($sp -ne $sxPid) {
-          if ($sp) { $need = $true; $lastTry = -99999.0; $mine.Clear() } else { $S.applied = $false; $S.error = 'ShowXpress is closed - waiting for it (the looks keep counting).' }
+          if ($sp) { $need = $true; $lastTry = -99999.0; $mine.Clear() }
+          else { $S.applied = $false; $S.error = $(if ($usePl) { 'The SX Player stopped - waiting for it (the looks keep counting).' } else { 'ShowXpress is closed - waiting for it (the looks keep counting).' }) }
           $sxPid = $sp
+        }
+      }
+      # ---- on the player: follow its tempo (tap / VirtualDJ / the Lab)
+      if ($usePl -and $now - $lastPl -ge 500) {
+        $lastPl = $now; $ps = Get-PlStatus
+        if ($ps -and $ps.bpm -ge 40) {
+          $S.src = "$($ps.src)"; $b = [math]::Round([double]$ps.bpm, 1)
+          if ([math]::Abs($b - $cfg.bpm) -ge 0.1) { $lookStart = $now - ($now - $lookStart) * $cfg.bpm / $b; $cfg.bpm = $b }
         }
       }
       if ($need -and $sxPid -and ($now - $lastTry) -gt 3000) { $lastTry = $now; Invoke-Look; $lastW = -99999.0 }

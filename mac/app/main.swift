@@ -1,4 +1,4 @@
-// SX Helper for Mac: a real app (Dock icon, own window, Cmd+Q) around the Helper's local server.
+// SX Studio for Mac: a real app (Dock icon, own window, Cmd+Q) around the Helper's local server.
 // launch.sh starts the PowerShell server; this window shows its page. The server writes its address to
 // $TMPDIR/showxpress_helper_gui.json ({url, pid, ver}); only a server of this same version is used.
 import Cocoa
@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 880),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
                           backing: .buffered, defer: false)
-        window.title = "SX Helper"
+        window.title = "SX Studio"
         window.minSize = NSSize(width: 640, height: 480)
         window.backgroundColor = NSColor(red: 0.055, green: 0.063, blue: 0.078, alpha: 1)
         window.contentView = web
@@ -94,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.setFrameAutosaveName("ShowXpressHelperWindow")
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        showMessage("Starting SX Helper…")
+        showMessage("Starting SX Studio…")
         startServer()
     }
 
@@ -135,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             logLine("server did not answer")
             DispatchQueue.main.async {
                 self.starting = false
-                self.showMessage("SX Helper didn't start.\nDetails: ~/AwaazTools/showxpress_helper_error.log\n\nClose this window and open SX Helper again.")
+                self.showMessage("SX Studio didn't start.\nDetails: ~/AwaazTools/showxpress_helper_error.log\n\nClose this window and open SX Studio again.")
             }
         }
     }
@@ -158,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             timer = nil
             if updating() { logLine("server stopped for an update - quitting"); NSApp.terminate(nil); return }
             logLine("server stopped - starting it again")
-            showMessage("Starting SX Helper again…")
+            showMessage("Starting SX Studio again…")
             startServer()
             return
         }
@@ -186,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert()
-        a.messageText = "SX Helper"
+        a.messageText = "SX Studio"
         a.informativeText = message
         a.runModal()
         completionHandler()
@@ -194,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
         let a = NSAlert()
-        a.messageText = "SX Helper"
+        a.messageText = "SX Studio"
         a.informativeText = message
         a.addButton(withTitle: "OK")
         a.addButton(withTitle: "Cancel")
@@ -212,14 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             item.submenu = m
             return m
         }
-        let appMenu = sub("SX Helper")
-        appMenu.addItem(withTitle: "About SX Helper", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let appMenu = sub("SX Studio")
+        appMenu.addItem(withTitle: "About SX Studio", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Hide SX Helper", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        appMenu.addItem(withTitle: "Hide SX Studio", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         let others = appMenu.addItem(withTitle: "Hide Others", action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
         others.keyEquivalentModifierMask = [.command, .option]
         appMenu.addItem(NSMenuItem.separator())
-        appMenu.addItem(withTitle: "Quit SX Helper", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit SX Studio", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let edit = sub("Edit")
         edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")

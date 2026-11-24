@@ -70,7 +70,7 @@ function Get-FlipState($root) {
   # id -> @{ pan = bool; tilt = bool } for every head reversed by the Helper
   $r = @{}; $p = "$root/flip_state.json"
   if (-not (Test-Path -LiteralPath $p)) { return $r }
-  try { $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json } catch { throw "flip_state.json in the show folder can't be read - NOTHING was changed. (It says which heads the Helper reverses.)" }
+  try { $j = [IO.File]::ReadAllText($p) | ConvertFrom-Json } catch { throw "flip_state.json in the show folder can't be read - NOTHING was changed. (It says which heads SX Studio reverses.)" }
   if ($j.heads) { foreach ($q in $j.heads.PSObject.Properties) {
     $pn = [bool]$q.Value.pan; $tl = [bool]$q.Value.tilt
     if ($pn -or $tl) { $r["$($q.Name)"] = @{ pan = $pn; tilt = $tl } } } }

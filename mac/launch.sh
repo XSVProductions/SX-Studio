@@ -1,5 +1,5 @@
 #!/bin/bash
-# Started by the SX Helper app (Contents/MacOS/SXHelper): needs PowerShell 7 (offers to install it),
+# Started by the SX Studio app (Contents/MacOS/SXHelper): needs PowerShell 7 (offers to install it),
 # then starts the Helper's server in the background. The app shows the window. Exit 0 = started, anything else = give up.
 RES="$(cd "$(dirname "$0")" && pwd)"
 LOG="$HOME/AwaazTools/showxpress_helper_error.log"
@@ -11,14 +11,14 @@ find_pwsh() {
   done
   return 1
 }
-alert() { osascript -e "display alert \"SX Helper\" message \"$1\"" >/dev/null 2>&1; }
+alert() { osascript -e "display alert \"SX Studio\" message \"$1\"" >/dev/null 2>&1; }
 
 PW="$(find_pwsh)"
 if [ -z "$PW" ]; then
-  ans="$(osascript -e 'button returned of (display dialog "SX Helper needs PowerShell 7 (free, from Microsoft).\n\nDownload and install it now? macOS will ask for your password." buttons {"Cancel", "Install"} default button "Install" with title "SX Helper")' 2>/dev/null)"
+  ans="$(osascript -e 'button returned of (display dialog "SX Studio needs PowerShell 7 (free, from Microsoft).\n\nDownload and install it now? macOS will ask for your password." buttons {"Cancel", "Install"} default button "Install" with title "SX Studio")' 2>/dev/null)"
   [ "$ans" = "Install" ] || exit 3
   case "$(uname -m)" in arm64) ARCH=osx-arm64;; *) ARCH=osx-x64;; esac
-  osascript -e 'display notification "Downloading PowerShell 7..." with title "SX Helper"' >/dev/null 2>&1
+  osascript -e 'display notification "Downloading PowerShell 7..." with title "SX Studio"' >/dev/null 2>&1
   URL="$(curl -fsSL https://api.github.com/repos/PowerShell/PowerShell/releases/latest | grep -o "https://[^\"]*powershell-[0-9.]*-$ARCH\.pkg" | head -n 1)"
   PKG="/tmp/powershell-$ARCH.pkg"
   if [ -z "$URL" ] || ! curl -fsSL -o "$PKG" "$URL"; then

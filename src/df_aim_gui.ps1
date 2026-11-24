@@ -231,7 +231,7 @@ function Send-Text($ctx, [int]$code, [string]$type, [string]$text) {
 # Only "Unpair all phones" (new key) makes a phone pair again.
 function Set-PhoneCookie($ctx) { $ctx.Response.AppendHeader('Set-Cookie', "sxh_k=$($script:ph.key); Max-Age=315360000; Path=/; HttpOnly; SameSite=Lax") }
 function Get-PhoneCookieKey($req) { $c = $req.Cookies['sxh_k']; if ($c -and $script:ph.key -and $c.Value -ceq $script:ph.key) { $c.Value } else { '' } }
-function Send-Json($ctx, $obj) { Send-Text $ctx 200 'application/json; charset=utf-8' ($obj | ConvertTo-Json -Depth 6 -Compress) }
+function Send-Json($ctx, $obj) { Send-Text $ctx 200 'application/json; charset=utf-8' ($obj | ConvertTo-Json -Depth 10 -Compress) }
 function Send-EngineJson($ctx, $r) {
   # engine printed one line of JSON (Preview / Check) -> pass it straight on
   if ($r.ok) {
@@ -346,6 +346,7 @@ function Start-Player([string]$root) {
   if ($r.ok) {
     $script:playP = $r.p; $script:playRoot = $root; $script:playSnap = $null
     try { $r.p.StandardInput.WriteLine('k') } catch {}   # Windows PowerShell swallows the first line a child gets - make it this one
+    $script:labXSent = @{}; Sync-PlayerExtras   # the buttons on the player's own pages
   }
   $r.Remove('p'); $r
 }
@@ -356,7 +357,10 @@ function Set-PlayEvent([string]$kind, [string]$text) { $script:playEvN++; $scrip
 function Invoke-Handoff([bool]$launch, [string]$why) {
   # stop the player and let ShowXpress carry on with what was playing (the Auto Show goes back to ShowXpress by itself)
   $titles = @(); $st = Get-PlayerStatus
-  if ($st) { foreach ($o in @($st.on)) { $b = $script:labMap["$($o.slot)"]; if ($b -and "$($b.title)" -match $titleRx -and $titles -notcontains "$($b.title)") { $titles += "$($b.title)" } } }
+  if ($st) { foreach ($o in @($st.on)) { $b = $script:labMap["$($o.slot)"]
+    # a copy on one of the player's own pages: ShowXpress plays the show's button with the same title, if there is one
+    if (-not $b) { $x = $script:labX["$($o.slot)"]; if ($x -and @($script:labMap.Values | Where-Object { "$($_.title)" -eq "$($x.title)" }).Count) { $b = $x } }
+    if ($b -and "$($b.title)" -match $titleRx -and $titles -notcontains "$($b.title)") { $titles += "$($b.title)" } } }
   $wasAuto = (Test-Auto) -and $script:autoPl
   Stop-Player
   if ($wasAuto) { $as = Get-AutoStatus; [void](Start-Auto "$(if ($as) { $as.lookId })") }
@@ -393,7 +397,7 @@ function Step-PlayerWatch {
   if ($snap) {
     $fd = @($snap.fd); for ($f = 0; $f -lt [math]::Min(16, $fd.Count); $f++) { [void](Send-Player ('fader ' + $f + ' ' + ([double]$fd[$f]).ToString('0.####', [Globalization.CultureInfo]::InvariantCulture))) }
     if ("$($snap.src)" -ne 'VirtualDJ' -and $snap.bpm) { [void](Send-Player ('bpm ' + ([double]$snap.bpm).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture))) }
-    if (-not ((Test-Auto) -and $script:autoPl)) { foreach ($o in @($snap.on)) { if ("$($o.slot)" -match '^page\d+_button\d+$') { [void](Send-Player "seton $($o.slot)") } } }
+    if (-not ((Test-Auto) -and $script:autoPl)) { foreach ($o in @($snap.on)) { if ("$($o.slot)" -match '^page\d+_button\d+$' -or ("$($o.slot)" -match $xbRx -and $script:labX.ContainsKey("$($o.slot)"))) { [void](Send-Player "seton $($o.slot)") } } }
     if ($snap.bo) { [void](Send-Player 'bo 1') }
   }
   Set-PlayEvent 'restart' 'The SX Player stopped by itself and was started again - the lights were dark for a few seconds.'
@@ -407,6 +411,31 @@ function Step-PlayerKeep {
 function Send-Player([string]$line) {
   if (-not (Test-Player)) { return $false }
   try { $script:playP.StandardInput.WriteLine($line); $true } catch { $false }
+}
+# the SX Player's own pages (settings playerLayout.custom): their buttons go to the player with "addb" (only the ones
+# that changed, so a playing button isn't restarted when the layout is saved); labX = sec -> button, for press / on / off
+$script:labX = @{}; $script:labXSent = @{}
+function Get-PlayerFilePath([string]$root, [string]$file) {
+  if (-not $root -or $file -notmatch $fileRx) { return '' }
+  $c = if ($file -like '*.gpj') { @("$root/Editor/Generator/projects/$file", "$root/scenes/$file") } else { @("$root/scenes/$file") }
+  foreach ($p in $c) { if (Test-Path -LiteralPath $p -PathType Leaf) { return (Resolve-Path -LiteralPath $p).ProviderPath } }
+  ''
+}
+function Sync-PlayerExtras {
+  if (-not (Test-Player)) { return }
+  $ic = [Globalization.CultureInfo]::InvariantCulture; $want = @{}; $map = @{}
+  foreach ($c in @((Get-Settings).playerLayout.custom)) {
+    $g = 1000 + [int]("$($c.id)".Substring(1))
+    foreach ($b in @($c.buttons)) {
+      $path = Get-PlayerFilePath $script:playRoot "$($b.file)"
+      $want["$($b.id)"] = 'addb ' + (@("$($b.id)", $g, $(if ($c.swap) { 1 } else { 0 }), $b.fader, $(if ($b.bpm) { 1 } else { 0 }), $(if ($b.flash) { 1 } else { 0 }),
+        ([double]$b.beats).ToString('0.####', $ic), $path, "$($b.title)") -join '|')
+      $map["$($b.id)"] = [pscustomobject]@{ sec = "$($b.id)"; title = "$($b.title)"; path = $path; kind = $(if (-not $path) { 'missing' } elseif ($path -like '*.gpj') { 'gpj' } else { 'scex' }) }
+    }
+  }
+  foreach ($k in @($script:labXSent.Keys)) { if (-not $want.ContainsKey($k)) { [void](Send-Player "delb $k"); $script:labXSent.Remove($k) } }
+  foreach ($k in $want.Keys) { if ($script:labXSent[$k] -ne $want[$k] -and (Send-Player $want[$k])) { $script:labXSent[$k] = $want[$k] } }
+  $script:labX = $map
 }
 function Get-PlayerStatus {
   if (-not (Test-Player) -or -not (Test-Path -LiteralPath $script:labStat)) { return $null }
@@ -652,6 +681,9 @@ $setF = Join-Path $cfgDir 'settings.json'
 # 'lab' = the SX Player tab (out of the Lab since 2026-11-23, the id stayed). tabNames = the user's own tab names (Settings).
 # playerLayout = how the SX Player tab arranges the show's pages and buttons: {pages:[page n..], order:{"n":[button sec..]}} -
 # only this tab's view, ShowXpress's own live screen is never changed.
+# 2026-11-24 (user): pages can be collapsed / hidden (collapsed:[n..], hidden:[n..]), and the player has pages of its own
+# (custom:[{id:"x1", name, swap, buttons:[{id:"x1_b1", title, file, fader, bpm, flash, beats, color}]}]) that play the
+# show's scene / movement files. All of it is SX Studio's settings only - live.ini and the scenes are never written.
 $tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab')
 $secRx = '^[\w .\-]{1,60}$'
 function Get-TabNames($v) {
@@ -659,12 +691,31 @@ function Get-TabNames($v) {
   if ($v) { foreach ($p in $v.PSObject.Properties) { $n = ("$($p.Value)" -replace '[\x00-\x1f<>]', '').Trim(); if ($tabIds -contains $p.Name -and $n -and $n.Length -le 24) { $o[$p.Name] = $n } } }
   $o
 }
+$pgRx = '^(\d{1,3}|x\d{1,3})$'; $xbRx = '^x\d{1,3}_b\d{1,3}$'; $fileRx = '^[^\\/:*?"<>|\x00-\x1f]{1,120}\.(scex|gpj)$'
+function Get-CleanText($v, [int]$max) { $t = ("$v" -replace '[\x00-\x1f<>|]', '').Trim(); if ($t.Length -gt $max) { $t = $t.Substring(0, $max).Trim() }; $t }
 function Get-PlayerLayout($v) {
-  $pg = @(@($v.pages) | ForEach-Object { "$_" } | Where-Object { $_ -match '^\d{1,3}$' } | Select-Object -Unique -First 100)
+  $pg = @(@($v.pages) | ForEach-Object { "$_" } | Where-Object { $_ -match $pgRx } | Select-Object -Unique -First 140)
   $od = [ordered]@{}
-  if ($v -and $v.order) { foreach ($p in $v.order.PSObject.Properties) { if ($p.Name -match '^\d{1,3}$') {
+  if ($v -and $v.order) { foreach ($p in $v.order.PSObject.Properties) { if ($p.Name -match $pgRx) {
     $od[$p.Name] = @(@($p.Value) | ForEach-Object { "$_" } | Where-Object { $_ -match $secRx } | Select-Object -Unique -First 300) } } }
-  [ordered]@{ pages = $pg; order = $od }
+  $hid = @(@($v.hidden) | ForEach-Object { "$_" } | Where-Object { $_ -match $pgRx } | Select-Object -Unique -First 140)
+  $col = @(@($v.collapsed) | ForEach-Object { "$_" } | Where-Object { $_ -match $pgRx } | Select-Object -Unique -First 140)
+  $cu = @(foreach ($c in @($v.custom | Select-Object -First 40)) {
+    if (-not $c -or "$($c.id)" -notmatch '^x\d{1,3}$') { continue }
+    $id = "$($c.id)"; $nm = Get-CleanText $c.name 40; if (-not $nm) { $nm = 'NEW PAGE' }
+    $bs = @(foreach ($b in @($c.buttons | Select-Object -First 64)) {
+      if (-not $b -or "$($b.id)" -notmatch $xbRx -or -not "$($b.id)".StartsWith("${id}_") -or "$($b.file)" -notmatch $fileRx) { continue }
+      $fd = 0; [void][int]::TryParse("$($b.fader)", [ref]$fd); $fd = [math]::Max(0, [math]::Min(15, $fd))
+      $bt = 1.0; [void][double]::TryParse("$($b.beats)", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bt)
+      if ($bt -le 0.01 -or $bt -gt 64) { $bt = 1.0 }
+      $co = -1; if ("$($b.color)" -match '^\d{1,8}$' -and [int64]"$($b.color)" -le 0xFFFFFF) { $co = [int]"$($b.color)" }
+      $ti = Get-CleanText $b.title 40; if (-not $ti) { $ti = "$($b.file)" -replace '\.(scex|gpj)$', '' }
+      [ordered]@{ id = "$($b.id)"; title = $ti; file = "$($b.file)"; fader = $fd; bpm = [bool]$b.bpm; flash = [bool]$b.flash; beats = $bt; color = $co }
+    })
+    [ordered]@{ id = $id; name = $nm; swap = [bool]$c.swap; buttons = @($bs | Group-Object { $_.id } | ForEach-Object { $_.Group[0] }) }
+  })
+  $cu = @($cu | Group-Object { $_.id } | ForEach-Object { $_.Group[0] })
+  [ordered]@{ pages = $pg; order = $od; hidden = $hid; collapsed = $col; custom = $cu }
 }
 function Get-Settings {
   $s = [ordered]@{ tabOrder = $tabIds; tabHidden = @(); tabNames = $null; playerLayout = $null; reopen = $true; autoUpd = $true; driveFolder = '' }
@@ -680,7 +731,7 @@ function Get-Settings {
 }
 function Save-Settings($s) {
   if (-not (Test-Path -LiteralPath $cfgDir)) { [void](New-Item -ItemType Directory -Path $cfgDir -Force) }
-  [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+  [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding($false)))
 }
 function Get-BackupDir { if ($TestRoot) { Join-Path (Split-Path (Split-Path $TestRoot)) 'HelperBackups' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/backups' } else { Join-Path $env:APPDATA 'ShowXpress Helper/backups' } }
 function Open-OnComputer([string]$what) {
@@ -1158,7 +1209,13 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 #lbpages.arr .lbb.drag{opacity:.35!important;cursor:grabbing}
 .lbghost{position:fixed;z-index:60;pointer-events:none;transform:rotate(-2deg);box-shadow:0 12px 30px rgba(0,0,0,.5);border-color:var(--amber)!important;opacity:.95}
 .lbpg .pgbar{display:none;gap:4px;margin-left:8px}#lbpages.arr .lbpg .pgbar{display:inline-flex}
-.lbpg h3{display:flex;align-items:center}
+.lbpg h3{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.lbpg .pcol{background:none;border:0;padding:0 2px;color:var(--dim);cursor:pointer;font-size:12px;line-height:1;min-width:16px}.lbpg .pcol:hover{color:var(--amber)}
+.lbpg.col .lbg,.lbpg.col>p{display:none}.lbpg .pgon{color:var(--green);font-weight:600;letter-spacing:.5px}
+.lbpg .pgtag{font-size:9.5px;padding:1px 6px;border-radius:6px;border:1px solid var(--line2);color:var(--mute);letter-spacing:1px}
+#lbpages.arr .lbpg.hid .lbg,#lbpages.arr .lbpg.hid h3{opacity:.45}
+.lbb{position:relative}.lbb .xdel{display:none;position:absolute;top:2px;right:6px;font-style:normal;font-size:15px;color:var(--mute);cursor:pointer;padding:0 3px}#lbpages.arr .lbb .xdel{display:block}.lbb .xdel:hover{color:var(--red)}
+.lbal{max-height:46vh;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px}.lbal label{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border-radius:8px;cursor:pointer}.lbal label:hover{background:rgba(255,176,32,.07)}.lbal small{color:var(--mute);margin-left:auto;text-align:right}
 .arrbar{display:none;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 14px;border-radius:12px;background:rgba(255,176,32,.07);border:1px solid rgba(255,176,32,.4);font-size:13px;color:var(--txt2)}
 .arrbar.on{display:flex}
 @media (max-width:860px){.htiles{grid-template-columns:1fr 1fr}}
@@ -1229,11 +1286,11 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
   <section class="card"><div class="row" style="align-items:flex-start"><div class="grow"><h2>SX Player</h2>
    <p class="sub" style="margin:0">Plays your show&rsquo;s scenes and movements straight to the DMX interface, with ShowXpress closed &mdash; nothing in the show is changed. Tap a button to start it, tap again to stop; on a MOVEMENTS page one replaces the other. A movement only moves what it&rsquo;s set to (usually pan/tilt), so tap a colour scene as well. While it plays, the <b>APC mini</b> pads and speed faders, the keyboard keys, <b>BPM</b> (tap, type or VirtualDJ) and the <b>Auto Show</b> all work.</p>
    <details style="margin-top:8px"><summary>At a gig</summary><p class="sub" style="margin:8px 0 0"><b>Hand over to ShowXpress</b> stops the player and opens ShowXpress straight away, and ShowXpress carries on with what was playing (starting the player does the same the other way round). If the DMX interface gets unplugged the player waits and carries on when it&rsquo;s plugged back in; if the player itself stops, SX Studio starts it again; if someone opens ShowXpress, the player hands over to it. The laptop doesn&rsquo;t sleep while the player runs, and closing this window doesn&rsquo;t stop the lights &mdash; open SX Studio again from its icon. Scenes, chases and movements were checked against ShowXpress&rsquo;s own DMX output; which button wins when two use the same light isn&rsquo;t measured yet.</p></details></div>
-   <button id="lbarr" class="mini" title="Put the pages and buttons in your own order (only here - ShowXpress's live screen stays as it is)">&#8645; Arrange</button></div>
+   <button id="lbarr" class="mini" title="Order, hide and add pages and buttons (only here - ShowXpress's live screen stays as it is)">&#8645; Arrange</button></div>
    <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap" id="lbctl"></div><div id="lbmsg" class="summary" style="margin-top:8px"></div></section>
   <section class="card" id="lbbpm" style="display:none"></section>
   <section class="card" id="lbfd" style="display:none"></section>
-  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page. It&rsquo;s saved for this computer, the phone and the iPad &mdash; ShowXpress&rsquo;s own live screen stays as it is.<div class="grow"></div><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
+  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page, and <b>Hide</b> takes a page out of the player. <b>New page</b> makes a page that&rsquo;s only in the SX Player, with copies of any of the show&rsquo;s buttons. It&rsquo;s all saved for this computer, the phone and the iPad &mdash; ShowXpress and its live screen stay exactly as they are.<div class="grow"></div><button id="lbnewpg" class="mini">+ New page</button><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
   <section class="card idle" id="lbpages"><p class="sub" style="margin:0">Loading&hellip;</p></section>
   <div class="lbtoast" id="lbtoast"></div>
  </div>
@@ -2332,23 +2389,68 @@ function lbKind0(b){return b.kind==='gpj'?'movement'+(b.bpm?' \u00b7 BPM':''):b.
 // ---- arrange (user 2026-11-23): the user's own order of pages and buttons, only in this tab (settings.json playerLayout,
 // shared with the phone). Buttons stay on their own page - a MOVEMENTS page's "one replaces the other" depends on it.
 // Buttons the layout doesn't know yet (new in the show) go at the end of their page.
+// 2026-11-24 (user): pages can be collapsed (any time) and hidden (in Arrange), and the player has pages of its own with
+// buttons that play the show's scene / movement files. All of it is SX Studio's settings: the show is never written.
 let LBarr=false;
-function lbPages(){if(!LB||!LB.ok)return [];const lay=(SET&&SET.playerLayout)||{},po=(lay.pages||[]).map(String),od=lay.order||{};
- const ix=(a,v,d)=>{const i=a.indexOf(v);return i<0?d:i;};
- return LB.pages.filter(p=>p.buttons.length).slice().sort((a,b)=>ix(po,String(a.n),1e6+a.n)-ix(po,String(b.n),1e6+b.n))
-  .map(p=>{const o=(od[String(p.n)]||[]).map(String);return {p:p,bs:p.buttons.slice().sort((a,b)=>ix(o,a.sec,1e6)-ix(o,b.sec,1e6))};});}
+function lbLay(){const l=(SET&&SET.playerLayout)||{};return {pages:(l.pages||[]).map(String),order:l.order||{},hidden:(l.hidden||[]).map(String),collapsed:(l.collapsed||[]).map(String),custom:JSON.parse(JSON.stringify(l.custom||[]))};}
+function lbFileKind(f){const fs=(LB&&LB.files)||[],l=String(f).toLowerCase();return !fs.some(x=>String(x).toLowerCase()===l)?'missing':/\.gpj$/i.test(f)?'gpj':'scex';}
+function lbCustom(){return lbLay().custom.map(c=>({n:c.id,name:c.name,swap:!!c.swap,custom:true,buttons:(c.buttons||[]).map(b=>({sec:b.id,title:b.title,file:b.file,kind:lbFileKind(b.file),steps:0,color:b.color,bpm:!!b.bpm,flash:!!b.flash,fader:b.fader,beats:b.beats,key:'',custom:true}))}));}
+function lbAllPages(){return LB&&LB.ok?LB.pages.concat(lbCustom()):[];}
+function lbAllButtons(){return lbAllPages().flatMap(p=>p.buttons);}
+function lbPageOf(sec){return lbAllPages().find(p=>p.buttons.some(x=>x.sec===sec));}
+function lbPages(){if(!LB||!LB.ok)return [];const lay=lbLay(),po=lay.pages,od=lay.order,hid=new Set(lay.hidden);
+ const ix=(a,v,d)=>{const i=a.indexOf(v);return i<0?d:i;},cu=lay.custom.map(c=>c.id),key=p=>ix(po,String(p.n),p.custom?2e6+cu.indexOf(p.n):1e6+p.n);
+ return lbAllPages().filter(p=>(p.custom||p.buttons.length)&&(LBarr||!hid.has(String(p.n)))).sort((a,b)=>key(a)-key(b))
+  .map(p=>{const o=p.custom?[]:(od[String(p.n)]||[]).map(String);return {p:p,hid:hid.has(String(p.n)),col:lay.collapsed.includes(String(p.n)),bs:p.custom?p.buttons:p.buttons.slice().sort((a,b)=>ix(o,a.sec,1e6)-ix(o,b.sec,1e6))};});}
 function lbArrange(on){LBarr=on;$('lbpages').classList.toggle('arr',on);$('lbarrbar').classList.toggle('on',on);$('lbarr').classList.toggle('son',on);
- $('lbarr').innerHTML=on?'&#10003; Arranging':'&#8645; Arrange';}
-async function lbSaveLayout(lay){if(!lay){lay={pages:[],order:{}};document.querySelectorAll('#lbpages .lbpg').forEach(g=>{lay.pages.push(g.dataset.n);lay.order[g.dataset.n]=[...g.querySelectorAll('.lbb')].map(x=>x.dataset.sec);});}
- SET=Object.assign(SET||{},{playerLayout:lay});$('lbpages').dataset.gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify(lay);
- try{const r=await api('/api/settings/set',{playerLayout:lay});if(r.ok){SET=r.settings;$('lbpages').dataset.gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify(SET.playerLayout||{});}else lbToast('<span style="color:var(--amber)">The order wasn&rsquo;t saved.</span>');}
- catch(e){lbToast('<span style="color:var(--amber)">The order wasn&rsquo;t saved &mdash; lost connection.</span>');}}
+ $('lbarr').innerHTML=on?'&#10003; Arranging':'&#8645; Arrange';$('lbpages').dataset.gen='';if(LB)renderLab();}
+const lbGen=()=>String(LB.show)+LB.pages.length+'|'+LBarr+'|'+JSON.stringify((SET&&SET.playerLayout)||{});
+async function lbSaveLayout(lay){if(!lay){lay=lbLay();const pages=[],order={};
+  document.querySelectorAll('#lbpages .lbpg').forEach(g=>{const n=g.dataset.n,secs=[...g.querySelectorAll('.lbb')].map(x=>x.dataset.sec);pages.push(n);
+   const c=lay.custom.find(x=>x.id===n);if(c)c.buttons=secs.map(s=>c.buttons.find(b=>b.id===s)).filter(Boolean);else order[n]=secs;});
+  lay.pages.forEach(n=>{if(!pages.includes(n))pages.push(n);});lay.pages=pages;lay.order=Object.assign({},lay.order,order);}
+ SET=Object.assign(SET||{},{playerLayout:lay});$('lbpages').dataset.gen=lbGen();
+ try{const r=await api('/api/settings/set',{playerLayout:lay});if(r.ok){SET=r.settings;$('lbpages').dataset.gen=lbGen();}else lbToast('<span style="color:var(--amber)">The layout wasn&rsquo;t saved.</span>');}
+ catch(e){lbToast('<span style="color:var(--amber)">The layout wasn&rsquo;t saved &mdash; lost connection.</span>');}}
+async function lbSetLay(f){const lay=lbLay();f(lay);await lbSaveLayout(lay);renderLab();}
 $('lbarr').onclick=()=>lbArrange(!LBarr);$('lbarrdone').onclick=()=>lbArrange(false);
-$('lbarrreset').onclick=async()=>{if(!await ask('Back to ShowXpress&rsquo;s order?','The pages and buttons go back to the order they have in ShowXpress.','Reset'))return;await lbSaveLayout({pages:[],order:{}});renderLab();};
-$('lbpages').addEventListener('click',e=>{const b=e.target.closest('[data-pmv]');if(!b||!LBarr)return;e.stopPropagation();
- const g=b.closest('.lbpg'),box=g.parentElement,sib=b.dataset.pmv==='-1'?g.previousElementSibling:g.nextElementSibling;if(!sib||!sib.classList.contains('lbpg'))return;
- if(b.dataset.pmv==='-1')box.insertBefore(g,sib);else box.insertBefore(sib,g);lbSaveLayout();});
-$('lbpages').addEventListener('pointerdown',e=>{if(!LBarr||e.button>0)return;const el=e.target.closest('.lbb');if(!el)return;e.preventDefault();
+$('lbarrreset').onclick=async()=>{if(!await ask('Back to ShowXpress&rsquo;s order?','The pages and buttons go back to the order they have in ShowXpress, and hidden pages show again. Your own pages stay, at the end.','Reset'))return;
+ await lbSetLay(l=>{l.pages=[];l.order={};l.hidden=[];l.collapsed=[];});};
+// ---- the player's own pages
+const lbNextPage=lay=>'x'+(1+Math.max(0,...lay.custom.map(c=>+c.id.slice(1)||0))),lbNextBtn=c=>c.id+'_b'+(1+Math.max(0,...(c.buttons||[]).map(b=>+b.id.split('_b')[1]||0)));
+function lbPageForm(name,swap){return 'Name<br><input id="lbpn" maxlength="40" style="width:100%;margin:6px 0 12px" value="'+esc(name||'')+'"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="lbps"'+(swap?' checked':'')+'> One at a time &mdash; a button here stops the others on this page (like MOVEMENTS)</label>'+
+ '<br><span class="sub">This page is only in the SX Player. ShowXpress and its live screen don&rsquo;t change.</span>';}
+const lbClean=v=>String(v||'').replace(/[\x00-\x1f<>|]/g,'').trim().slice(0,40);
+$('lbnewpg').onclick=async()=>{const lay=lbLay();if(lay.custom.length>=40){lbToast('<span style="color:var(--amber)">That&rsquo;s the most pages the player can have (40).</span>');return;}
+ const go=ask('New page',lbPageForm('',false),'Make the page');setTimeout(()=>{const i=$('lbpn');if(i)i.focus();},50);if(!await go)return;
+ const nm=lbClean($('lbpn').value)||'NEW PAGE',id=lbNextPage(lay);lay.custom.push({id:id,name:nm,swap:$('lbps').checked,buttons:[]});lay.pages=lbPages().map(x=>String(x.p.n)).concat(id);
+ await lbSaveLayout(lay);renderLab();lbAddButtons(id);};
+async function lbAddButtons(id){const lay=lbLay(),c=lay.custom.find(x=>x.id===id);if(!c)return;
+ const used=new Set(LB.pages.flatMap(p=>p.buttons.map(b=>String(b.file).toLowerCase()))),items=[];
+ LB.pages.forEach(p=>p.buttons.forEach(b=>{if(b.kind!=='missing')items.push({k:'b:'+b.sec,t:b.title,s:esc(p.name||('Page '+p.n))+' &middot; '+esc(lbKind0(b)),b:b});}));
+ ((LB&&LB.files)||[]).filter(f=>!used.has(String(f).toLowerCase())).forEach(f=>items.push({k:'f:'+f,t:String(f).replace(/\.(scex|gpj)$/i,''),s:'not on a button &middot; '+(/\.gpj$/i.test(f)?'movement':'scene'),f:f}));
+ const go=ask('Add buttons to '+c.name,'Tick the buttons to copy onto this page. A copy plays the same scene with the same speed and BPM settings; it has no APC pad or key of its own.'+
+  '<input id="lbaq" placeholder="Search" style="width:100%;margin:10px 0 6px"><div id="lbal" class="lbal">'+items.map((x,i)=>'<label data-t="'+esc((x.t+' '+x.s).toLowerCase())+'"><input type="checkbox" data-i="'+i+'"><b>'+esc(x.t)+'</b><small>'+x.s+'</small></label>').join('')+'</div>','Add');
+ setTimeout(()=>{const q=$('lbaq');if(!q)return;q.focus();q.oninput=()=>{const v=q.value.trim().toLowerCase();document.querySelectorAll('#lbal label').forEach(l=>l.style.display=!v||l.dataset.t.includes(v)?'':'none');};},50);
+ if(!await go)return;const pick=[...document.querySelectorAll('#lbal input:checked')].map(x=>items[+x.dataset.i]);if(!pick.length)return;
+ const l2=lbLay(),c2=l2.custom.find(x=>x.id===id);if(!c2)return;c2.buttons=c2.buttons||[];let full=false;
+ pick.forEach(x=>{if(c2.buttons.length>=64){full=true;return;}const b=x.b;
+  c2.buttons.push(b?{id:lbNextBtn(c2),title:b.title,file:b.file,fader:b.fader||0,bpm:!!b.bpm,flash:!!b.flash,beats:b.beats||1,color:b.color==null?-1:b.color}:{id:lbNextBtn(c2),title:x.t,file:x.f,fader:0,bpm:false,flash:false,beats:1,color:-1});});
+ await lbSaveLayout(l2);renderLab();if(full)lbToast('<span style="color:var(--amber)">A page holds 64 buttons &mdash; the rest weren&rsquo;t added.</span>');}
+$('lbpages').addEventListener('click',async e=>{const t=e.target.closest('[data-pa],[data-pmv],[data-xdel]');if(!t)return;e.stopPropagation();
+ const g=t.closest('.lbpg'),n=g.dataset.n;
+ if(t.dataset.pa==='col'){const lay=lbLay(),c=!lay.collapsed.includes(n);lay.collapsed=lay.collapsed.filter(x=>x!==n);if(c)lay.collapsed.push(n);g.classList.toggle('col',c);t.innerHTML=c?'&#9656;':'&#9662;';t.title=c?'Open this page':'Collapse this page';lbSaveLayout(lay);drawLab();return;}
+ if(!LBarr)return;
+ if(t.dataset.pmv){const box=g.parentElement,sib=t.dataset.pmv==='-1'?g.previousElementSibling:g.nextElementSibling;if(!sib||!sib.classList.contains('lbpg'))return;
+  if(t.dataset.pmv==='-1')box.insertBefore(g,sib);else box.insertBefore(sib,g);lbSaveLayout();return;}
+ if(t.dataset.pa==='hide'){await lbSetLay(l=>{const h=!l.hidden.includes(n);l.hidden=l.hidden.filter(x=>x!==n);if(h)l.hidden.push(n);});return;}
+ const lay=lbLay(),c=lay.custom.find(x=>x.id===n);if(!c)return;
+ if(t.dataset.xdel){c.buttons=c.buttons.filter(b=>b.id!==t.dataset.xdel);await lbSaveLayout(lay);renderLab();return;}
+ if(t.dataset.pa==='add'){lbAddButtons(n);return;}
+ if(t.dataset.pa==='edit'){const go=ask('Page settings',lbPageForm(c.name,c.swap),'Save');if(!await go)return;c.name=lbClean($('lbpn').value)||c.name;c.swap=$('lbps').checked;await lbSaveLayout(lay);renderLab();return;}
+ if(t.dataset.pa==='del'){if(!await ask('Delete '+c.name+'?','The page and its '+c.buttons.length+' button'+(c.buttons.length===1?'':'s')+' go from the SX Player. The scenes themselves stay in the show.','Delete the page'))return;
+  lay.custom=lay.custom.filter(x=>x.id!==n);lay.pages=lay.pages.filter(x=>x!==n);lay.hidden=lay.hidden.filter(x=>x!==n);lay.collapsed=lay.collapsed.filter(x=>x!==n);await lbSaveLayout(lay);renderLab();}},true);
+$('lbpages').addEventListener('pointerdown',e=>{if(!LBarr||e.button>0)return;if(e.target.closest('[data-xdel]'))return;const el=e.target.closest('.lbb');if(!el)return;e.preventDefault();
  const grid=el.parentElement,r=el.getBoundingClientRect(),gh=el.cloneNode(true),start=[...grid.children].indexOf(el),dx=e.clientX-r.left,dy=e.clientY-r.top;
  gh.classList.add('lbghost');gh.style.width=r.width+'px';gh.style.height=r.height+'px';gh.style.margin='0';document.body.appendChild(gh);el.classList.add('drag');
  const place=ev=>{gh.style.left=(ev.clientX-dx)+'px';gh.style.top=(ev.clientY-dy)+'px';};place(e);
@@ -2369,12 +2471,18 @@ function renderLab(){const run=lbRun();
  else{$('lbgo').onclick=()=>lbGo();$('lbreload').onclick=loadLab;}
  const pg=$('lbpages');pg.classList.toggle('idle',!run);
  if(!LB||!LB.ok){pg.innerHTML='<p class="sub" style="margin:0;color:var(--red)">'+esc((LB&&LB.error)||'Could not read the show.')+'</p>';drawLab();return;}
- const gen=String(LB.show)+LB.pages.length+'|'+JSON.stringify((SET&&SET.playerLayout)||{});
- if(!pg.querySelector('.lbb')||pg.dataset.gen!==gen){pg.dataset.gen=gen;
-  pg.innerHTML=lbPages().map(({p,bs})=>'<div class="lbpg" data-n="'+p.n+'"><h3>'+esc(p.name||('Page '+p.n))+'<span class="pgbar"><button class="mini" data-pmv="-1" title="Move this page up">&#9650;</button><button class="mini" data-pmv="1" title="Move this page down">&#9660;</button></span></h3><div class="lbg">'+bs.map(b=>{const c=lbCol(b.color);
-   return '<div class="lbb'+(b.kind==='missing'?' na':'')+'" data-sec="'+esc(b.sec)+'" data-k="'+esc(lbKind(b))+'" title="'+esc(b.file)+'"'+(c?' style="--c:'+c+'"':'')+'><b>'+esc(b.title)+'</b><small>'+esc(lbKind(b))+'</small></div>';}).join('')+'</div></div>').join('')||'<p class="sub" style="margin:0">No live buttons in the show.</p>';}
+ const gen=lbGen();
+ if(!pg.querySelector('.lbb')||pg.dataset.gen!==gen){pg.dataset.gen=gen;const ps=lbPages(),lay=lbLay(),ids=new Set(lbAllPages().map(p=>String(p.n))),nh=lay.hidden.filter(n=>ids.has(n)).length;
+  pg.innerHTML=ps.map(({p,bs,hid,col})=>'<div class="lbpg'+(col?' col':'')+(hid?' hid':'')+'" data-n="'+esc(String(p.n))+'"><h3><button class="pcol" data-pa="col" title="'+(col?'Open this page':'Collapse this page')+'">'+(col?'&#9656;':'&#9662;')+'</button>'+esc(p.name||('Page '+p.n))+
+   (p.custom?'<span class="pgtag" title="Only in the SX Player - not in ShowXpress">SX Player</span>':'')+(hid?'<span class="pgtag">hidden</span>':'')+'<span class="pgon"></span>'+
+   '<span class="pgbar"><button class="mini" data-pmv="-1" title="Move this page up">&#9650;</button><button class="mini" data-pmv="1" title="Move this page down">&#9660;</button><button class="mini" data-pa="hide" title="'+(hid?'Show this page in the player again':'Hide this page from the player (it still plays from the APC and the Auto Show)')+'">'+(hid?'Show':'Hide')+'</button>'+
+   (p.custom?'<button class="mini" data-pa="add">+ Buttons</button><button class="mini" data-pa="edit">Settings</button><button class="mini" data-pa="del">Delete</button>':'')+'</span></h3><div class="lbg">'+bs.map(b=>{const c=lbCol(b.color);
+   return '<div class="lbb'+(b.kind==='missing'?' na':'')+'" data-sec="'+esc(b.sec)+'" data-k="'+esc(lbKind(b))+'" title="'+esc(b.file)+'"'+(c?' style="--c:'+c+'"':'')+'>'+(b.custom?'<i class="xdel" data-xdel="'+esc(b.sec)+'" title="Take it off this page">&times;</i>':'')+'<b>'+esc(b.title)+'</b><small>'+esc(lbKind(b))+'</small></div>';}).join('')+'</div>'+
+   (p.custom&&!bs.length?'<p class="sub" style="margin:0">No buttons yet &mdash; '+(LBarr?'press <b>+ Buttons</b>.':'press <b>Arrange</b>, then <b>+ Buttons</b>.')+'</p>':'')+'</div>').join('')+
+   (!LBarr&&nh?'<p class="sub" style="margin:14px 0 0">'+nh+' page'+(nh===1?' is':'s are')+' hidden &mdash; press <b>Arrange</b> to show '+(nh===1?'it':'them')+' again.</p>':'')||'<p class="sub" style="margin:0">No live buttons in the show.</p>';}
  drawLab();}
 function drawLab(){const st=LBS&&LBS.running&&LBS.status,on={};if(st&&st.on)st.on.forEach(x=>on[x.slot]=x);
+ document.querySelectorAll('#lbpages .lbpg').forEach(g=>{const n=g.classList.contains('col')?[...g.querySelectorAll('.lbb')].filter(el=>on[el.dataset.sec]).length:0,s=g.querySelector('.pgon'),tx=n?'\u25b6 '+n+' playing':'';if(s&&s.textContent!==tx)s.textContent=tx;});
  document.querySelectorAll('#lbpages .lbb').forEach(el=>{const x=on[el.dataset.sec];el.classList.toggle('on',!!x);const s=el.querySelector('small'),tx=x?(x.mv?'\u25b6 moving':x.of>1?'\u25b6 step '+x.step+' of '+x.of:'\u25b6 on'):el.dataset.k;if(s.textContent!==tx)s.textContent=tx;});
  lbFdDraw(st);lbBpmDraw(st);if(st)LBbo=!!st.bo;const bb=$('lbbo');if(bb){bb.classList.toggle('son',LBbo);bb.textContent=LBbo?'\u25cf Blackout is ON':'Blackout';}
  const se=st&&st.err?'<span style="color:var(--red)">Couldn&rsquo;t play '+esc(st.err)+'</span>':'';if(se&&se!==LBlastErr)lbToast(se);LBlastErr=se;
@@ -2394,10 +2502,10 @@ async function lbCmd(b,quiet){let r;try{r=await api('/api/lab/cmd',b);}catch(e){
  if(r.ok){}else if(r.gone){LBgen++;LBS={ok:true,running:false};LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);renderLab();return;}else{LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);}
  drawLab();clearTimeout(LBT);LBT=setTimeout(labPoll,120);}
 $('lbpages').addEventListener('click',e=>{const el=e.target.closest('.lbb');if(!el||LBarr)return;LBerr='';
- const b=LB.pages.flatMap(p=>p.buttons).find(x=>x.sec===el.dataset.sec);if(!b)return;
+ const b=lbAllButtons().find(x=>x.sec===el.dataset.sec);if(!b)return;
  if(b.kind==='missing'){LBerr='<span style="color:var(--amber)">'+esc(b.title)+': its file is missing.</span>';lbToast(LBerr);drawLab();return;}
  if(!lbRun()){lbGo(b.sec);return;}
- const on=el.classList.contains('on'),pg=LB.pages.find(p=>p.buttons.includes(b));
+ const on=el.classList.contains('on'),pg=lbPageOf(b.sec);
  if(!on&&pg&&pg.swap)pg.buttons.forEach(x=>{const o=document.querySelector('.lbb[data-sec="'+x.sec+'"]');if(o)o.classList.remove('on');});
  el.classList.toggle('on',!on);lbCmd({cmd:'press',sec:b.sec});});
 document.addEventListener('keydown',e=>{if(!$('v-lab').classList.contains('on')||!lbRun()||e.ctrlKey||e.altKey||e.metaKey||e.repeat)return;
@@ -2416,7 +2524,7 @@ async function lbGo(first){if(lbRun())return;
  LBgen++;LBreo=c.reo;LBtest=!!r.test;LBbo=false;LBS={ok:true,running:true,status:null};LBerr=r.test?'Test copy: no real interface &mdash; the output goes to _dmx_frame.txt.':'Playing on <b>'+esc(r.iface||'the DMX interface')+'</b>. Tap a button to start or stop it.';
  if(r.list&&r.list.ok){LB=r.list;$('lbpages').dataset.gen='';}else if(!$('lb'+'pages').querySelector('.lbb'))await loadLab();renderLab();
  if(r.carried&&r.carried.length)LBerr+=' Carried on from ShowXpress: <b>'+r.carried.map(esc).join(', ')+'</b>.';
- const fb=typeof first==='string'&&first&&LB&&LB.ok&&LB.pages.flatMap(p=>p.buttons).find(x=>x.sec===first);
+ const fb=typeof first==='string'&&first&&LB&&LB.ok&&lbAllButtons().find(x=>x.sec===first);
  if(fb&&!(r.carried||[]).includes(fb.title)){const el=document.querySelector('.lbb[data-sec="'+first+'"]');if(el)el.classList.add('on');await lbCmd({cmd:'press',sec:first});}
  labPoll();}
 async function lbStop(){const reo=!PH&&$('lbreo')&&$('lbreo').checked,st=LBS&&LBS.status;
@@ -2727,8 +2835,9 @@ try {
           if (-not (Test-Player)) { Send-Json $ctx @{ ok = $false; gone = $true; error = 'The SX Player stopped.' }; break }
           $c = "$($body.cmd)"; $line = ''; $err = ''
           if ($c -eq 'press') {
-            $b = $script:labMap["$($body.sec)"]
-            if (-not $b -or "$($b.sec)" -notmatch '^page\d+_button\d+$') { $err = 'That button is not in the show any more - press Reload.' }
+            $b = $script:labMap["$($body.sec)"]; if (-not $b -and "$($body.sec)" -match $xbRx) { $b = $script:labX["$($body.sec)"] }
+            if ($b -and "$($b.sec)" -match $xbRx -and $b.kind -eq 'missing') { $err = "The file for $($b.title) is missing." }
+            elseif (-not $b -or ("$($b.sec)" -notmatch '^page\d+_button\d+$' -and "$($b.sec)" -notmatch $xbRx)) { $err = 'That button is not in the show any more - press Reload.' }
             else { $line = "press $($b.sec)" }
           }
           elseif ($c -eq 'fader') {
@@ -2744,8 +2853,8 @@ try {
           }
           elseif ($c -eq 'key') { $kk = "$($body.key)".ToLower(); if ($kk -match '^[a-z0-9]$') { $line = "key $kk" } else { $err = 'Bad key.' } }
           elseif ($c -eq 'on' -or $c -eq 'off') {
-            $b = $script:labMap["$($body.sec)"]
-            if (-not $b -or "$($b.sec)" -notmatch '^page\d+_button\d+$') { $err = 'That button is not in the show any more - press Reload.' }
+            $b = $script:labMap["$($body.sec)"]; if (-not $b -and "$($body.sec)" -match $xbRx) { $b = $script:labX["$($body.sec)"] }
+            if (-not $b -or ("$($b.sec)" -notmatch '^page\d+_button\d+$' -and "$($b.sec)" -notmatch $xbRx)) { $err = 'That button is not in the show any more - press Reload.' }
             elseif ($c -eq 'off') { $line = "off $($b.sec)" }
             elseif ($b.kind -notin 'scex', 'gpj' -or -not (Test-Path -LiteralPath "$($b.path)")) { $err = "The file for $($b.title) is missing." }
             else { $line = "on $($b.sec) $($b.path)" }
@@ -2789,6 +2898,7 @@ try {
           if ($null -ne $body.tabHidden) { $st.tabHidden = @($body.tabHidden | ForEach-Object { "$_" }) }
           if ($null -ne $body.tabNames) { $st.tabNames = Get-TabNames $body.tabNames }
           if ($null -ne $body.playerLayout) { $st.playerLayout = Get-PlayerLayout $body.playerLayout }
+          $lay = $null -ne $body.playerLayout
           if (-not $fromPhone) {
             if ($null -ne $body.reopen) { $st.reopen = [bool]$body.reopen; $script:qReopen = $st.reopen }
             if ($null -ne $body.autoUpd) { $st.autoUpd = [bool]$body.autoUpd }
@@ -2799,6 +2909,7 @@ try {
             }
           }
           Save-Settings $st
+          if ($lay) { Sync-PlayerExtras }   # a button added to / changed on one of the player's own pages plays straight away
           Send-Json $ctx @{ ok = $true; settings = (Get-Settings) }
         }
         '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }

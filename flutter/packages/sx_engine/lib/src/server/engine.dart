@@ -22,7 +22,7 @@ import 'routes/routes.dart';
 
 /// The version this build of SX Studio reports, and compares with GitHub's
 /// newest release.
-const sxStudioVersion = '2.0.0';
+const sxStudioVersion = String.fromEnvironment('SX_VERSION', defaultValue: '2.0.0');
 
 /// How to start the engine.
 class EngineConfig {
@@ -35,6 +35,7 @@ class EngineConfig {
     this.phonePort = 47322,
     this.settingsDir,
     this.appVersion = sxStudioVersion,
+    this.appExe,
   });
 
   /// Port for the laptop's own UI, on the loopback address. 0 picks a free one.
@@ -65,6 +66,11 @@ class EngineConfig {
 
   /// SX Studio's version, for the update check.
   final String appVersion;
+
+  /// The installed app's program, which an update opens again when it is
+  /// done. Null (the engine on its own, tests) means there is nothing to
+  /// update, and "update" only opens the release page.
+  final String? appExe;
 }
 
 /// The laptop side of SX Studio: the tools, the save queue and the HTTP API.

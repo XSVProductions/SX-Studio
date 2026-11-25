@@ -18,6 +18,7 @@ export 'src/server/queue.dart';
 export 'src/settings/open_on_computer.dart';
 export 'src/settings/settings_store.dart';
 export 'src/settings/update_check.dart';
+export 'src/settings/update_install.dart';
 export 'src/server/routes/move.dart' show MoveSavedHook;
 export 'src/show/find_show.dart';
 export 'src/show/fixtures.dart';

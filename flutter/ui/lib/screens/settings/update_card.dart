@@ -1,26 +1,59 @@
+import 'dart:async';
+import 'dart:ui' show AppExitType;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../boot/boot.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'settings_bits.dart';
 import 'settings_model.dart';
 
-/// Asks to update to [u] and opens its release page on the laptop. The new
-/// app's installer isn't decided yet, so nothing is downloaded here.
+/// Asks, then updates to [u]: the laptop downloads the installer and runs it,
+/// and SX Studio closes so the installer can replace it. The old `doUpd`.
 Future<void> startUpdate(BuildContext context, UpdateInfo u) async {
   final app = AppScope.read(context);
-  if (!await confirm(
-    context,
-    'Update to version ${u.latest}?',
-    "The release page opens in the browser on the laptop. Download the installer there and run it. Your show isn't touched.",
-    'Open the release page',
-  )) {
+  final how = u.mac
+      ? "SX Studio closes and the Mac installer opens. Follow it, and SX Studio opens again when it's done."
+      : 'SX Studio closes and opens again by itself in a few seconds.';
+  if (!await confirm(context, 'Update to version ${u.latest}?', "Downloads it from GitHub and installs it. $how Your show isn't touched.", 'Update')) return;
+  if (!context.mounted) return;
+  final line = ValueNotifier('Downloading the update.');
+  unawaited(
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: ValueListenableBuilder(
+            valueListenable: line,
+            builder: (context, text, _) => Text(text, style: TextStyle(color: Sx.text, fontSize: 14)),
+          ),
+        ),
+      ),
+    ),
+  );
+  ToolResult r;
+  try {
+    r = await app.client.updateInstall();
+  } on ApiException catch (e) {
+    r = ToolResult.failed(e.message);
+  }
+  if (r.ok && r.extra['restarting'] == true) {
+    line.value = u.mac
+        ? "Opening the installer. Follow it, and SX Studio opens again when it's done."
+        : 'Installing the update. SX Studio opens again by itself.';
+    await shutdown();
+    await ServicesBinding.instance.exitApplication(AppExitType.required);
     return;
   }
   if (!context.mounted) return;
-  await runSave(context, app.client.updateInstall, quiet: true);
+  Navigator.of(context, rootNavigator: true).pop();
+  if (!r.ok || r.out.trim().isNotEmpty) await showReport(context, r.ok ? 'Update' : 'Not updated', r.out, error: r.error);
 }
 
 /// The Updates section of Settings: the version, "Check now", and whether

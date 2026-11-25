@@ -134,7 +134,44 @@ void main() {
       expect(u.page, endsWith('/tag/v2.1.0'));
     });
 
-    test('install opens the release page and runs nothing', () async {
+    test('install downloads the installer and starts the script that runs it', () async {
+      github(() => _release('v2.1.0'));
+      final started = <String>[];
+      engine.provide(
+        UpdateInstaller(
+          appExe: r"C:\Users\O'Brien\sx_studio.exe",
+          mac: false,
+          tempDir: tmp.path,
+          download: (from, to) async => to.writeAsStringSync('$from'),
+          start: (exe, args) async => started.add('$exe ${args.last}'),
+        ),
+      );
+      final r = await laptop.updateInstall();
+      expect(r.extra['restarting'], isTrue, reason: r.error);
+      final installer = p.join(tmp.path, 'SX-Studio-Setup.exe');
+      expect(File(installer).readAsStringSync(), endsWith('/download/v2.1.0/SX-Studio-Setup.exe'));
+      final script = p.join(tmp.path, 'sxh_update.ps1');
+      expect(started, ['powershell.exe $script']);
+      expect(File(script).readAsStringSync(), contains("-FilePath '$installer' -ArgumentList '/VERYSILENT'"));
+      expect(File(script).readAsStringSync(), contains(r"Start-Process -FilePath 'C:\Users\O''Brien\sx_studio.exe'"));
+      expect(opener.opened, isEmpty);
+    });
+
+    test('a failed download says why and starts nothing', () async {
+      github(() => _release('v2.1.0'));
+      engine.provide(
+        UpdateInstaller(
+          appExe: 'sx_studio.exe',
+          mac: false,
+          tempDir: tmp.path,
+          download: (from, to) async => throw const HttpException('GitHub answered 404'),
+          start: (exe, args) async => fail('nothing may start'),
+        ),
+      );
+      expect((await laptop.updateInstall()).error, startsWith('Download failed: '));
+    });
+
+    test('without an installed app, install opens the release page and runs nothing', () async {
       github(() => _release('v2.1.0'));
       final r = await laptop.updateInstall();
       expect(r.ok, isTrue, reason: r.error);

@@ -16,6 +16,13 @@ class _FakeSx implements SxApp {
   Future<ToolResult> close({bool force = false}) async => const ToolResult(ok: true);
 }
 
+class _FakeHooks implements LabPlayerHooks {
+  var synced = 0;
+
+  @override
+  void syncExtras() => synced++;
+}
+
 class _FakeOpener implements Opener {
   final opened = <String>[];
 
@@ -66,6 +73,31 @@ void main() {
     expect(s.tabNames, {'rt': 'Rig'});
     expect(engine.queue.reopen, isFalse);
     expect(File(p.join(tmp.path, 'cfg', 'settings.json')).readAsStringSync(), contains('"reopen":false'));
+  });
+
+  test("the player's own pages reach the player, and a saved layout syncs it", () async {
+    final hooks = _FakeHooks();
+    engine.provide<LabPlayerHooks>(hooks);
+    await laptop.settingsSet(const SettingsChange(tabHidden: ['rt']));
+    expect(hooks.synced, 0);
+    await laptop.settingsSet(
+      const SettingsChange(
+        playerLayout: PlayerLayout(
+          custom: [
+            PlayerPage(
+              id: 'x1',
+              name: 'Mine',
+              buttons: [PlayerButton(id: 'x1_b1', title: 'Chase', file: 'CHASE.scex', fader: 3, beats: 2)],
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(hooks.synced, 1);
+    final page = engine.find<PlayerLayoutSource>()!.customPages.single;
+    expect(page.id, 'x1');
+    expect(page.buttons.single.file, 'CHASE.scex');
+    expect(page.buttons.single.fader, 3);
   });
 
   test('a Google Drive folder that is not there is refused', () async {

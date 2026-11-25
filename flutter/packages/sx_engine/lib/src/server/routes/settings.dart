@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
+import '../../player/player_links.dart';
 import '../../settings/open_on_computer.dart';
 import '../../settings/settings_store.dart';
 import '../../show/show_env.dart';
@@ -13,6 +14,7 @@ import 'gdrive.dart' show driveShow;
 void registerSettingsRoutes(Engine e) {
   final store = SettingsStore(e.settingsFolder);
   e.provide(store);
+  e.provide<PlayerLayoutSource>(_PlayerPages(store));
   e.queue.reopen = store.read().reopen;
 
   e.api.get('/api/settings', (req) => SettingsInfo(settings: store.read(), ver: e.config.appVersion, phone: req.fromPhone));
@@ -20,6 +22,8 @@ void registerSettingsRoutes(Engine e) {
   e.api.post('/api/settings/set', (req) {
     final s = store.apply(req.body, fromPhone: req.fromPhone);
     if (!req.fromPhone) e.queue.reopen = s.reopen;
+    // a button added to or changed on one of the player's own pages plays straight away
+    if (req.body['playerLayout'] != null) e.find<LabPlayerHooks>()?.syncExtras();
     return {'ok': true, 'settings': s};
   });
 
@@ -55,4 +59,24 @@ Future<ToolResult> openOnComputer(Engine e, String what) async {
     throw ToolError("Couldn't open $t (${x.message})");
   }
   return const ToolResult(ok: true);
+}
+
+/// The SX Player's own pages, read from the settings each time, already
+/// cleaned by [SettingsStore.read] the way `Get-PlayerLayout` cleans them.
+class _PlayerPages implements PlayerLayoutSource {
+  _PlayerPages(this.store);
+
+  final SettingsStore store;
+
+  @override
+  List<PlayerPageSpec> get customPages => [
+    for (final c in store.read().playerLayout.custom)
+      PlayerPageSpec(
+        id: c.id,
+        swap: c.swap,
+        buttons: [
+          for (final b in c.buttons) PlayerButtonSpec(id: b.id, title: b.title, file: b.file, fader: b.fader, bpm: b.bpm, flash: b.flash, beats: b.beats),
+        ],
+      ),
+  ];
 }

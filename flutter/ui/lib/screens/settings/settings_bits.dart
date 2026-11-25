@@ -216,27 +216,44 @@ InputDecoration txtDecoration({String? hint}) => InputDecoration(
 );
 
 /// A fold-out section, the old `details` with its dim `summary` line.
-class Details extends StatelessWidget {
+class Details extends StatefulWidget {
   const Details(this.summary, {super.key, required this.children});
 
   final String summary;
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Theme(
-    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-    child: ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      dense: true,
-      visualDensity: VisualDensity.compact,
-      minTileHeight: 30,
-      controlAffinity: ListTileControlAffinity.leading,
-      iconColor: Sx.dim,
-      collapsedIconColor: Sx.dim,
-      childrenPadding: const EdgeInsets.only(bottom: 4),
-      expandedCrossAxisAlignment: CrossAxisAlignment.start,
-      title: Text(summary, style: TextStyle(fontSize: 12.5, color: Sx.dim)),
-      children: children,
-    ),
+  State<Details> createState() => _DetailsState();
+}
+
+class _DetailsState extends State<Details> {
+  var _open = false;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      InkWell(
+        onTap: () => setState(() => _open = !_open),
+        hoverColor: Colors.transparent,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_open ? Icons.arrow_drop_down : Icons.arrow_right, size: 18, color: Sx.dim),
+              Flexible(
+                child: Text(widget.summary, style: TextStyle(fontSize: 12.5, color: Sx.dim)),
+              ),
+            ],
+          ),
+        ),
+      ),
+      if (_open)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: widget.children),
+        ),
+    ],
   );
 }

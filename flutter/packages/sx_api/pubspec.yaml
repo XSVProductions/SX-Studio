@@ -1,0 +1,14 @@
+name: sx_api
+description: Wire types and the HTTP client shared by the SX Studio engine and UI. No dart:io, so it compiles for web.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  http: ^1.2.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0

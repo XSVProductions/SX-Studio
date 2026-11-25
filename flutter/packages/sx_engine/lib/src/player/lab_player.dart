@@ -85,6 +85,9 @@ class LabPlayer implements PlayerControl, LabPlayerHooks {
   final bool onMac;
 
   SxPlayer? _player;
+
+  /// The player while it is meant to run, even if it has just stopped by itself.
+  SxPlayer? get player => _player;
   String _root = '';
   Map<String, Object?>? _snap;
   final _tries = <DateTime>[];

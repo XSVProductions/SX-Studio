@@ -224,45 +224,6 @@ class RigHeader extends StatelessWidget {
   }
 }
 
-/// The save bar for the rig tabs. On a laptop it is the shared [SaveBar].
-/// On a phone it follows the old `.bar` phone rule: the hint gets its own
-/// line and the buttons share the row under it. [SaveBar] keeps the hint and
-/// up to three buttons on one row, which leaves the hint no room at 380 px.
-class RigBar extends StatelessWidget {
-  const RigBar({super.key, required this.hint, required this.actions});
-
-  final String hint;
-  final List<Widget> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    if (MediaQuery.sizeOf(context).width > 640) return SaveBar(hint: hint, actions: actions);
-    return Container(
-      decoration: BoxDecoration(
-        color: Sx.bg,
-        border: Border(top: BorderSide(color: Sx.line)),
-      ),
-      padding: const EdgeInsets.all(10),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (hint.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(hint, style: TextStyle(color: Sx.dim, fontSize: 12)),
-            ),
-          Row(
-            children: [
-              for (final (i, a) in actions.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: a)],
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// A box with a dashed 1 px border, like CSS `border: 1px dashed`. Flutter's
 /// own borders are solid only.
 class DashedBox extends StatelessWidget {
@@ -307,9 +268,14 @@ class _Dashes extends CustomPainter {
   bool shouldRepaint(_Dashes old) => old.color != color || old.radius != radius || old.fill != fill;
 }
 
-/// Loads the screen again each time its tab comes back into view, unless it
-/// holds unsaved edits. Saves in one rig tab change what the others show.
-mixin ReloadWhenShown<T extends StatefulWidget> on State<T> {
+/// When the rig tabs read the show again, as the old page's poll did:
+///
+/// - the queue saved into the show (`reloadAll`): always, unsaved edits
+///   included, since the queue just saved them;
+/// - ShowXpress closed: unless the screen holds unsaved edits;
+/// - the tab comes back into view: unless it holds unsaved edits. Saves in
+///   one rig tab change what the others show.
+mixin RigReloads<T extends StatefulWidget> on ShowWatcher<T> {
   String get tabId;
   bool get dirty;
   Future<void> load();
@@ -331,6 +297,14 @@ mixin ReloadWhenShown<T extends StatefulWidget> on State<T> {
     final shown = _app!.tab == tabId;
     if (shown && !_wasShown && !dirty) load();
     _wasShown = shown;
+  }
+
+  @override
+  void onQueueRan() => load();
+
+  @override
+  void onSxClosed() {
+    if (!dirty) load();
   }
 
   @override

@@ -15,7 +15,7 @@ class RigScreen extends StatefulWidget {
   State<RigScreen> createState() => _RigScreenState();
 }
 
-class _RigScreenState extends State<RigScreen> with ReloadWhenShown {
+class _RigScreenState extends State<RigScreen> with ShowWatcher, RigReloads {
   RigPreview? _data;
   var _error = '';
 
@@ -111,7 +111,7 @@ class _RigScreenState extends State<RigScreen> with ReloadWhenShown {
     final d = _data;
     final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
     return ScreenBody(
-      bar: RigBar(
+      bar: SaveBar(
         hint: _hint(app),
         actions: [
           TextButton(onPressed: d != null && dirty ? _undo : null, child: const Text('Undo')),

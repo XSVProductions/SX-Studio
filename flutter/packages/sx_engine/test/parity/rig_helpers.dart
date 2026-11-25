@@ -38,7 +38,7 @@ List<int> canonicalJson(List<int> bytes, {Set<String> sortLists = const {}, Set<
     List l => [for (final e in l) walk(e)],
     _ => v,
   };
-  return utf8.encode(rigPsJson(_sortKeys(walk(jsonDecode(utf8.decode(bytes))))));
+  return utf8.encode(psJson(_sortKeys(walk(jsonDecode(utf8.decode(bytes))))));
 }
 
 /// The one allowed difference where an old tool deleted its state file: the

@@ -6,21 +6,24 @@ import 'harness.dart';
 
 Map<String, Object?> _head(String id, int num, bool is140, bool on) => {'id': id, 'label': '${is140 ? 140 : 251} #$num', 'num': num, 'is140': is140, 'on': on};
 
+/// Two 140s of three in SKIP FLASH, and one 251 not in it.
+FakeEngine _engine() => FakeEngine({
+  '/api/skip': {
+    'ok': true,
+    'show': 'Test',
+    'scene': 'skip.scex',
+    'stepCs': 10,
+    'unknown': 0,
+    'heads': [_head('1', 1, true, true), _head('2', 2, true, true), _head('3', 3, true, false), _head('9', 1, false, false)],
+    'order': ['140 #1', '140 #2'],
+    'order140': [1, 2, 3],
+    'order251': [1],
+  },
+});
+
 void main() {
   testWidgets('SKIP FLASH needs two heads, and Save sends the picked ones', (tester) async {
-    final e = FakeEngine({
-      '/api/skip': {
-        'ok': true,
-        'show': 'Test',
-        'scene': 'skip.scex',
-        'stepCs': 10,
-        'unknown': 0,
-        'heads': [_head('1', 1, true, true), _head('2', 2, true, true), _head('3', 3, true, false), _head('9', 1, false, false)],
-        'order': ['140 #1', '140 #2'],
-        'order140': [1, 2, 3],
-        'order251': [1],
-      },
-    });
+    final e = _engine();
     final app = await pumpScreen(tester, e, 'skip', SkipScreen.new);
     expect(find.text('2 of 3'), findsOneWidget);
 
@@ -38,6 +41,14 @@ void main() {
     expect(e.posts.single.body, {
       'heads': ['1', '3', '9'],
     });
+    await finish(tester, app);
+  });
+
+  testWidgets('reads the show again when ShowXpress closes or the queue saves', (tester) async {
+    final e = _engine()..sxOpen = true;
+    final app = await pumpScreen(tester, e, 'skip', SkipScreen.new);
+    await checkReloads(tester, e, app, 'skip', '/api/skip', () => tap(tester, find.text('#3')));
+    expect(find.text('2 of 3'), findsOneWidget);
     await finish(tester, app);
   });
 }

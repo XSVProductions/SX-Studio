@@ -108,3 +108,81 @@ bool psLike(String s, String pattern) {
   rx.write(r'$');
   return RegExp(rx.toString(), caseSensitive: false, dotAll: true).hasMatch(s);
 }
+
+/// The text PowerShell 7's `ConvertTo-Json` writes for [value]: two-space
+/// indent, `"key": value`, LF line ends, and its string escapes. Maps keep
+/// their order, so pass them in the order the old tool would write.
+///
+/// Doubles are refused: .NET writes them its own way (`netNumber` in
+/// `tools/move_edit/gpj.dart`). The move editor's `psJsonPretty` is the same
+/// writer with doubles, and can switch to this one once `netNumber` lives here.
+String psJson(Object? value) {
+  final b = StringBuffer();
+  void write(Object? v, String indent) {
+    final inner = '$indent  ';
+    switch (v) {
+      case null:
+        b.write('null');
+      case bool x:
+        b.write('$x');
+      case int x:
+        b.write('$x');
+      case String s:
+        b.write(_psJsonString(s));
+      case List<Object?> l when l.isEmpty:
+        b.write('[]');
+      case List<Object?> l:
+        b.write('[\n');
+        for (final (i, e) in l.indexed) {
+          b.write(inner);
+          write(e, inner);
+          b.write(i < l.length - 1 ? ',\n' : '\n');
+        }
+        b.write('$indent]');
+      case Map<String, Object?> m when m.isEmpty:
+        b.write('{}');
+      case Map<String, Object?> m:
+        b.write('{\n');
+        for (final (i, e) in m.entries.indexed) {
+          b.write('$inner${_psJsonString(e.key)}: ');
+          write(e.value, inner);
+          b.write(i < m.length - 1 ? ',\n' : '\n');
+        }
+        b.write('$indent}');
+      default:
+        throw ArgumentError('psJson: ${v.runtimeType}');
+    }
+  }
+
+  write(value, '');
+  return b.toString();
+}
+
+/// A string as Newtonsoft.Json (inside `ConvertTo-Json`) escapes it.
+String _psJsonString(String s) {
+  final b = StringBuffer('"');
+  for (final c in s.runes) {
+    switch (c) {
+      case 0x22:
+        b.write(r'\"');
+      case 0x5C:
+        b.write(r'\\');
+      case 0x08:
+        b.write(r'\b');
+      case 0x09:
+        b.write(r'\t');
+      case 0x0A:
+        b.write(r'\n');
+      case 0x0C:
+        b.write(r'\f');
+      case 0x0D:
+        b.write(r'\r');
+      case < 0x20 || 0x85 || 0x2028 || 0x2029:
+        b.write('\\u${c.toRadixString(16).padLeft(4, '0')}');
+      default:
+        b.writeCharCode(c);
+    }
+  }
+  b.write('"');
+  return b.toString();
+}

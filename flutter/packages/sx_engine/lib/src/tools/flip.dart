@@ -108,14 +108,14 @@ String flipApply(ShowEnv env, Map<String, Flip> flip) {
 
   final out = RigWrites();
   writes.forEach(out.add);
-  if (rsOut != null) out.add(rsFile.path, rigPsJson(rsOut), bom: false);
+  if (rsOut != null) out.add(rsFile.path, psJson(rsOut), bom: false);
   final statePath = env.path('flip_state.json');
   if (want.isNotEmpty) {
     final heads = <String, Object?>{
       for (final m in movers)
         if (want[m.id] case final w?) m.id: {'label': m.label, 'pan': w.pan, 'tilt': w.tilt},
     };
-    out.add(statePath, rigPsJson({'saved': sortableTime(env.now()), 'heads': heads}), bom: false);
+    out.add(statePath, psJson({'saved': sortableTime(env.now()), 'heads': heads}), bom: false);
   } else if (File(statePath).existsSync() && readText(statePath) != rigEmptyState) {
     out.add(statePath, rigEmptyState, bom: false);
   }

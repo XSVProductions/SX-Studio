@@ -350,11 +350,7 @@ String rtApply(ShowEnv env, Map<String, String> assign, {required bool extra}) {
   } else {
     out.add('  nothing to change in the 2D view');
   }
-  writes.add(
-    env.path('rig_test.json'),
-    rigPsJson({'saved': env.now().toIso8601String().substring(0, 19), 'extra': extra, 'hung': slotOf.keys.toList()}),
-    bom: false,
-  );
+  writes.add(env.path('rig_test.json'), psJson({'saved': sortableTime(env.now()), 'extra': extra, 'hung': slotOf.keys.toList()}), bom: false);
   writes.commit();
   out.addAll(lines);
 

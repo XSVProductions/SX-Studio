@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:sx_api/sx_api.dart';
 
 import '../../dmx/dmx_output.dart';
+import '../../dmx/nova.dart';
 import '../../show/show_env.dart';
 import '../../tools/aim/aim.dart';
 import '../api.dart';
@@ -58,11 +61,20 @@ void registerLiveRoutes(Engine e) {
         if (h.rt) session.inv.addAll([h.addr + 2, h.addr + 3]);
       }
     }
-    // `stopNova` pauses the NovaStar scanner on Windows. Not ported.
+    if (psTruthy(req.body['stopNova']) && Platform.isWindows) await pauseNova();
     try {
       final live = await e.dmx.startLive();
       return {'ok': true, 'iface': live.iface, 'test': e.dmx.spec is FakeDmxSpec, 'info': info};
     } on DmxError catch (err) {
+      if (Platform.isWindows && err.message.toLowerCase().contains('was not found') && await novaRunning()) {
+        return {
+          'ok': false,
+          'nova': true,
+          'error':
+              'The NovaStar LED-screen software (NovaLCT) is holding the DMX interface. Its USB scanner can be paused while you aim - NovaLCT starts it again by itself.',
+          'out': '',
+        };
+      }
       return {'ok': false, 'error': err.message, 'out': ''};
     }
   });

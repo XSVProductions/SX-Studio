@@ -6,6 +6,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../dmx/dmx_output.dart';
 import '../dmx/efk_dmx.dart';
+import '../dmx/nova.dart';
 import '../ps_compat.dart';
 import '../server/engine.dart';
 import '../show/show_env.dart';
@@ -327,11 +328,10 @@ class LabPlayer implements PlayerControl, LabPlayerHooks {
     }
     final windows = !onMac && Platform.isWindows;
     if (stopNova && windows) {
-      await _killNova();
-      await Future<void>.delayed(const Duration(milliseconds: 800));
+      await pauseNova();
     }
     final s = await start('${j['show']}');
-    if (s['ok'] != true && windows && '${s['error']}'.toLowerCase().contains('was not found') && await _novaRunning()) {
+    if (s['ok'] != true && windows && '${s['error']}'.toLowerCase().contains('was not found') && await novaRunning()) {
       s['nova'] = true;
       s['error'] =
           'The NovaStar LED-screen software (NovaLCT) is holding the DMX interface. Its USB scanner can be paused while the player runs - NovaLCT starts it again by itself.';
@@ -419,22 +419,3 @@ String _playerFilePath(String root, String file) {
 
 /// What `ToString('0.####')` and back does to a number.
 double _round(double v, int digits) => double.parse(v.toStringAsFixed(digits));
-
-Future<bool> _novaRunning() async {
-  try {
-    final r = await Process.run('tasklist', ['/FI', 'IMAGENAME eq MarsServerProvider.exe', '/NH']);
-    return '${r.stdout}'.toLowerCase().contains('marsserverprovider');
-  } on ProcessException {
-    return false;
-  }
-}
-
-/// Pauses NovaLCT's USB scanner, which holds the interface. NovaLCT starts it
-/// again by itself.
-Future<void> _killNova() async {
-  try {
-    await Process.run('taskkill', ['/F', '/IM', 'MarsServerProvider.exe']);
-  } on ProcessException {
-    // not there
-  }
-}

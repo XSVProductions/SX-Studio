@@ -26,6 +26,7 @@ Future<SxClient> boot() async {
       showPath: Platform.environment['SX_SHOW'],
       webDir: Platform.environment['SX_WEB'] ?? _bundledWeb(),
       settingsDir: settingsDir,
+      appExe: Platform.resolvedExecutable,
     ),
   ));
   final (port, engine) = await ready.first as (int, SendPort);

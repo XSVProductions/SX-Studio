@@ -116,7 +116,8 @@ void main() {
     });
 
     Map<String, String> files() => {
-      for (final f in Directory(env.root).listSync(recursive: true).whereType<File>()) f.path.substring(env.root.length + 1): f.readAsStringSync(),
+      for (final f in Directory(env.root).listSync(recursive: true).whereType<File>())
+        f.path.substring(env.root.length + 1).replaceAll(r'\', '/'): f.readAsStringSync(),
     };
 
     test('a failed last write puts the scenes and live.ini back', () {

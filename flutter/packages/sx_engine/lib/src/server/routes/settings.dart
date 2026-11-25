@@ -39,6 +39,7 @@ Future<ToolResult> openOnComputer(Engine e, String what) async {
   final t = switch (what) {
     'show' => driveShow(e).root,
     'backups' => p.join(e.settingsFolder, 'backups'),
+    'export' => e.find<LastExport>()?.path ?? '',
     'gddl' => 'https://www.google.com/drive/download/',
     'gdapp' =>
       Platform.isMacOS
@@ -57,7 +58,11 @@ Future<ToolResult> openOnComputer(Engine e, String what) async {
     });
   }
   try {
-    await (e.find<Opener>() ?? const LaptopOpener()).open(t);
+    if (what == 'export') {
+      await (e.find<Revealer>() ?? const LaptopOpener()).reveal(t);
+    } else {
+      await (e.find<Opener>() ?? const LaptopOpener()).open(t);
+    }
   } on ProcessException catch (x) {
     throw ToolError("Couldn't open $t (${x.message})");
   }

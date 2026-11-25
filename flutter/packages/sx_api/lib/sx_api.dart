@@ -25,3 +25,4 @@ export 'src/scene_edit.dart';
 export 'src/rig.dart';
 export 'src/rig_test.dart';
 export 'src/skip_flash.dart';
+export 'src/config.dart';

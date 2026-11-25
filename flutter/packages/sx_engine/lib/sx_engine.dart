@@ -52,3 +52,4 @@ export 'src/tools/flip.dart';
 export 'src/tools/rig.dart';
 export 'src/tools/rig_test.dart';
 export 'src/tools/skip_flash.dart';
+export 'src/settings/config_io.dart';

@@ -3,3 +3,9 @@ packages/sx_api/lib/sx_api.dart merge=union
 packages/sx_engine/lib/sx_engine.dart merge=union
 packages/sx_engine/lib/src/server/routes/routes.dart merge=union
 ui/lib/tabs.dart merge=union
+
+# The top of the repository stores .ps1, .iss and .vbs exactly as committed (-text). These three kinds are
+# committed with LF here and were tested on Windows with CRLF, so they check out as CRLF everywhere.
+*.ps1 text eol=crlf
+*.iss text eol=crlf
+*.vbs text eol=crlf

@@ -22,9 +22,9 @@ UsePreviousAppDir=no
 DisableDirPage=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
-; the app is 64-bit, like ShowXpress's interface driver it loads
+; The app is 64-bit, like ShowXpress's interface driver it loads. The installer itself stays in 32-bit mode like the
+; PowerShell app's, so it carries on that one's uninstall record instead of adding a second uninstaller.
 ArchitecturesAllowed=x64compatible
-ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\..\build\windows
 OutputBaseFilename=SX-Studio-windows-setup-{#AppVer}
 SetupIconFile=..\..\ui\windows\runner\resources\app_icon.ico

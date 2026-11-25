@@ -82,7 +82,7 @@ if ($List) {
       [pscustomobject]@{ sec = $b.Sec; title = $(if ($b.Title) { $b.Title } else { $b.Name -replace '\.(scex|gpj)$', '' }); file = $b.Name; path = "$p"; kind = $kind; steps = $steps
         line = [int]"0$($b.Keys['line'])"; col = [int]"0$($b.Keys['column'])"; color = $c; bpm = ("$($b.Keys['speed'])" -eq 'auto_bpm')
         fader = [int]"0$($b.Keys['masterspeedfader'])"; key = "$($b.Keys['trigger_keyboard'])"; flash = ("$($b.Keys['bpm_trigger'])" -eq 'flash_mode')
-        beats = $(& { $bt = 1.0; [void][double]::TryParse("$($b.Keys['beats'])", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bt); $bt }); pad = $(if ("$($b.Keys['trigger_midi_note'])" -match '^\d+$') { [int]$b.Keys['trigger_midi_note'] } else { -1 }) }
+        beats = $(& { $bt = 1.0; [void][double]::TryParse("$($b.Keys['beats'])", [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$bt); $bt }); pad = $(if ("$($b.Keys['trigger_midi_note'])" -match '^\d+$' -and "$($b.Keys['trigger_midi_device'])" -match '^0?$') { [int]$b.Keys['trigger_midi_note'] } else { -1 }) }
     }
     [pscustomobject]@{ n = $pg; name = $info.Pages[$pg]; swap = (Get-PageSwap $info $pg); buttons = @($bs) }
   }
@@ -859,13 +859,15 @@ function Set-PlayerBoard([string]$root) {
   $int = { param($v, $d) if ("$v" -match '^-?\d+$') { [int]$v } else { $d } }
   foreach ($f in @($info.Faders)) {
     $n = $f.k + 1; $ty = & $int $info.Live["fader${n}_midi_type"] -1
+    if ((& $int $info.Live["fader${n}_midi_device"] 0) -ne 0) { $ty = -1 }   # a fader on another controller: the player only listens to the APC mini
     [SxPlayer]::AddFader($f.k, ("$($f.type)" -eq '1'), (& $int $info.Live["fader${n}_midi_channel"] 1), $(if ($ty -eq 1) { & $int $info.Live["fader${n}_midi_note"] -1 } else { -1 }))
   }
   $swap = @{}; foreach ($s in $info.Sections) { if ($s[0] -match '^page(\d+)$' -and "$($s[1]['swap'])" -eq 'yes') { $swap[[int]$matches[1]] = $true } }
   foreach ($b in $info.Buttons) {
     $k = $b.Keys; $p = Get-ScenePath $root $b.Name
-    $note = if ((& $int $k['trigger_midi_type'] -1) -eq 0) { & $int $k['trigger_midi_note'] -1 } else { -1 }
-    $onote = if ((& $int $k['trigger_midiout_type'] -1) -eq 0) { & $int $k['trigger_midiout_note'] -1 } else { -1 }
+    # only the APC mini's pads (MIDI device 0); a button on another controller (the APC40) isn't on a pad here
+    $note = if ((& $int $k['trigger_midi_type'] -1) -eq 0 -and (& $int $k['trigger_midi_device'] 0) -eq 0) { & $int $k['trigger_midi_note'] -1 } else { -1 }
+    $onote = if ((& $int $k['trigger_midiout_type'] -1) -eq 0 -and (& $int $k['trigger_midiout_device'] 0) -eq 0) { & $int $k['trigger_midiout_note'] -1 } else { -1 }
     $title = if ($b.Title) { $b.Title } else { $b.Name -replace '\.(scex|gpj)$', '' }
     [SxPlayer]::AddButton($b.Sec, "$p", $title, $b.Page, [bool]$swap[$b.Page], (& $int $k['masterspeedfader'] 0), "$($k['trigger_keyboard'])",
       (& $int $k['trigger_midi_channel'] 1), $note, (& $int $k['trigger_midiout_channel'] 1), $onote, (& $int $k['trigger_midiout_data'] 0), (& $int $k['trigger_midiout_data_off'] 0))

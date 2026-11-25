@@ -185,6 +185,7 @@ void runParity(String name, List<Step> steps, {void Function(ShowEnv env)? setup
       oldOut.add(r.error != null ? 'ERROR ${r.error}' : r.stdout.replaceAll('\r\n', '\n').trimRight());
     }
     final oldFiles = {...snapshot(show), for (final e in snapshot(Directory(backups)).entries) 'backups/${e.key}': e.value};
+    dumpTree(p.join(p.basename(tmp.path), 'old'), tmp);
 
     // The port, on a fresh copy, with a clock that moves a second per backup.
     fresh();
@@ -213,6 +214,7 @@ void runParity(String name, List<Step> steps, {void Function(ShowEnv env)? setup
       }
     }
     final newFiles = {...snapshot(show), for (final e in snapshot(Directory(backups)).entries) 'backups/${e.key}': e.value};
+    dumpTree(p.join(p.basename(tmp.path), 'new'), tmp);
 
     for (var i = 0; i < steps.length; i++) {
       if (steps[i] is BackupsStep && !oldOut[i].startsWith('ERROR')) {

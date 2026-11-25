@@ -313,6 +313,26 @@ bool _sameBytes(List<int> a, List<int> b) {
   return true;
 }
 
+/// With `SX_PARITY_DUMP` set to a folder, keeps both sides of a differing file
+/// there (as compared, after masks) to read in full, since the failure shows
+/// only the first differing line.
+void _dump(String rel, List<int> old, List<int> now) {
+  final dir = _env['SX_PARITY_DUMP'];
+  if (dir == null || dir.isEmpty) return;
+  final base = p.join(dir, '${DateTime.now().microsecondsSinceEpoch}_${rel.replaceAll(RegExp(r'[\\/:]'), '_')}');
+  File('$base.old').parent.createSync(recursive: true);
+  File('$base.old').writeAsBytesSync(old);
+  File('$base.new').writeAsBytesSync(now);
+}
+
+/// With `SX_PARITY_DUMP` set, copies the folder [dir] there under [label], for
+/// tests that compare whole folders by hash and so can't show the bytes.
+void dumpTree(String label, Directory dir) {
+  final to = _env['SX_PARITY_DUMP'];
+  if (to == null || to.isEmpty || !dir.existsSync()) return;
+  _copyDir(dir, Directory(p.join(to, label)));
+}
+
 /// A readable account of how two folders differ, or '' when they match.
 String _diffFiles(Map<String, List<int>> old, Map<String, List<int>> now) {
   final out = <String>[];
@@ -324,6 +344,7 @@ String _diffFiles(Map<String, List<int>> old, Map<String, List<int>> now) {
   }
   for (final f in old.keys.where(now.containsKey)) {
     if (_sameBytes(old[f]!, now[f]!)) continue;
+    _dump(f, old[f]!, now[f]!);
     final a = utf8.decode(old[f]!, allowMalformed: true).split('\n'), b = utf8.decode(now[f]!, allowMalformed: true).split('\n');
     var i = 0;
     while (i < a.length && i < b.length && a[i] == b[i]) {

@@ -2,7 +2,7 @@
 
 # SX Studio
 
-**SX Studio** by XSV Productions: a Windows + Mac app for **ShowXpress** that gets the lights ready for each venue and can play the show itself (the SX Player). It used to be called SX Helper (before that ShowXpress Helper, and AIM MOVERS).
+**SX Studio** by XSV Productions: a Windows + Mac app for **ShowXpress** that gets the lights ready for each venue and can play the show itself (the SX Player). It used to be called SX Helper (before that ShowXpress Helper, and AIM MOVERS); this repo was `showxpress-helper` until 2026-11-24, and the old links still lead here.
 
 Its main tabs:
 
@@ -147,7 +147,7 @@ SX Studio also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Ton
 3. **Share -> Add to Home Screen**, then open it from the Home Screen icon.
 4. On the laptop, press **Pair a phone** and type the 6-digit code on the phone. Each phone or iPad is paired once and stays paired: after a restart of the phone, the laptop or SX Studio it connects straight away. **Unpair all phones** locks them all out again.
 
-**Demo (no laptop needed):** https://xsvproductions.github.io/showxpress-helper/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever SX Studio's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
+**Demo (no laptop needed):** https://xsvproductions.github.io/SX-Studio/demo/ runs the same phone screens against a pretend show. Nothing reaches ShowXpress or the lights. Add it to the Home Screen (Share -> Add to Home Screen) and it works without internet too. It rebuilds by itself whenever SX Studio's page changes on `main` (`demo/build_demo.py`, `.github/workflows/demo.yml`).
 
 **Aim live from the floor:** stand on the dance floor and drag your finger in the box to move the head. **Fine / Normal / Fast** set the speed, and **Next head** moves on. On an iPad with a keyboard or trackpad, the keys and mouse work as they do on the laptop. If the phone locks or loses Wi-Fi during live aim, the heads go dark after 30 s. Press **Reconnect**, and your aims so far are kept.
 

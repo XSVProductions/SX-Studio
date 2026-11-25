@@ -36,6 +36,7 @@ def main():
     rep('/fonts/saira.woff2?t=__TOKEN__', 'fonts/saira.woff2', 1)
     rep('/fonts/orbitron.woff2?t=__TOKEN__', 'fonts/orbitron.woff2', 1)
     rep("bi.src='/brand.png?t='+T;", "bi.src='brand.png';", 1)
+    rep("i.src='/'+i.dataset.img+'.png?t='+T", "i.src=i.dataset.img+'.png'", 1)
     rep('<link rel="apple-touch-icon" href="icon.png">', '<link rel="apple-touch-icon" href="icon.png"><link rel="manifest" href="manifest.webmanifest">', 1)
     rep("if(__PHONE__){let ls='';try{ls=localStorage.getItem('sxh_phone_key')||'';}catch(e){}\n"
         " const uk=new URLSearchParams(location.search).get('k')||'',ck='__PHONEKEY__';\n"
@@ -60,6 +61,8 @@ def main():
     open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(h)
     shutil.copy(os.path.join(ROOT, 'assets', 'aim_movers_1024.png'), os.path.join(OUT, 'icon.png'))
     shutil.copy(os.path.join(ROOT, 'assets', 'brand.png'), os.path.join(OUT, 'brand.png'))
+    shutil.copy(os.path.join(ROOT, 'assets', 'sx_logo.png'), os.path.join(OUT, 'logo.png'))
+    shutil.copy(os.path.join(ROOT, 'assets', 'sx_mark.png'), os.path.join(OUT, 'mark.png'))
     os.makedirs(os.path.join(OUT, 'fonts'))
     for f in ('saira.woff2', 'orbitron.woff2'):
         shutil.copy(os.path.join(ROOT, 'assets', 'fonts', f), os.path.join(OUT, 'fonts', f))
@@ -69,7 +72,7 @@ def main():
               open(os.path.join(OUT, 'manifest.webmanifest'), 'w'), indent=1)
     # offline: keep the three files; a new build (new hash) replaces them the next time the demo is opened online
     tag = hashlib.sha1((h + ver).encode()).hexdigest()[:12]
-    open(os.path.join(OUT, 'sw.js'), 'w').write(f"""const C='sxh-demo-{tag}',F=['./','index.html','icon.png','brand.png','fonts/saira.woff2','fonts/orbitron.woff2','manifest.webmanifest'];
+    open(os.path.join(OUT, 'sw.js'), 'w').write(f"""const C='sxh-demo-{tag}',F=['./','index.html','icon.png','brand.png','logo.png','mark.png','fonts/saira.woff2','fonts/orbitron.woff2','manifest.webmanifest'];
 self.addEventListener('install',e=>{{e.waitUntil(caches.open(C).then(c=>c.addAll(F)).then(()=>self.skipWaiting()));}});
 self.addEventListener('activate',e=>{{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>self.clients.claim()));}});
 self.addEventListener('fetch',e=>{{if(e.request.method!=='GET')return;

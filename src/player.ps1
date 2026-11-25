@@ -496,7 +496,7 @@ public static class SxPlayer {
     try { os2l = TcpListener.Create(port); os2l.Start(); }
     catch { os2l = null; Os2lErr = "port " + port + " is in use"; return Os2lErr; }
     if (announce) {
-      try { IntPtr sd; if (DNSServiceRegister(out sd, 0, 0, "ShowXpress Helper", "_os2l._tcp", IntPtr.Zero, IntPtr.Zero, (ushort)IPAddress.HostToNetworkOrder((short)port), 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0) mdns = sd; else Os2lErr = "Bonjour said no"; }
+      try { IntPtr sd; if (DNSServiceRegister(out sd, 0, 0, "SX Studio", "_os2l._tcp", IntPtr.Zero, IntPtr.Zero, (ushort)IPAddress.HostToNetworkOrder((short)port), 0, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero) == 0) mdns = sd; else Os2lErr = "Bonjour said no"; }
       catch { Os2lErr = "Bonjour is not installed"; }
     }
     Thread t = new Thread(Os2lAccept); t.IsBackground = true; t.Start();

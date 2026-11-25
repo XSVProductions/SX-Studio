@@ -1,11 +1,11 @@
 name: Demo (GitHub Pages)
 
 # Builds the no-laptop demo from the Helper's own phone page and puts it on
-# https://xsvproductions.github.io/showxpress-helper/demo/  (iPhone / iPad: Share -> Add to Home Screen)
+# https://xsvproductions.github.io/SX-Studio/demo/  (iPhone / iPad: Share -> Add to Home Screen)
 on:
   push:
     branches: [main]
-    paths: ['src/df_aim_gui.ps1', 'demo/**', 'assets/aim_movers_1024.png', '.github/workflows/demo.yml']
+    paths: ['src/df_aim_gui.ps1', 'demo/**', 'assets/aim_movers_1024.png', 'assets/sx_logo.png', 'assets/sx_mark.png', '.github/workflows/demo.yml']
   workflow_dispatch:
 
 permissions:

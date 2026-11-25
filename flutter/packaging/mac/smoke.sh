@@ -13,11 +13,11 @@ open -n "/Applications/SX Studio.app" --env SX_PORT=47390
 CODE=0
 for i in $(seq 30); do
   CODE="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:47390/api/sx || true)"
-  [ "$CODE" = 401 ] && break
+  [ "$CODE" = 403 ] && break
   sleep 1
 done
 # no key, so the engine must refuse: that proves it is up and guarded
-test "$CODE" = 401
+test "$CODE" = 403
 curl -fsS http://127.0.0.1:47390/ | grep -q flutter
 osascript -e 'quit app id "io.github.aimmovers.app"' || true
 echo "Installer OK"

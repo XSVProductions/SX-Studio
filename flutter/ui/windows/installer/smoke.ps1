@@ -13,12 +13,12 @@ $env:SX_PORT = '47390'
 $p = Start-Process -FilePath (Join-Path $app 'sx_studio.exe') -PassThru
 try {
   $code = 0
-  for ($i = 0; $i -lt 30 -and $code -ne 401; $i++) {
+  for ($i = 0; $i -lt 30 -and $code -ne 403; $i++) {
     Start-Sleep 1
     try { $code = (Invoke-WebRequest 'http://127.0.0.1:47390/api/sx' -UseBasicParsing).StatusCode } catch { $code = [int]$_.Exception.Response.StatusCode }
   }
   # no key, so the engine must refuse: that proves it is up and guarded
-  if ($code -ne 401) { throw "The app's engine did not answer (got $code)." }
+  if ($code -ne 403) { throw "The app's engine did not answer (got $code)." }
   if ((Invoke-WebRequest 'http://127.0.0.1:47390/' -UseBasicParsing).Content -notmatch 'flutter') { throw 'The phone page is not served.' }
 } finally { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
 'Installer OK'

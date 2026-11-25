@@ -455,6 +455,83 @@ void main() {
     expect(() => moveRevert(env, 'FIG.gpj', '20260101-000000-000', backups: s.backups), throwsA(isA<ToolError>()));
   });
 
+  group('the curve', () {
+    test('pan/tilt uses tangents 0.75 x (next - previous), value graphs plain Catmull-Rom', () {
+      expect(moveCard(0, 0, 100, 300, 0.5), 31.25);
+      expect(moveCR(0, 0, 100, 300, 0.5), 37.5);
+    });
+
+    // The frames below come from the SX Player's own C# (player.ps1 LoadMove
+    // and Eval) run on this movement: 2 heads, one aimed, sized and reversed,
+    // shift on both channels, points out of order on the dimmer graph.
+    test('DMX frames match the SX Player number for number', () {
+      final tmp = Directory.systemTemp.createTempSync('sxm_curve_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final g = Directory(p.join(tmp.path, 'show', 'Editor', 'Generator', 'projects'))..createSync(recursive: true);
+      File(p.join(tmp.path, 'show', 'fixtures.ini')).writeAsStringSync('[Fixture1]\naddress = 1\nid = 11\n\n[Fixture2]\naddress = 20\nid = 12\n');
+      File(p.join(g.path, 'T.gpj')).writeAsStringSync(
+        '\n[Params]\nPanTiltShift = 0.0\n[Fixture_0]\nID = 11\nName = A\nChannels = pan,upan,tilt,utilt,dimmer\nReversePan = 0\nReverseTilt = 0\n'
+        'OffsetPan = 0\nOffsetTilt = 0\nZoomPan = 0\nZoomTilt = 0\n[Fixture_1]\nID = 12\nName = A #2\nChannels = pan,upan,tilt,utilt,dimmer\n'
+        'ReversePan = 0\nReverseTilt = 1\nOffsetPan = 300\nOffsetTilt = -150\nZoomPan = 20\nZoomTilt = -10\n[Pan/Tilt/uPan/uTilt]\nSelected = 1\n'
+        'Transition = 2\nDuration = 40\nShift = 12.5\nPoint_0 = 20000,50000\nPoint_1 = 30000,41000\nPoint_2 = 26000,52000\nPoint_3 = 21000,44000\n'
+        '[dimmer]\nSelected = 1\nTransition = 2\nDuration = 20\nShift = 30.0\nPoint_0 = 0,10000\nPoint_1 = 40000,65535\nPoint_2 = 20000,30000\nPoint_3 = 60000,0\n',
+      );
+      final d = moveOpen(ShowEnv(p.join(tmp.path, 'show')), 'T.gpj'), st = MoveState.of(d);
+      String frame(double t) {
+        final f = moveFrame(d, st, t);
+        return [
+          for (final k in f.keys.toList()..sort())
+            if (f[k] != 0) '$k:${f[k]}',
+        ].join(' ');
+      }
+
+      expect(
+        {
+          for (final t in [0.0, 250, 777, 1999.5, 3100, 5432.1]) t: frame(t.toDouble()),
+        },
+        {
+          0.0: '1:78 2:32 3:195 4:80 5:39 20:65 21:155 22:73 23:16 24:201',
+          250: '1:87 2:29 3:188 4:79 5:62 20:65 21:14 22:66 23:14 24:69',
+          777: '1:110 2:225 3:163 4:126 5:161 20:85 21:91 22:70 23:129 24:54',
+          1999.5: '1:101 2:147 3:203 4:31 20:123 21:161 22:75 23:67 24:202',
+          3100: '1:80 2:67 3:172 4:35 5:252 20:86 21:58 22:72 23:147 24:98',
+          5432.1: '1:116 2:52 3:177 4:45 5:186 20:124 21:225 22:92 23:71 24:179',
+        },
+      );
+    });
+
+    test('a save body holds only what differs from the file', () {
+      final s = TestShow();
+      addTearDown(s.dispose);
+      final d = s.open('CRLF.gpj');
+      var st = MoveState.of(d);
+      expect(st.diff(d).isEmpty, isTrue);
+      final i = d.secs.indexWhere((x) => x.name == pt);
+      st = st.withSec(i, st.secs[i].copyWith(dur: 45, pts: [(1, 2), ...st.secs[i].pts.skip(1)])).withHead(1, st.heads[1].with_('op', -300));
+      expect(st.diff(d).toJson(), {
+        'move': 'CRLF.gpj',
+        'sha': d.sha,
+        'secs': [
+          {
+            'name': pt,
+            'dur': 45,
+            'pts': [
+              [1, 2],
+              [25000, 45000],
+              [25000, 50000],
+              [20000, 45000],
+            ],
+          },
+        ],
+        'heads': [
+          {'k': 1, 'op': -300},
+        ],
+      });
+      expect(moveWhat(st.diff(d)), 'Pan / Tilt: shape, cycle · 1 head aimed or sized');
+      expect(s.save(st.diff(d).toJson()).$1, isTrue);
+    });
+  });
+
   group('PowerShell number and text habits', () {
     test('"\$x" of a JSON number', () {
       expect(

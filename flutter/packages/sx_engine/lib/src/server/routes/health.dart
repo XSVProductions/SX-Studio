@@ -5,9 +5,9 @@ import '../../tools/health.dart';
 import '../api.dart';
 import '../engine.dart';
 
-// The old server's fix keys. `color251` is missing here in the old app too,
-// so "Match the 251s" is refused with "Unknown fix." Kept as it was.
-final _fixKey = RegExp(r'^(speed|midiout|midilight|pad|color|fixtures)\|(page\d+_button\d+|\d+)$', caseSensitive: false);
+// The old server's fix keys, plus `color251`. The old list left it out, so
+// its "Match the 251s" button always answered "Unknown fix."
+final _fixKey = RegExp(r'^(speed|midiout|midilight|pad|color|color251|fixtures)\|(page\d+_button\d+|\d+)$', caseSensitive: false);
 final _fixId = RegExp(r'^[0-9a-f]{8}$', caseSensitive: false);
 
 /// PowerShell's `if ($x)` on a value decoded from JSON.

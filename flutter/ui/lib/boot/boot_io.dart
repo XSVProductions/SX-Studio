@@ -16,7 +16,12 @@ Future<SxClient> boot() async {
   final ready = ReceivePort();
   await Isolate.spawn(_engineMain, (
     ready.sendPort,
-    EngineConfig(port: int.tryParse(Platform.environment['SX_PORT'] ?? '') ?? 0, token: token, showPath: Platform.environment['SX_SHOW']),
+    EngineConfig(
+      port: int.tryParse(Platform.environment['SX_PORT'] ?? '') ?? 0,
+      token: token,
+      showPath: Platform.environment['SX_SHOW'],
+      settingsDir: settingsDir,
+    ),
   ));
   final port = await ready.first as int;
   return SxClient(Uri.parse('http://127.0.0.1:$port'), token: token);

@@ -30,9 +30,12 @@ bool same(Object? a, Object? b) => switch ((a, b)) {
 Object? roundTrip(Object? v) => jsonDecode(jsonEncode(v));
 
 void main() {
-  final pwsh = _above('tools/pwsh/pwsh');
-  final player = _above('repo/src/player.ps1');
-  final show = _above('real-show/Awaaz Lightshow');
+  // SX_PWSH, SX_OLD_SRC and SX_SHOW name them, as for the engine's parity tests. Otherwise they are looked for above
+  // this folder: the old app cloned next to the port (`repo/`), or the port inside the SX-Studio repository (`src/`).
+  final env = Platform.environment;
+  final pwsh = env['SX_PWSH'] ?? _above('tools/pwsh/pwsh');
+  final player = env['SX_OLD_SRC'] == null ? _above('repo/src/player.ps1') ?? _above('src/player.ps1') : '${env['SX_OLD_SRC']}/player.ps1';
+  final show = env['SX_SHOW'] ?? _above('real-show/Awaaz Lightshow');
 
   test(
     'the board from player.ps1 -List on the real show reads and writes back key for key',

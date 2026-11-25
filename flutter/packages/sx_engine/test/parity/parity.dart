@@ -61,7 +61,15 @@ String? _above(String relative, {bool dir = false}) {
 
 final _env = Platform.environment;
 final String? pwshPath = _firstExisting([_env['SX_PWSH'], _above(p.join('tools', 'pwsh', 'pwsh')), _onPath('pwsh'), _onPath('powershell')]);
-final String? oldSrcPath = _firstExisting([_env['SX_OLD_SRC'], _above(p.join('repo', 'src'), dir: true)], dir: true);
+
+/// The old app's scripts: `SX_OLD_SRC`, or `repo/src` above (the old app
+/// cloned next to the port), or the `src` folder above that holds
+/// `df_aim_gui.ps1` (the port inside the SX-Studio repository).
+final String? oldSrcPath = _firstExisting([
+  _env['SX_OLD_SRC'],
+  _above(p.join('repo', 'src'), dir: true),
+  if (_above(p.join('src', 'df_aim_gui.ps1')) case final String gui) p.dirname(gui),
+], dir: true);
 final String? realShowPath = _firstExisting([_env['SX_SHOW'], _above(p.join('real-show', 'Awaaz Lightshow'), dir: true)], dir: true);
 
 /// The major version of the PowerShell at [pwshPath], asked once: 5 for

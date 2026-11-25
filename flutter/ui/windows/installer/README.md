@@ -45,4 +45,4 @@ Settings, Updates asks GitHub for the latest release. Update downloads `release.
 
 The installer keeps the PowerShell app's AppId and folder (`%LOCALAPPDATA%\Programs\ShowXpress Helper`), so its Update button installs this over it. It runs the `.exe` silently: the installer closes the old app, removes its scripts, icons and fonts, replaces the shortcuts and opens the new app. The old updater then opens `showxpress_helper.vbs` from the same folder; the new one starts nothing when the app started in the last minute, otherwise it starts the app (old taskbar pins point at it). Settings in `%APPDATA%\ShowXpress Helper` and the shows stay. The old app checks no signature, so this one switch trusts GitHub's HTTPS alone.
 
-`smoke.ps1` installs the built installer, opens the app and checks the engine and the phone page answer.
+`smoke.ps1` installs the built installer, opens the app and checks the engine and the phone page answer, then uninstalls it while it runs and checks nothing is left.

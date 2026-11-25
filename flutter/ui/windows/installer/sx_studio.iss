@@ -73,8 +73,11 @@ Name: "{autodesktop}\SX Studio"; Filename: "{app}\sx_studio.exe"; WorkingDir: "{
 
 [Run]
 Filename: "{app}\sx_studio.exe"; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent
-; a silent install (an update, from this app or the PowerShell one) opens the new version too
-Filename: "{app}\sx_studio.exe"; Flags: nowait; Check: WizardSilent
+; a silent install (an update, from this app or the PowerShell one) opens the new version too. Through Explorer, so
+; the app is no child of the installer: the PowerShell app's updater waits for the installer and all it started
+; (Start-Process -Wait), then opens showxpress_helper.vbs, which would open the app again once it had quit.
+Filename: "{win}\explorer.exe"; Parameters: """{app}\sx_studio.exe"""; Flags: nowait; Check: WizardSilent and ShellRuns
+Filename: "{app}\sx_studio.exe"; Flags: nowait; Check: WizardSilent and not ShellRuns
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM sx_studio.exe"; Flags: runhidden; RunOnceId: "StopApp"
@@ -94,4 +97,52 @@ begin
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM sx_studio.exe', '', SW_HIDE, ewWaitUntilTerminated, R);
   Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), '{#StopOld}', '', SW_HIDE, ewWaitUntilTerminated, R);
   Result := '';
+end;
+
+// True when Explorer runs the desktop (its taskbar is there), so it can open the app for [Run].
+function ShellRuns: Boolean;
+begin
+  Result := FindWindowByClassName('Shell_TrayWnd') <> 0;
+end;
+
+// Deletes the app's .exe and .dll files left in Dir. True when none is left.
+function DeleteBinaries(Dir: String): Boolean;
+var
+  F: TFindRec;
+  Ext: String;
+begin
+  Result := True;
+  if FindFirst(Dir + '\*', F) then begin
+    try
+      repeat
+        Ext := Lowercase(ExtractFileExt(F.Name));
+        if ((Ext = '.exe') or (Ext = '.dll')) and (F.Attributes and FILE_ATTRIBUTE_DIRECTORY = 0) then
+          if not DeleteFile(Dir + '\' + F.Name) then Result := False;
+      until not FindNext(F);
+    finally
+      FindClose(F);
+    end;
+  end;
+end;
+
+// Uninstalling while the app runs: [UninstallRun] ends it, but Windows keeps its exe and DLLs locked for a moment
+// after, the uninstaller does not retry, and a per-user uninstall can't leave them for a restart. Try for 5 s.
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  App: String;
+  I: Integer;
+  Done: Boolean;
+begin
+  if CurUninstallStep <> usPostUninstall then exit;
+  App := ExpandConstant('{app}');
+  Done := not DirExists(App) or DeleteBinaries(App);
+  I := 0;
+  while not Done and (I < 20) do begin
+    Sleep(250);
+    I := I + 1;
+    Done := DeleteBinaries(App);
+  end;
+  if not Done then Log('Some of the app''s files are still in use and stay behind.')
+  else if I > 0 then Log(Format('Deleted the app''s locked files after %d retries.', [I]));
+  RemoveDir(App);
 end;

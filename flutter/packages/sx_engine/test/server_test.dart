@@ -67,6 +67,23 @@ void main() {
     expect(r.error, contains('The show changed since this page was loaded'));
   });
 
+  test('the brand image comes from the settings folder, without a key', () async {
+    final url = Uri.parse('http://127.0.0.1:${engine.port}/brand.png');
+    final http = HttpClient();
+    addTearDown(http.close);
+    Future<HttpClientResponse> ask() async => (await http.getUrl(url)).close();
+
+    final none = await ask();
+    expect(none.statusCode, 404);
+    await none.drain<void>();
+
+    File('${engine.settingsFolder}/brand.png').writeAsBytesSync([1, 2, 3]);
+    final found = await ask();
+    expect(found.statusCode, 200);
+    expect(found.headers.contentType?.mimeType, 'image/png');
+    expect(await found.expand((b) => b).toList(), [1, 2, 3]);
+  });
+
   test('a call without the token is refused', () async {
     final stranger = SxClient(client.base, token: 'guess');
     addTearDown(stranger.close);

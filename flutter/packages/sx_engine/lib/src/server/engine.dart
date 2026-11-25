@@ -174,13 +174,27 @@ class Engine {
     final web = config.webDir;
     if (web == null || !Directory(web).existsSync()) return api;
     final files = createStaticHandler(web, defaultDocument: 'index.html');
-    return (req) => req.url.path.startsWith('api/') ? api(req) : files(req);
+    return (req) => req.url.path.startsWith('api/') || req.url.path == _brandPath ? api(req) : files(req);
   }
 
   static const _pairPath = '/api/phone/pair';
+  static const _brandPath = 'brand.png';
+
+  /// `/brand.png`: the user's own banner image for Home, when they put one in
+  /// the settings folder. Needs no key, as before. 404 when there is none,
+  /// and the UI shows its built-in one.
+  Response _brand() {
+    final folders = [settingsFolder, if (config.settingsDir != null) '$homeDir/AwaazTools'];
+    for (final folder in folders) {
+      final f = File('$folder/$_brandPath');
+      if (f.existsSync()) return Response.ok(f.readAsBytesSync(), headers: {'content-type': 'image/png', 'cache-control': 'no-store'});
+    }
+    return Response.notFound('no brand image');
+  }
 
   Future<Response> _handle(Request req, {required bool fromPhone}) async {
     final path = '/${req.url.path}';
+    if (req.url.path == _brandPath) return _brand();
     if (path == _pairPath) return _pair(req, fromPhone: fromPhone);
     final route = api.find(path);
     if (route == null) return _json({'ok': false, 'error': 'Unknown action.', 'out': ''}, 404);

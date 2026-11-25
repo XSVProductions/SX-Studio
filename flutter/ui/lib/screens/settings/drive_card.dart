@@ -17,7 +17,7 @@ class DriveCard extends StatefulWidget {
   State<DriveCard> createState() => _DriveCardState();
 }
 
-class _DriveCardState extends State<DriveCard> {
+class _DriveCardState extends State<DriveCard> with ShowWatcher {
   DriveInfo? _g;
   var _error = '';
   final _folder = TextEditingController();
@@ -27,6 +27,13 @@ class _DriveCardState extends State<DriveCard> {
     super.initState();
     _load();
   }
+
+  // the old page's poll read the Drive card again whenever the show changed
+  @override
+  void onQueueRan() => _load();
+
+  @override
+  void onSxClosed() => _load();
 
   @override
   void dispose() {
@@ -39,9 +46,10 @@ class _DriveCardState extends State<DriveCard> {
       final g = await AppScope.read(context).client.gdrive();
       if (!mounted) return;
       setState(() {
+        // a reload from the poll must not wipe a folder being typed
+        if (_g?.override != g.override) _folder.text = g.override;
         _g = g;
         _error = '';
-        _folder.text = g.override;
       });
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);

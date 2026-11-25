@@ -6,17 +6,11 @@ import '../../sx/pending_presses.dart';
 import '../../tools/aim/aim.dart';
 import '../api.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 import 'move.dart';
 
 /// `"$($body.mode)" -eq 'room'` in the old server: anything else is the dance floor.
 AimMode aimModeOf(String mode) => psEq(mode, 'room') ? AimMode.room : AimMode.floor;
-
-/// PowerShell's `if ($body.x)`: null, false, 0 and '' are false.
-bool psTruthy(Object? v) => switch (v) {
-  null || false || '' => false,
-  num n => n != 0,
-  _ => true,
-};
 
 /// The Aim Movers tab: preview, apply at a size, reset to normal and the ROOM buttons.
 ///
@@ -25,8 +19,8 @@ bool psTruthy(Object? v) => switch (v) {
 void registerAimRoutes(Engine e) {
   final aimQueue = Queueable(
     'Aim Movers',
-    key: (b) => 'aim-${aimModeOf(b.str('mode')).name}',
-    detail: (b) => aimModeOf(b.str('mode')) == AimMode.room ? '- Room' : '- Dance Floor',
+    key: (b) => 'aim-${aimModeOf(bodyText(b['mode'])).name}',
+    detail: (b) => aimModeOf(bodyText(b['mode'])) == AimMode.room ? '- Room' : '- Dance Floor',
   );
 
   // A saved or reverted GRAND ENTRANCE.gpj makes its step scene again
@@ -49,7 +43,7 @@ void registerAimRoutes(Engine e) {
   e.api.post('/api/apply', queue: aimQueue, (req) {
     final out = applyAims(e.show(), req.body);
     // the CHECK buttons come on when ShowXpress next opens (`Set-PendingPress`)
-    final room = aimModeOf(req.body.str('mode')) == AimMode.room;
+    final room = aimModeOf(bodyText(req.body['mode'])) == AimMode.room;
     e.find<ButtonPresses>()?.pressWhenOpen(room ? const ['ROOM CHECK'] : const ['DF CHECK 140', 'DF CHECK 251'], room ? 'ROOM CHECK' : 'DF CHECK 140 + 251');
     return out;
   });
@@ -57,7 +51,7 @@ void registerAimRoutes(Engine e) {
   e.api.post(
     '/api/home',
     queue: Queueable('Aim Movers (reset)', key: aimQueue.key, detail: aimQueue.detail),
-    (req) => aimHome(e.show(), aimModeOf(req.body.str('mode'))),
+    (req) => aimHome(e.show(), aimModeOf(bodyText(req.body['mode']))),
   );
 
   // always the room: only the room has buttons to add
@@ -69,5 +63,5 @@ void registerAimRoutes(Engine e) {
 String applyAims(ShowEnv env, Json body) {
   final w = psInt(body['w']), d = psInt(body['d']);
   if (w < 20 || w > 300 || d < 20 || d > 300) throw ToolError('Size must be 20-300%.');
-  return aimApply(env, aimModeOf(body.str('mode')), size: '$w $d', force: psTruthy(body['force']));
+  return aimApply(env, aimModeOf(bodyText(body['mode'])), size: '$w $d', force: psTruthy(body['force']));
 }

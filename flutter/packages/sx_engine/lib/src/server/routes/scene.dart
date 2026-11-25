@@ -4,6 +4,7 @@ import '../../show/show_env.dart';
 import '../../tools/scene_edit.dart';
 import '../api.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 
 /// The old server's `$sceneRx`. `-notmatch` ignores case.
 final _sceneRx = RegExp(r'^[^\\/:*?"<>|\x00-\x1f]{1,120}\.scex$', caseSensitive: false);
@@ -26,10 +27,10 @@ void registerSceneRoutes(Engine e) {
   });
 
   e.api.post('/api/scene/revert', (req) {
-    final f = req.body.str('f'), id = req.body.str('id');
+    final f = bodyText(req.body['f']), id = bodyText(req.body['id']);
     if (!_sceneRx.hasMatch(f) || !RegExp(r'^\d{8}-\d{6}-\d{3}$').hasMatch(id)) throw ToolError('Unknown backup.');
     if (e.sx.running) throw ToolError('ShowXpress is open. Close it (save first), then press Revert again.');
-    final r = sceneRevert(e.show(), f, id, force: req.body['force'] == true, backupBase: sceneBackupBase(e.settingsFolder));
+    final r = sceneRevert(e.show(), f, id, force: psTruthy(req.body['force']), backupBase: sceneBackupBase(e.settingsFolder));
     return r.conflict ? {'ok': true, 'conflict': true, 'out': ''} : r.out;
   });
 
@@ -38,11 +39,11 @@ void registerSceneRoutes(Engine e) {
     '/api/scene/save',
     queue: Queueable(
       'Scene',
-      key: (b) => 'scene-${b.str('scene').toLowerCase()}',
-      detail: (b) => b.str('scene').replaceFirst(RegExp(r'\.scex$', caseSensitive: false), ''),
+      key: (b) => 'scene-${bodyText(b['scene']).toLowerCase()}',
+      detail: (b) => bodyText(b['scene']).replaceFirst(RegExp(r'\.scex$', caseSensitive: false), ''),
     ),
     (req) {
-      if (!_sceneRx.hasMatch(req.body.str('scene'))) throw ToolError('Unknown scene.');
+      if (!_sceneRx.hasMatch(bodyText(req.body['scene']))) throw ToolError('Unknown scene.');
       final SceneChanges changes;
       try {
         changes = SceneChanges.fromJson(req.body);

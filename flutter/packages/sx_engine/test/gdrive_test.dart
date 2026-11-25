@@ -5,9 +5,9 @@ import 'package:path/path.dart' as p;
 import 'package:sx_engine/sx_engine.dart';
 import 'package:test/test.dart';
 
-/// The fix the port makes to Google Drive sync: a file the last sync put on
-/// Google Drive, and that has since left the show, is removed there. Nothing
-/// else on Google Drive is ever removed.
+/// Google Drive sync and import, beyond what the parity test can reach: the
+/// sync never removes anything on Google Drive, as the old `gdrive.ps1`, and
+/// Windows finds Google Drive by drive letter G or a label saying Google.
 void main() {
   late Directory tmp;
   late String show, drive;
@@ -32,80 +32,38 @@ void main() {
 
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  test('a file deleted from the show leaves Google Drive on the next sync', () {
+  test('a file deleted from the show stays on Google Drive, as the old sync left it', () {
     driveSync(env, at);
-    expect(there('scenes/B.scex').existsSync(), isTrue);
     here('scenes/B.scex').deleteSync();
+    there('notes from someone.txt').writeAsStringSync('mine');
 
     final out = driveSync(env, at);
-    expect(out, contains('REMOVED  1 file(s) from Google Drive that are no longer in the show'));
-    expect(there('scenes/B.scex').existsSync(), isFalse);
-    expect(there('scenes/A.scex').existsSync(), isTrue);
-  });
-
-  test('so an import no longer brings a deleted file back', () {
-    driveSync(env, at);
-    here('scenes/B.scex').deleteSync();
-    driveSync(env, at);
-    driveImport(env, at);
-    expect(here('scenes/B.scex').existsSync(), isFalse);
-    expect(here('scenes/A.scex').existsSync(), isTrue);
-  });
-
-  test('a file SX Studio did not put on Google Drive is never removed', () {
-    there('notes from someone.txt')
-      ..createSync(recursive: true)
-      ..writeAsStringSync('mine');
-    driveSync(env, at);
-    driveSync(env, at);
+    expect(out.split('\n'), ['  Google Drive folder: $drive', '  CHANGED  0 file(s) copied, 3 already up to date']);
+    expect(there('scenes/B.scex').existsSync(), isTrue);
     expect(there('notes from someone.txt').readAsStringSync(), 'mine');
+    expect(Directory(show).listSync().map((e) => p.basename(e.path)), isNot(contains('gdrive_sync_files.json')));
   });
 
-  test('a removed file that changed on Google Drive since is left alone', () {
+  test("the sync and import records stay on this computer, whatever their case", () {
+    here('GDRIVE_SYNC.JSON').writeAsStringSync('{}');
+    here('gdrive_import.json').writeAsStringSync('{}');
     driveSync(env, at);
-    here('scenes/B.scex').deleteSync();
-    // another laptop synced a new B in the meantime
-    there('scenes/B.scex')
-      ..writeAsStringSync('newer B from the other laptop')
-      ..setLastModifiedSync(DateTime.now().add(const Duration(minutes: 5)));
-
-    final out = driveSync(env, at);
-    expect(out, contains('1 file(s) no longer in the show were changed on Google Drive since the last sync - left alone'));
-    expect(there('scenes/B.scex').readAsStringSync(), 'newer B from the other laptop');
-    // and it is not ours any more, so a later sync leaves it too
-    expect(driveSync(env, at), isNot(contains('REMOVED')));
-    expect(there('scenes/B.scex').existsSync(), isTrue);
+    expect(
+      Directory(drive).listSync().map((e) => p.basename(e.path).toLowerCase()),
+      isNot(anyOf(contains('gdrive_sync.json'), contains('gdrive_import.json'))),
+    );
   });
 
-  test('a file newer on Google Drive is not ours to remove later', () {
-    there('scenes/B.scex')
-      ..createSync(recursive: true)
-      ..writeAsStringSync('B from the other laptop')
-      ..setLastModifiedSync(DateTime.now().add(const Duration(hours: 1)));
-    expect(driveSync(env, at), contains('1 file(s) are newer on Google Drive - left alone'));
-    here('scenes/B.scex').deleteSync();
-    driveSync(env, at);
-    expect(there('scenes/B.scex').readAsStringSync(), 'B from the other laptop');
-  });
-
-  test('a record made for another Google Drive folder removes nothing', () {
-    driveSync(env, at);
-    final rec = here(syncFilesFile);
-    rec.writeAsStringSync(rec.readAsStringSync().replaceFirst(jsonEncode(drive), jsonEncode('/elsewhere')));
-    here('scenes/B.scex').deleteSync();
-    expect(driveSync(env, at), isNot(contains('REMOVED')));
-    expect(there('scenes/B.scex').existsSync(), isTrue);
-  });
-
-  test('the sync record stays on this computer', () {
-    driveSync(env, at);
-    expect(here(syncFilesFile).existsSync(), isTrue);
-    expect(there(syncFilesFile).existsSync(), isFalse);
-    // an import keeps this computer's record, not one found on Google Drive
-    final mine = here(syncFilesFile).readAsStringSync();
-    there(syncFilesFile).writeAsStringSync('{"target":"x","files":{}}');
-    driveImport(env, at);
-    expect(here(syncFilesFile).readAsStringSync(), mine);
+  test('Windows takes the first drive that is G or labelled Google, with My Drive on it', () {
+    final have = {r'G:\My Drive', r'H:\My Drive', r'E:\My Drive', r'D:\My Drive'};
+    String pick(List<(String, String)> drives) => pickMyDrive([for (final (l, n) in drives) (letter: l, label: n)], have.contains);
+    expect(pick([('C', 'Windows'), ('D', 'Data'), ('G', '')]), r'G:\My Drive');
+    expect(pick([('C', ''), ('E', 'GOOGLE DRIVE'), ('G', '')]), r'E:\My Drive');
+    // a drive with My Drive on it but no Google label is not Google Drive
+    expect(pick([('C', ''), ('D', 'Backup'), ('H', 'My Google Drive')]), r'H:\My Drive');
+    expect(pick([('C', ''), ('D', 'Backup')]), '');
+    // labelled Google, but no My Drive folder
+    expect(pick([('F', 'Google Drive')]), '');
   });
 
   test('sync and import refuse while ShowXpress is open', () {

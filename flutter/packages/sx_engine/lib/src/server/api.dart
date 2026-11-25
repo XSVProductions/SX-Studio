@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:sx_api/sx_api.dart';
 
+import '../ps_compat.dart';
+
 /// One API call, already authenticated and decoded.
 class ApiRequest {
   ApiRequest({required this.body, required this.query, required this.fromPhone});
@@ -51,8 +53,10 @@ class ApiRoute {
 
 /// The engine's route table. Each area registers its routes from its own file
 /// in `lib/src/server/routes/`.
+///
+/// Paths ignore case, as the old server's `switch ($path)` did.
 class Api {
-  final _routes = <String, ApiRoute>{};
+  final _routes = psMap<ApiRoute>();
 
   /// A read. Must not change anything.
   void get(String path, ApiHandler handler, {bool phone = true}) => _add(ApiRoute('GET', path, handler, phone: phone));
@@ -66,4 +70,7 @@ class Api {
   }
 
   ApiRoute? find(String path) => _routes[path];
+
+  /// Every registered route, for tests that check the whole table.
+  Iterable<ApiRoute> get routes => _routes.values;
 }

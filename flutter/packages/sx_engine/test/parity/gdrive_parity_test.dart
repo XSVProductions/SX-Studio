@@ -79,11 +79,10 @@ List<int> _maskState(String path, List<int> bytes) {
   return utf8.encode(jsonEncode({for (final k in j.keys.toList()..sort()) k: j[k]}));
 }
 
-/// Every file under [dir] except the new sync record, which only the port writes.
+/// Every file under [dir].
 Map<String, List<int>> _snapshot(String dir) => {
   for (final f in Directory(dir).listSync(recursive: true, followLinks: false).whereType<File>())
-    if (p.basename(f.path) != syncFilesFile)
-      p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, forCompare(f.path, f.readAsBytesSync())),
+    p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, forCompare(f.path, f.readAsBytesSync())),
 };
 
 /// PowerShell 7 reads `"2026-11-23T06:20:16"` from JSON as a date and prints
@@ -94,7 +93,12 @@ String _isoDate(Object? v) {
   return m == null ? '$v' : '${m[3]}-${m[1]}-${m[2]}T${m[4]}';
 }
 
-Future<OldRun> _runOld(String action, String show) async {
+/// Runs `gdrive.ps1` in test mode, or with [sxOpen] as on the laptop while
+/// ShowXpress looks open (test mode skips that check): the show found through
+/// `show_path.txt` and Google Drive given as `-Target`.
+Future<OldRun> _runOld(String action, _Layout l, {bool sxOpen = false}) async {
+  String q(String s) => "'${s.replaceAll("'", "''")}'";
+  final where = sxOpen ? '-Target ${q(l.drive)}' : '-TestRoot ${q(l.show)}';
   final r = await Process.run(
     pwshPath!,
     [
@@ -102,10 +106,14 @@ Future<OldRun> _runOld(String action, String show) async {
       '-NonInteractive',
       '-Command',
       "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \$ErrorActionPreference='Stop'; "
-          "try { & '${p.join(oldSrcPath!, 'gdrive.ps1')}' -Action $action -TestRoot '${show.replaceAll("'", "''")}' } "
+          "${sxOpen ? r"function global:Get-Process { [pscustomobject]@{ ProcessName = 'ShowXpress'; Id = $PID } }; " : ''}"
+          "try { & ${q(p.join(oldSrcPath!, 'gdrive.ps1'))} -Action $action $where } "
           "catch { [Console]::Error.WriteLine('SXERR:' + \$_.Exception.Message); exit 3 }",
     ],
-    environment: {'ProgramFiles': '/nonexistent'},
+    environment: {
+      'ProgramFiles': '/nonexistent',
+      if (sxOpen) 'APPDATA': oldShowPathFor(l.show, at: p.join(p.dirname(l.w), 'appdata')),
+    },
     stdoutEncoding: utf8,
     stderrEncoding: utf8,
   );
@@ -115,7 +123,7 @@ Future<OldRun> _runOld(String action, String show) async {
 
 String _tidy(String t) => t.replaceAll('\r\n', '\n').trimRight().replaceAll(_stamp, 'before import <time>');
 
-void _case(String name, String action, {void Function(_Layout l)? setup}) {
+void _case(String name, String action, {void Function(_Layout l)? setup, bool sxOpen = false}) {
   test(name, skip: paritySkip, () async {
     final tmp = Directory.systemTemp.createTempSync('sx_gd_parity_');
     addTearDown(() => tmp.deleteSync(recursive: true));
@@ -127,13 +135,13 @@ void _case(String name, String action, {void Function(_Layout l)? setup}) {
     }
 
     fresh();
-    final old = await _runOld(action, l.show);
+    final old = await _runOld(action, l, sxOpen: sxOpen);
     final oldFiles = _snapshot(l.w);
 
     fresh();
     Object? answer;
     String? error;
-    final env = ShowEnv(l.show);
+    final env = ShowEnv(l.show, sxRunning: () => sxOpen);
     try {
       answer = switch (action) {
         'Preview' => drivePreview(env, l.places),
@@ -201,6 +209,29 @@ void main() {
         File(p.join(l.show, 'scenes', 'NEW ONE.scex')).writeAsStringSync('<Scene/>');
       },
     );
+    _case(
+      'a file gone from the show stays on Google Drive',
+      'Sync',
+      setup: (l) {
+        _onDrive(l);
+        File(p.join(l.drive, 'scenes', 'DELETED HERE.scex')).writeAsStringSync('<Scene/>');
+        File(p.join(l.show, 'fixtures.ini')).deleteSync();
+      },
+    );
+    _case(
+      'the sync records stay here',
+      'Sync',
+      setup: (l) {
+        File(p.join(l.show, 'gdrive_sync.json')).writeAsStringSync('{"synced":"2001-01-01T00:00:00","target":"elsewhere"}');
+        File(p.join(l.show, 'gdrive_import.json')).writeAsStringSync('{"imported":"2001-01-01T00:00:00","from":"x","backup":""}');
+      },
+    );
+  });
+
+  group('ShowXpress is open', () {
+    _case('sync', 'Sync', sxOpen: true, setup: _onDrive);
+    _case('import', 'Import', sxOpen: true, setup: _onDrive);
+    _case('import with nothing on Google Drive', 'Import', sxOpen: true);
   });
 
   group('import', () {

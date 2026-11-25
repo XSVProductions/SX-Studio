@@ -8,6 +8,7 @@ import '../../settings/open_on_computer.dart';
 import '../../settings/settings_store.dart';
 import '../../show/show_env.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 import 'gdrive.dart' show driveShow;
 
 /// Settings (the cogwheel) and "open on the computer".
@@ -27,12 +28,14 @@ void registerSettingsRoutes(Engine e) {
     return {'ok': true, 'settings': s};
   });
 
-  e.api.post('/api/open', phone: false, (req) => openOnComputer(e, req.body.str('what')));
+  e.api.post('/api/open', phone: false, (req) => openOnComputer(e, bodyText(req.body['what'])));
 }
 
 /// Opens one of a few known places on the laptop. Nothing else can be opened.
 /// Port of `Open-OnComputer`.
 Future<ToolResult> openOnComputer(Engine e, String what) async {
+  // `switch ($what)` ignores case
+  what = what.toLowerCase();
   final t = switch (what) {
     'show' => driveShow(e).root,
     'backups' => p.join(e.settingsFolder, 'backups'),

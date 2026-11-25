@@ -60,13 +60,10 @@ void main() {
   });
 
   group('pre-show fixes', () {
-    test('a phone can never restart the laptop', () async {
-      final r = await phone.preshowFix('restart');
-      expect(r.ok, isFalse);
-      expect(r.error, 'Only on the laptop.');
-      final upper = await phone.preshowFix('RESTART');
-      expect(upper.ok, isFalse);
-      expect(laptop.fixed, isEmpty);
+    test('a phone can restart the laptop, as the old server let it', () async {
+      expect((await phone.preshowFix('restart')).ok, isTrue);
+      expect((await phone.preshowFix('RESTART')).ok, isTrue);
+      expect(laptop.fixed, [LaptopFix.restart, LaptopFix.restart]);
     });
 
     test('the laptop can, and a phone can do the power settings', () async {
@@ -112,6 +109,7 @@ void main() {
 
     test('a fix made while ShowXpress is open waits in the queue under its own key', () async {
       sx.running = true;
+      await client.status();
       final r = await client.healthFix('speed|page1_button1');
       expect(r.extra['queued'], isTrue);
       expect((await client.status()).queue.items.single.key, 'fix-speed|page1_button1');

@@ -15,8 +15,10 @@ import '../dmx/default_dmx.dart';
 import '../sx/default_sx_app.dart';
 import '../sx/live_hold.dart';
 import '../sx/sx_app.dart';
+import '../ps_compat.dart';
 import 'api.dart';
 import 'phone.dart';
+import 'ps_body.dart';
 import 'queue.dart';
 import 'routes/routes.dart';
 
@@ -174,7 +176,7 @@ class Engine {
     final web = config.webDir;
     if (web == null || !Directory(web).existsSync()) return api;
     final files = createStaticHandler(web, defaultDocument: 'index.html');
-    return (req) => req.url.path.startsWith('api/') || req.url.path == _brandPath ? api(req) : files(req);
+    return (req) => req.url.path.toLowerCase().startsWith('api/') || psEq(req.url.path, _brandPath) ? api(req) : files(req);
   }
 
   static const _pairPath = '/api/phone/pair';
@@ -194,17 +196,20 @@ class Engine {
 
   Future<Response> _handle(Request req, {required bool fromPhone}) async {
     final path = '/${req.url.path}';
-    if (req.url.path == _brandPath) return _brand();
-    if (path == _pairPath) return _pair(req, fromPhone: fromPhone);
+    if (psEq(req.url.path, _brandPath)) return _brand();
+    if (psEq(path, _pairPath)) return _pair(req, fromPhone: fromPhone);
     final route = api.find(path);
     if (route == null) return _json({'ok': false, 'error': 'Unknown action.', 'out': ''}, 404);
-    final key = req.headers['x-sx-token'] ?? '';
+    // the header, or `?t=` as the old page's `sendBeacon` sent it on leaving
+    final header = req.headers['x-sx-token'] ?? '';
+    final key = header.isEmpty ? req.url.queryParameters['t'] ?? '' : header;
     if (fromPhone) {
+      // the old server's refusals, word for word. Laptop-only first, as before.
+      if (!route.phone) return _json({'ok': false, 'error': 'Only on the computer.', 'out': ''}, 403);
       // A phone's own key only. The laptop's token means nothing on this port.
-      if (phones.check(key, ip: _ip(req)) == null) return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
-      if (!route.phone) return _json({'ok': false, 'error': 'Only on the laptop.', 'out': ''}, 403);
-    } else if (!sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
-      return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
+      if (phones.check(key, ip: _ip(req)) == null) return _json({'ok': false, 'error': 'Pair this phone again.', 'out': ''}, 401);
+    } else if (!sameSecret(key, config.token)) {
+      return _json({'ok': false, 'error': 'Open SX Studio from its icon.', 'out': ''}, 401);
     }
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
     if (fromPhone && (req.contentLength ?? 0) > 4000000) return _json({'ok': false, 'error': 'Too big.', 'out': ''}, 413);
@@ -222,7 +227,9 @@ class Engine {
         }
       }
     }
-    if (route.queue != null && sx.running) return _json(queue.add(route, body));
+    // ShowXpress open and the page asked to queue: done when ShowXpress
+    // closes. Otherwise now, and the tool refuses while ShowXpress is open.
+    if (route.queue != null && psTruthy(body['queue']) && sx.running) return _json(queue.add(route, body));
     return _json(await runRoute(route, ApiRequest(body: body, query: req.url.queryParameters, fromPhone: fromPhone)));
   }
 

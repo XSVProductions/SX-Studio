@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:ffi';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
+import '../player/win32.dart' show kernel32, winAlloc, winFree, toWide, fromWide;
 import '../show/show_env.dart';
 import '../show/text_files.dart';
 import '../ps_compat.dart';
@@ -13,18 +15,14 @@ import '../ps_compat.dart';
 // computer, so Google Drive uploads and downloads it by itself.
 //
 //   Preview  where things are and when they last moved
-//   Sync     new and changed files are copied up. A file that is newer on
-//            Google Drive is left alone. A file this computer's sync put on
-//            Google Drive, and that has since left the show, is removed there,
-//            unless Google Drive's copy changed since (see `_ManifestEntry`).
+//   Sync     one way, never deletes: new and changed files are copied up.
+//            A file that is newer on Google Drive is left alone.
 //   Import   the Google Drive copy replaces the show here. Everything is read
 //            into a temp folder first, so a failed read changes nothing. The
 //            old show is kept as a backup (newest 3). This computer's window
 //            layout, error log and sync notes stay.
 //
-// Port of `gdrive.ps1`. The removal on sync is new: the old sync never
-// removed anything, so a file deleted from the show lived on in Google Drive
-// and the next import brought it back.
+// Port of `gdrive.ps1`.
 
 /// The sync record of the last sync, in the show folder. Old app.
 const syncStateFile = 'gdrive_sync.json';
@@ -32,12 +30,9 @@ const syncStateFile = 'gdrive_sync.json';
 /// The import record, in the show folder. Old app.
 const importStateFile = 'gdrive_import.json';
 
-/// What this computer's last sync left on Google Drive. New in the port.
-const syncFilesFile = 'gdrive_sync_files.json';
-
 /// Files that belong to this computer. Import keeps them; sync never sends
-/// the first three.
-const _keepLocal = [syncStateFile, importStateFile, syncFilesFile, 'thelightingcontroller.ini', 'TheLightingController_Err.log'];
+/// the first two.
+const _keepLocal = [syncStateFile, importStateFile, 'thelightingcontroller.ini', 'TheLightingController_Err.log'];
 
 final _junk = RegExp(r'(^|[\\/])(desktop\.ini|\.DS_Store|Icon\r|~\$[^\\/]*|\._[^\\/]*|[^\\/]*\.tmp)$', caseSensitive: false);
 
@@ -79,9 +74,8 @@ String get _home => Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'H
 /// Finds Google Drive's My Drive folder. A folder set in Settings
 /// (`driveFolder`) wins while it exists. Port of `Find-MyDrive`.
 ///
-/// Windows: the old tool asked Windows for the drive whose label says
-/// Google. Without that, this takes the first drive letter (G first) with a
-/// `My Drive` folder on it.
+/// Windows: the first drive, in letter order, that is G or whose label says
+/// Google, with a `My Drive` folder on it (`Get-PSDrive`, see [pickMyDrive]).
 DriveFound findDrive(String settingsDir) {
   var override = '';
   final setF = File(p.join(settingsDir, 'settings.json'));
@@ -102,25 +96,67 @@ DriveFound findDrive(String settingsDir) {
     if (Platform.isMacOS) {
       final cs = Directory(p.join(_home, 'Library', 'CloudStorage'));
       if (!cs.existsSync()) return '';
-      for (final d in cs.listSync().whereType<Directory>()) {
-        final my = p.join(d.path, 'My Drive');
-        if (p.basename(d.path).startsWith('GoogleDrive-') && Directory(my).existsSync()) return my;
+      final dirs = [
+        for (final d in cs.listSync().whereType<Directory>())
+          if (psLike(p.basename(d.path), 'GoogleDrive-*')) d.path,
+      ];
+      for (final d in psSorted<String>(dirs, [(String x) => p.basename(x)])) {
+        final my = p.join(d, 'My Drive');
+        if (FileSystemEntity.typeSync(my) != FileSystemEntityType.notFound) return my;
       }
       return '';
     }
     if (Platform.isWindows) {
-      for (final l in 'GDEFHIJKLMNOPQRSTUVWXYZ'.split('')) {
-        final my = '$l:\\My Drive';
-        if (Directory(my).existsSync()) return my;
-      }
+      final my = pickMyDrive(_windowsDrives(), (path) => FileSystemEntity.typeSync(path) != FileSystemEntityType.notFound);
+      if (my.isNotEmpty) return my;
     }
     for (final my in [p.join(_home, 'Google Drive', 'My Drive'), p.join(_home, 'My Drive')]) {
-      if (Directory(my).existsSync()) return my;
+      if (FileSystemEntity.typeSync(my) != FileSystemEntityType.notFound) return my;
     }
     return '';
   }
 
   return DriveFound(my: find(), override: override, appFound: appFound);
+}
+
+/// The Windows half of `Find-MyDrive`: the first of [drives] (letter and
+/// volume label, in letter order) that is G or whose label says Google
+/// (case ignored, as `-match`), with `My Drive` on it. '' when none.
+String pickMyDrive(Iterable<({String letter, String label})> drives, bool Function(String path) exists) {
+  for (final d in drives) {
+    final my = '${d.letter}:\\My Drive';
+    if ((d.label.toLowerCase().contains('google') || psEq(d.letter, 'G')) && exists(my)) return my;
+  }
+  return '';
+}
+
+final _getLogicalDrives = kernel32.lookupFunction<Uint32 Function(), int Function()>('GetLogicalDrives');
+final _getVolumeInformation = kernel32
+    .lookupFunction<
+      Int32 Function(Pointer<Uint16>, Pointer<Uint16>, Uint32, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint16>, Uint32),
+      int Function(Pointer<Uint16>, Pointer<Uint16>, int, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint32>, Pointer<Uint16>, int)
+    >('GetVolumeInformationW');
+
+/// This computer's drive letters and their volume labels, A to Z, as
+/// `Get-PSDrive -PSProvider FileSystem` lists them (`Name`, `Description`).
+/// A drive that can't be read (an empty card reader) has no label.
+List<({String letter, String label})> _windowsDrives() {
+  final mask = _getLogicalDrives();
+  final out = <({String letter, String label})>[];
+  for (var i = 0; i < 26; i++) {
+    if (mask & (1 << i) == 0) continue;
+    final letter = String.fromCharCode(0x41 + i);
+    final root = toWide('$letter:\\');
+    final name = winAlloc<Uint16>(261 * 2);
+    try {
+      final ok = _getVolumeInformation(root, name, 261, nullptr, nullptr, nullptr, nullptr, 0) != 0;
+      out.add((letter: letter, label: ok ? fromWide(name) ?? '' : ''));
+    } finally {
+      winFree(root);
+      winFree(name);
+    }
+  }
+  return out;
 }
 
 /// The show folder when this computer has no show yet (a new laptop): the
@@ -192,29 +228,6 @@ void _copy(File from, String to) {
   File(to).setLastModifiedSync(from.lastModifiedSync());
 }
 
-/// One file this computer's sync left on Google Drive: its size and modified
-/// time there. Sync removes a file from Google Drive only when it is in here,
-/// has left the show, and Google Drive's copy still has this size and time.
-/// A copy someone changed since is somebody else's and stays.
-typedef _ManifestEntry = ({int size, int time});
-
-Map<String, _ManifestEntry> _readManifest(String path, String dest) {
-  if (!File(path).existsSync()) return {};
-  try {
-    final j = jsonDecode(readText(path));
-    // a record for another Google Drive folder says nothing about this one
-    if (j is! Map || j['target'] != dest || j['files'] is! Map) return {};
-    return {
-      for (final e in (j['files'] as Map).entries)
-        if (e.value case {'size': final int size, 'time': final int time}) '${e.key}': (size: size, time: time),
-    };
-  } on FormatException {
-    return {};
-  }
-}
-
-bool _matches(FileStat s, _ManifestEntry m) => s.size == m.size && (s.modified.millisecondsSinceEpoch - m.time).abs() <= 2000;
-
 /// Copies the show to Google Drive. Returns the report text.
 String driveSync(ShowEnv env, DrivePlaces at) {
   if (at.dest.isEmpty) throw ToolError('Google Drive not found on this computer - is the Google Drive app installed and signed in? NOTHING was copied.');
@@ -225,12 +238,8 @@ String driveSync(ShowEnv env, DrivePlaces at) {
   Directory(dest).createSync(recursive: true);
   var copied = 0, newer = 0, same = 0;
   final failed = <String>[];
-  final left = <String, _ManifestEntry>{};
-  final here = <String>{};
   for (final (rel, f) in _files(env.root)) {
-    if (rel == syncStateFile || rel == importStateFile || rel == syncFilesFile) continue;
-    final key = rel.replaceAll(r'\', '/');
-    here.add(key);
+    if (psEq(rel, syncStateFile) || psEq(rel, importStateFile)) continue;
     final t = File(p.join(dest, rel));
     final fs = f.statSync();
     if (t.existsSync()) {
@@ -238,7 +247,6 @@ String driveSync(ShowEnv env, DrivePlaces at) {
       final diff = ts.modified.difference(fs.modified).inMicroseconds;
       if (ts.size == fs.size && diff.abs() <= 2000000) {
         same++;
-        left[key] = (size: ts.size, time: ts.modified.millisecondsSinceEpoch);
         continue;
       }
       if (diff > 2000000) {
@@ -249,44 +257,14 @@ String driveSync(ShowEnv env, DrivePlaces at) {
     try {
       _copy(f, t.path);
       copied++;
-      final ts = t.statSync();
-      left[key] = (size: ts.size, time: ts.modified.millisecondsSinceEpoch);
     } on FileSystemException {
       failed.add(rel);
     }
   }
-  // Files the last sync left on Google Drive that are no longer in the show.
-  var removed = 0, changedThere = 0;
-  final manifestPath = env.path(syncFilesFile);
-  for (final e in _readManifest(manifestPath, dest).entries) {
-    if (here.contains(e.key)) continue;
-    final t = File(p.join(dest, e.key));
-    if (!t.existsSync()) continue;
-    if (!_matches(t.statSync(), e.value)) {
-      changedThere++;
-      continue;
-    }
-    try {
-      t.deleteSync();
-      removed++;
-    } on FileSystemException {
-      // still there: keep it on the list, so the next sync tries again
-      left[e.key] = e.value;
-      failed.add(e.key);
-    }
-  }
-  _writeState(manifestPath, {
-    'target': dest,
-    'files': {
-      for (final e in left.entries) e.key: {'size': e.value.size, 'time': e.value.time},
-    },
-  });
   _writeState(env.path(syncStateFile), {'synced': sortableTime(env.now()), 'target': dest});
   return [
     '  Google Drive folder: $dest',
     '  CHANGED  $copied file(s) copied, $same already up to date',
-    if (removed > 0) '  REMOVED  $removed file(s) from Google Drive that are no longer in the show',
-    if (changedThere > 0) '  $changedThere file(s) no longer in the show were changed on Google Drive since the last sync - left alone',
     if (newer > 0) '  $newer file(s) are newer on Google Drive - left alone',
     if (failed.isNotEmpty) '  WARNING: could not copy ${failed.length}: ${failed.take(5).join(', ')}',
   ].join('\n');

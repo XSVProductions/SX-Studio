@@ -76,6 +76,35 @@ class ApcEdits {
     message = '';
   }
 
+  /// The button a drag from pad [n] carries: the picked one when it is on
+  /// that pad, else the first. Null for a free pad, which can't be dragged.
+  String? dragFrom(int n) {
+    final here = at(n);
+    if (here.isEmpty) return null;
+    return here.any((p) => p.sec == selected) ? selected : here.first.sec;
+  }
+
+  /// Button [sec] dropped on pad [n]: the same as picking it and tapping
+  /// [n], so a used pad swaps. Dropped on its own pad, nothing happens.
+  void drop(String sec, int n) {
+    if (note[sec] == n) return;
+    selected = sec;
+    tap(n);
+  }
+
+  /// Takes [sec] off the pads from the pad menu. Lets go of it if it was picked.
+  void takeOffFromMenu(String sec) {
+    note[sec] = -1;
+    if (selected == sec) selected = null;
+    message = '';
+  }
+
+  /// Lets go of the picked button, as Done, a click elsewhere or Esc.
+  void deselect() {
+    selected = null;
+    message = '';
+  }
+
   /// Sets the playing ([playing] true) or idle colour of [p].
   void setColour(ApcPad p, bool playing, int v) {
     final c = colours[p.sec] ?? (p.on, p.off);

@@ -1,3 +1,6 @@
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sx_studio/screens/apc/apc_screen.dart';
 
@@ -74,6 +77,51 @@ void main() {
     await poll(t, app);
     expect(_reads(c), 2, reason: 'the queue ran');
     expect(app.dirtyTabs, isNot(contains('apc')));
+    await end();
+  });
+
+  testWidgets('drag a pad onto a free pad to move it there', (t) async {
+    final (app, end) = await pumpScreen(t, Canned({'/api/apc': _apc}), ApcScreen.new, tab: 'apc');
+    final red = find.descendant(of: find.byType(GridView), matching: find.text('RED'));
+    final from = t.getCenter(red);
+    final g = await t.startGesture(from, kind: PointerDeviceKind.mouse);
+    await g.moveBy(const Offset(20, 0));
+    await t.pump();
+    await g.moveTo(t.getCenter(find.text('free').first));
+    await t.pump();
+    await g.up();
+    await t.pumpAndSettle();
+    expect(t.getCenter(red), isNot(from));
+    expect(app.dirtyTabs, contains('apc'));
+    await end();
+  });
+
+  testWidgets('right-click a pad, Take off the pads', (t) async {
+    final (app, end) = await pumpScreen(t, Canned({'/api/apc': _apc}), ApcScreen.new, tab: 'apc');
+    await t.tap(find.text('RED').first, buttons: kSecondaryButton, kind: PointerDeviceKind.mouse);
+    await t.pumpAndSettle();
+    expect(find.text('RED - row 8, column 1'), findsOneWidget);
+    await t.tap(find.text('Take off the pads'));
+    await t.pumpAndSettle();
+    expect(find.text('RED (COLORS) will be taken off the pads'), findsOneWidget);
+    expect(app.dirtyTabs, contains('apc'));
+    await end();
+  });
+
+  testWidgets('a press outside the grid and panels, or Esc, lets go of the picked pad', (t) async {
+    final (_, end) = await pumpScreen(t, Canned({'/api/apc': _apc}), ApcScreen.new, tab: 'apc');
+    await t.tap(find.text('RED').first);
+    await t.pump();
+    expect(find.text('Move a pad'), findsNothing);
+    await t.tap(find.text('APC mini pads'));
+    await t.pump();
+    expect(find.text('Move a pad'), findsOneWidget);
+
+    await t.tap(find.text('RED').first);
+    await t.pump();
+    await t.sendKeyEvent(LogicalKeyboardKey.escape);
+    await t.pump();
+    expect(find.text('Move a pad'), findsOneWidget);
     await end();
   });
 }

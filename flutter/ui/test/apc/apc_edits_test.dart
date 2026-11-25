@@ -88,4 +88,27 @@ void main() {
     e.undo();
     expect(e.dirty, isFalse);
   });
+
+  test('a drag carries the picked button on a pad, and drops like tap then tap', () {
+    final e = _edits();
+    expect(e.dragFrom(5), isNull, reason: 'a free pad');
+    expect(e.dragFrom(2), 'p3');
+    e.selected = 'p4';
+    expect(e.dragFrom(2), 'p4');
+    e.drop('p4', 2);
+    expect(e.selected, 'p4', reason: 'dropped on its own pad, nothing happens');
+    e.drop('p1', 1);
+    expect((e.note['p1'], e.note['p2'], e.selected), (1, 0, null));
+    e.drop('p1', 2);
+    expect(e.message, 'That pad already has 2 buttons on it. Move those apart first.');
+  });
+
+  test('taking a button off from the pad menu lets go of it only when it was picked', () {
+    final e = _edits()..selected = 'p1';
+    e.takeOffFromMenu('p2');
+    expect(e.selected, 'p1');
+    e.takeOffFromMenu('p1');
+    expect(e.selected, isNull);
+    expect(e.at(0), isEmpty);
+  });
 }

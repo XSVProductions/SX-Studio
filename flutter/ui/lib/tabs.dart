@@ -8,6 +8,7 @@ import 'screens/lab/lab_screen.dart';
 import 'screens/look/look_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/apc/apc_screen.dart';
+import 'screens/apc40/apc40_screen.dart';
 import 'screens/health/health_screen.dart';
 import 'screens/pre/pre_screen.dart';
 import 'screens/scene/scene_screen.dart';
@@ -51,6 +52,7 @@ const tabs = [
   TabDef('rig', "Tonight's Rig", TabGroup.rig, RigScreen.new),
   TabDef('skip', 'Strobe', TabGroup.rig, SkipScreen.new),
   TabDef('apc', 'APC mini', TabGroup.rig, ApcScreen.new),
+  TabDef('apc40', 'APC40', TabGroup.rig, Apc40Screen.new),
   TabDef('speed', 'Speed Faders', TabGroup.rig, SpeedScreen.new),
   TabDef('scene', 'Scene Editor', TabGroup.edit, SceneScreen.new),
   TabDef('move', 'Movement Editor', TabGroup.edit, MoveScreen.new),

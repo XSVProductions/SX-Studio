@@ -7,9 +7,11 @@ import '../../widgets/sx_widgets.dart';
 import '../health/issue_row.dart';
 import 'apc_edits.dart';
 import 'apc_palette.dart';
+import 'apc_parts.dart';
 
 /// APC mini: the 8x8 pad grid as it sits on the controller, in each pad's
-/// own colours. Tap a pad, then tap where it should go, or pick its colours.
+/// own colours. Tap a pad, then tap where it should go, or drag it there, or
+/// pick its colours. Right-click a pad for its menu.
 class ApcScreen extends StatefulWidget {
   const ApcScreen(BuildContext _, {super.key});
 
@@ -24,6 +26,10 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
 
   /// Whether the tab was on show at the last rebuild.
   bool? _shown;
+
+  /// The grid, the side panel, the pad problems and the bar: a press outside
+  /// them lets go of the picked pad.
+  final _keep = Object();
 
   @override
   void initState() {
@@ -81,107 +87,170 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
     AppScope.read(context).setDirty('apc', e.dirty);
   }
 
+  /// A press outside the grid and panels, or Esc, lets go of the picked pad,
+  /// as the old page's document `pointerdown` and `keydown` handlers.
+  void _deselect() {
+    if (_e?.selected == null || AppScope.read(context).tab != 'apc') return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    _edit((e) => e.deselect());
+  }
+
+  /// The old pad `contextmenu`: a free pad says so, a used one offers its
+  /// colours and taking it off, for each button on it.
+  void _menu(int n, Offset at) {
+    final e = _e!;
+    final ps = e.at(n);
+    if (ps.isEmpty) {
+      showPadMenu(context, at, 'Free pad - ${padPlace(n)}', [(text: 'Nothing on this pad', enabled: false, go: () {})]);
+      return;
+    }
+    final many = ps.length > 1;
+    showPadMenu(context, at, '${ps.map((p) => p.title).join(' + ')} - ${padPlace(n)}', [
+      for (final p in ps) ...[
+        (
+          text: '${many ? '${p.title}: ' : ''}Colours / details…',
+          enabled: true,
+          go: () => _edit((e) {
+            e.selected = p.sec;
+            e.message = '';
+          }),
+        ),
+        (text: many ? 'Take ${p.title} off the pads' : 'Take off the pads', enabled: true, go: () => _edit((e) => e.takeOffFromMenu(p.sec))),
+      ],
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final e = _e;
     final changed = e == null ? 0 : e.data.pads.where(e.changed).length;
     final stacked = MediaQuery.sizeOf(context).width <= 860;
-    return ScreenBody(
-      bar: SaveBar(
-        hint: e == null
-            ? ''
-            : app.sxOpen
-            ? 'ShowXpress is open. A save waits until it closes.'
-            : changed > 0
-            ? '$changed button(s) changed. Only the pad notes and pad colours in live.ini change.'
-            : 'Pads match the show.',
-        actions: [
-          OutlinedButton(onPressed: changed == 0 ? null : () => _edit((e) => e.undo()), child: const Text('Undo changes')),
-          FilledButton(
-            onPressed: changed == 0
-                ? null
-                : () => runSave(
-                    context,
-                    () => app.client.apcApply(e!.changes),
-                    what: 'apc',
-                    busy: 'Saving pads.',
-                    after: () async {
-                      await _load();
-                      app.showEdited();
-                    },
-                  ),
-            child: const Text('Save pads'),
-          ),
-        ],
-      ),
-      children: [
-        SxCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SxHeader(
-                'APC mini pads',
-                sub:
-                    "The 8x8 grid as it sits on the controller (top row first), in each pad's own colours. "
-                    'Tap a pad, then tap where it should go, or pick its colours.',
-                actions: [OutlinedButton(onPressed: _load, child: const Text('Refresh'))],
+    return EscCatcher(
+      onEsc: _deselect,
+      child: ScreenBody(
+        bar: TapRegion(
+          groupId: _keep,
+          child: SaveBar(
+            hint: e == null
+                ? ''
+                : app.sxOpen
+                ? 'ShowXpress is open. A save waits until it closes.'
+                : changed > 0
+                ? '$changed button(s) changed. Only the pad notes and pad colours in live.ini change.'
+                : 'Pads match the show.',
+            actions: [
+              OutlinedButton(onPressed: changed == 0 ? null : () => _edit((e) => e.undo()), child: const Text('Undo changes')),
+              FilledButton(
+                onPressed: changed == 0
+                    ? null
+                    : () => runSave(
+                        context,
+                        () => app.client.apcApply(e!.changes),
+                        what: 'apc',
+                        busy: 'Saving pads.',
+                        after: () async {
+                          await _load();
+                          app.showEdited();
+                        },
+                      ),
+                child: const Text('Save pads'),
               ),
-              ErrorBox(_error),
-              if (e == null && _error.isEmpty && _loading)
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Text('Reading the show.', style: Sx.sub),
-                ),
-              if (e != null) ...[
-                const SizedBox(height: 14),
-                if (stacked) ...[_grid(e), const SizedBox(height: 18), _side(e)],
-                if (!stacked)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _grid(e)),
-                      const SizedBox(width: 18),
-                      SizedBox(width: 270, child: _side(e)),
-                    ],
-                  ),
-                _faders(e),
-              ],
             ],
           ),
         ),
-        if (e != null)
+        children: [
           SxCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Pad problems', style: Sx.title),
-                const SizedBox(height: 8),
-                ..._issues(e),
+                SxHeader(
+                  'APC mini pads',
+                  sub:
+                      "The 8x8 grid as it sits on the controller (top row first), in each pad's own colours. "
+                      'Tap a pad, then tap where it should go, or pick its colours.',
+                  actions: [OutlinedButton(onPressed: _load, child: const Text('Refresh'))],
+                ),
+                ErrorBox(_error),
+                if (e == null && _error.isEmpty && _loading)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 14),
+                    child: Text('Reading the show.', style: Sx.sub),
+                  ),
+                if (e != null) ...[
+                  const SizedBox(height: 14),
+                  if (stacked) ...[_grid(e), const SizedBox(height: 18), _side(e)],
+                  if (!stacked)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: _grid(e)),
+                        const SizedBox(width: 18),
+                        SizedBox(width: 270, child: _side(e)),
+                      ],
+                    ),
+                  _faders(e),
+                ],
               ],
             ),
           ),
-      ],
+          if (e != null)
+            SxCard(
+              child: TapRegion(
+                groupId: _keep,
+                onTapOutside: (_) => _deselect(),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Pad problems', style: Sx.title),
+                    const SizedBox(height: 8),
+                    ..._issues(e),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
-  Widget _grid(ApcEdits e) => Container(
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: apcBody,
-      border: Border.all(color: Sx.line),
-      borderRadius: BorderRadius.circular(14),
+  Widget _grid(ApcEdits e) => TapRegion(
+    groupId: _keep,
+    onTapOutside: (_) => _deselect(),
+    child: Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: apcBody,
+        border: Border.all(color: Sx.line),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: GridView.count(
+        crossAxisCount: 8,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        children: [
+          for (var r = 1; r <= 8; r++)
+            for (var c = 1; c <= 8; c++) _cell(e, (8 - r) * 8 + (c - 1)),
+        ],
+      ),
     ),
-    child: GridView.count(
-      crossAxisCount: 8,
-      mainAxisSpacing: 6,
-      crossAxisSpacing: 6,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      children: [
-        for (var r = 1; r <= 8; r++)
-          for (var c = 1; c <= 8; c++) _Pad(edits: e, n: (8 - r) * 8 + (c - 1), onTap: (n) => _edit((e) => e.tap(n))),
-      ],
+  );
+
+  /// Pad [n]: tap it, drag it onto another pad, or right-click it.
+  Widget _cell(ApcEdits e, int n) => DragTarget<String>(
+    onAcceptWithDetails: (d) => _edit((e) => e.drop(d.data, n)),
+    builder: (context, over, _) => LayoutBuilder(
+      builder: (context, box) => PadDraggable<String>(
+        data: e.dragFrom(n),
+        size: box.biggest,
+        child: GestureDetector(
+          onTap: () => _edit((e) => e.tap(n)),
+          onSecondaryTapUp: (d) => _menu(n, d.globalPosition),
+          child: _Pad(edits: e, n: n, drop: over.isNotEmpty),
+        ),
+      ),
     ),
   );
 
@@ -204,7 +273,7 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
           Row(
             children: [
               Flexible(child: Text(where)),
-              if (e.moved(sel)) _Tag('moved', Sx.blue),
+              if (e.moved(sel)) ApcTag('moved', Sx.blue),
             ],
           ),
         ))
@@ -214,11 +283,11 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 4,
             children: [
-              _Swatch(padColor(e.on(sel))),
+              PadSwatch(padColor(e.on(sel))),
               const Text('playing  '),
-              _Swatch(padColor(e.off(sel))),
+              PadSwatch(padColor(e.off(sel))),
               const Text('idle'),
-              if (e.colourChanged(sel)) _Tag('changed', Sx.blue),
+              if (e.colourChanged(sel)) ApcTag('changed', Sx.blue),
             ],
           ),
         ));
@@ -227,12 +296,12 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(sel.title, style: Sx.title),
-          _Kv(kv),
+          ApcKv(kv),
           if (e.onGrid(sel)) ...[
             Text('Colour while playing', style: TextStyle(fontSize: 12, color: Sx.dim)),
-            _Palette(current: e.on(sel), onPick: (v) => _edit((e) => e.setColour(sel, true, v))),
+            PadPalette(current: e.on(sel), onPick: (v) => _edit((e) => e.setColour(sel, true, v))),
             Text('Colour when idle', style: TextStyle(fontSize: 12, color: Sx.dim)),
-            _Palette(current: e.off(sel), onPick: (v) => _edit((e) => e.setColour(sel, false, v))),
+            PadPalette(current: e.off(sel), onPick: (v) => _edit((e) => e.setColour(sel, false, v))),
           ],
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -246,13 +315,7 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
             runSpacing: 8,
             children: [
               OutlinedButton(onPressed: () => _edit((e) => e.takeOff(sel.sec)), child: const Text('Take off the pads')),
-              OutlinedButton(
-                onPressed: () => _edit((e) {
-                  e.selected = null;
-                  e.message = '';
-                }),
-                child: const Text('Done'),
-              ),
+              OutlinedButton(onPressed: () => _edit((e) => e.deselect()), child: const Text('Done')),
             ],
           ),
         ],
@@ -270,23 +333,31 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
           Text('Move a pad', style: Sx.title),
           Padding(
             padding: const EdgeInsets.only(top: 6, bottom: 8),
-            child: Text('Tap a pad to see what it plays, then tap where it should go. A blue dot means moved, not saved yet.', style: Sx.sub),
+            child: Text(
+              'Tap a pad to see what it plays, then tap where it should go, or drag it there. Right-click a pad to take it off. '
+              'A blue dot means moved, not saved yet.',
+              style: Sx.sub,
+            ),
           ),
           if (e.message.isNotEmpty) Text(e.message, style: TextStyle(fontSize: 13, color: Sx.amber)),
-          _Kv([('Pads used', Text('$used of 64')), ('Free', Text(free.isEmpty ? 'none' : free.join(', ')))]),
+          ApcKv([('Pads used', Text('$used of 64')), ('Free', Text(free.isEmpty ? 'none' : free.join(', ')))]),
         ],
       );
     }
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Sx.panel,
-        border: Border.all(color: Sx.line),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: DefaultTextStyle.merge(
-        style: TextStyle(fontSize: 13, color: Sx.text),
-        child: body,
+    return TapRegion(
+      groupId: _keep,
+      onTapOutside: (_) => _deselect(),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Sx.panel,
+          border: Border.all(color: Sx.line),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: DefaultTextStyle.merge(
+          style: TextStyle(fontSize: 13, color: Sx.text),
+          child: body,
+        ),
       ),
     );
   }
@@ -384,26 +455,25 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
 
 /// One pad of the grid.
 class _Pad extends StatelessWidget {
-  const _Pad({required this.edits, required this.n, required this.onTap});
+  const _Pad({required this.edits, required this.n, required this.drop});
 
   final ApcEdits edits;
   final int n;
-  final ValueChanged<int> onTap;
+
+  /// A dragged pad is over this one.
+  final bool drop;
 
   @override
   Widget build(BuildContext context) {
     final e = edits;
     final here = e.at(n);
     if (here.isEmpty) {
-      return GestureDetector(
-        onTap: () => onTap(n),
-        child: CustomPaint(
-          painter: _Dashed(),
-          child: Container(
-            alignment: Alignment.bottomLeft,
-            padding: const EdgeInsets.fromLTRB(5, 5, 5, 4),
-            child: Text('free', style: TextStyle(fontSize: 10, color: Sx.line2)),
-          ),
+      return CustomPaint(
+        painter: PadDashed(accent: drop),
+        child: Container(
+          alignment: Alignment.bottomLeft,
+          padding: const EdgeInsets.fromLTRB(5, 5, 5, 4),
+          child: Text('free', style: TextStyle(fontSize: 10, color: Sx.line2)),
         ),
       );
     }
@@ -415,8 +485,8 @@ class _Pad extends StatelessWidget {
     return Semantics(
       button: true,
       label: '${padPlace(n)}: ${here.map((x) => x.title).join(' + ')}',
-      child: GestureDetector(
-        onTap: () => onTap(n),
+      child: CustomPaint(
+        foregroundPainter: drop ? const PadDashed(accent: true) : null,
         child: Container(
           foregroundDecoration: sel
               ? BoxDecoration(
@@ -490,136 +560,4 @@ class _Pad extends StatelessWidget {
       ),
     );
   }
-}
-
-/// The dashed outline of a free pad.
-class _Dashed extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Sx.line
-      ..style = PaintingStyle.stroke;
-    final path = Path()..addRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(7)));
-    for (final m in path.computeMetrics()) {
-      for (var d = 0.0; d < m.length; d += 6) {
-        canvas.drawPath(m.extractPath(d, d + 3), paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_Dashed old) => false;
-}
-
-/// The colour palette for one of a pad's two colours.
-class _Palette extends StatelessWidget {
-  const _Palette({required this.current, required this.onPick});
-
-  final int current;
-  final ValueChanged<int> onPick;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 3, bottom: 7),
-    child: Wrap(
-      spacing: 3,
-      runSpacing: 3,
-      children: [
-        for (final v in padSwatches)
-          Tooltip(
-            message: v == 0 ? 'off' : 'colour $v',
-            child: GestureDetector(
-              onTap: () => onPick(v),
-              child: Container(
-                width: 17,
-                height: 17,
-                foregroundDecoration: v == current
-                    ? BoxDecoration(
-                        border: Border.all(color: Sx.accent, width: 2),
-                        borderRadius: BorderRadius.circular(4),
-                      )
-                    : null,
-                decoration: BoxDecoration(
-                  color: padColor(v),
-                  border: Border.all(color: Sx.line2),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-          ),
-      ],
-    ),
-  );
-}
-
-class _Swatch extends StatelessWidget {
-  const _Swatch(this.color);
-
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 12,
-    height: 12,
-    decoration: BoxDecoration(
-      color: color ?? apcBody,
-      border: Border.all(color: Sx.line2),
-      borderRadius: BorderRadius.circular(3),
-    ),
-  );
-}
-
-/// A small outlined pill, the old app's `.tag`.
-class _Tag extends StatelessWidget {
-  const _Tag(this.text, this.color);
-
-  final String text;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(left: 6),
-    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-    decoration: BoxDecoration(
-      border: Border.all(color: color.withValues(alpha: .45)),
-      borderRadius: BorderRadius.circular(99),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
-    ),
-  );
-}
-
-/// Label and value pairs, the old app's `.kv`.
-class _Kv extends StatelessWidget {
-  const _Kv(this.rows);
-
-  final List<(String, Widget)> rows;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 8, bottom: 12),
-    child: Column(
-      children: [
-        for (final (k, v) in rows)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 72,
-                  child: Text(k, style: TextStyle(fontSize: 12.5, color: Sx.dim)),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: DefaultTextStyle.merge(style: const TextStyle(fontSize: 12.5), child: v),
-                ),
-              ],
-            ),
-          ),
-      ],
-    ),
-  );
 }

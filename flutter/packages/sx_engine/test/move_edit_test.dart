@@ -478,7 +478,7 @@ void main() {
       );
       final d = moveOpen(ShowEnv(p.join(tmp.path, 'show')), 'T.gpj'), st = MoveState.of(d);
       String frame(double t) {
-        final f = moveFrame(d, st, t);
+        final f = moveFrame(d, st, t, player: true);
         return [
           for (final k in f.keys.toList()..sort())
             if (f[k] != 0) '$k:${f[k]}',
@@ -498,6 +498,23 @@ void main() {
           5432.1: '1:116 2:52 3:177 4:45 5:186 20:124 21:225 22:92 23:71 24:179',
         },
       );
+    });
+
+    test('the preview rounds an exact half up like the old page; the player rounds it to even', () {
+      final tmp = Directory.systemTemp.createTempSync('sx_move_half_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+      final g = Directory(p.join(tmp.path, 'show', 'Editor', 'Generator', 'projects'))..createSync(recursive: true);
+      File(p.join(tmp.path, 'show', 'fixtures.ini')).writeAsStringSync('[Fixture1]\naddress = 1\nid = 11\n');
+      File(p.join(g.path, 'H.gpj')).writeAsStringSync(
+        '[Params]\nPanTiltShift = 0.0\n[Fixture_0]\nID = 11\nName = A\nChannels = pan,upan,tilt,utilt\nReversePan = 0\nReverseTilt = 0\n'
+        'OffsetPan = 0\nOffsetTilt = 0\nZoomPan = 0\nZoomTilt = 0\n[Pan/Tilt/uPan/uTilt]\nSelected = 1\nTransition = 0\nDuration = 40\nShift = 0\n'
+        'Point_0 = 1,4\n',
+      );
+      final d = moveOpen(ShowEnv(p.join(tmp.path, 'show')), 'H.gpj');
+      // Aimed 1.5 steps right: pan 2.5 and tilt 5.5 on the way out.
+      final st = MoveState.of(d).withHead(0, const MoveHeadState(op: 1.5, ot: 1.5, zp: 0, zt: 0));
+      expect(moveFrame(d, st, 0), {1: 0, 2: 3, 3: 0, 4: 6});
+      expect(moveFrame(d, st, 0, player: true), {1: 0, 2: 2, 3: 0, 4: 6});
     });
 
     test('a save body holds only what differs from the file', () {

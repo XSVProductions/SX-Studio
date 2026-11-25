@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
 import '../ps_compat.dart';
-import '../show/find_show.dart';
 import '../show/live_ini.dart';
 import '../show/movers.dart';
 import '../show/show_env.dart';
@@ -32,10 +31,10 @@ import 'move_edit/ps_json.dart';
 
 const _maxBackups = 20;
 
-/// Where backups go by default: the app's settings folder, `move_backups`.
-/// The old tool in test mode kept them next to the show folder instead; tests
-/// pass that folder.
-String get defaultMoveBackups => p.join(settingsDir, 'move_backups');
+/// Where backups go: `move_backups` in the engine's settings folder. Every
+/// action that keeps or reads backups takes this folder as `backups`. The old
+/// tool in test mode kept them next to the show folder instead; tests pass that.
+String moveBackupsIn(String settingsFolder) => p.join(settingsFolder, 'move_backups');
 
 String _gdir(ShowEnv env) => '${env.root}/Editor/Generator/projects';
 
@@ -224,7 +223,7 @@ MoveDoc moveOpen(ShowEnv env, String move) {
 }
 
 /// The backups of a movement, newest first. Port of `-Action Backups`.
-MoveBackups moveBackups(ShowEnv env, String move, {String? backups}) {
+MoveBackups moveBackups(ShowEnv env, String move, {required String backups}) {
   _requireGdir(env);
   _moveFile(env, move);
   return MoveBackups(
@@ -332,7 +331,7 @@ String moveRender(ShowEnv env, Map<String, Object?> changes, String out) {
 ///
 /// [changes] is the request body as sent, not a parsed [MoveSave], so values of
 /// the wrong kind are refused with the old tool's own words.
-String moveSave(ShowEnv env, Map<String, Object?> changes, {String? backups}) {
+String moveSave(ShowEnv env, Map<String, Object?> changes, {required String backups}) {
   _requireGdir(env);
   env.requireSxClosed();
   final move = psText(prop(changes, 'move'));
@@ -377,7 +376,7 @@ class MoveReverted extends MoveRevertResult {
 
 /// Puts backup [backup] back. The current file is backed up first.
 /// Port of `-Action Revert`.
-MoveRevertResult moveRevert(ShowEnv env, String move, String backup, {bool force = false, String? backups}) {
+MoveRevertResult moveRevert(ShowEnv env, String move, String backup, {bool force = false, required String backups}) {
   _requireGdir(env);
   env.requireSxClosed();
   final path = _moveFile(env, move);
@@ -458,12 +457,12 @@ String? _updateAimRecord(ShowEnv env, String file, List<MovePt> pts) {
 
 // ---------------------------------------------------------------- backups (outside the show folder, so Google Drive never gets them)
 
-String _backupDir(ShowEnv env, String name, String? base) => p.join(base ?? defaultMoveBackups, p.basename(env.root), name);
+String _backupDir(ShowEnv env, String name, String base) => p.join(base, p.basename(env.root), name);
 
 typedef _Backup = ({String id, String at, String what, String written, String path});
 
 /// Port of `Get-Backups`: newest first.
-List<_Backup> _backups(ShowEnv env, String name, String? base) {
+List<_Backup> _backups(ShowEnv env, String name, String base) {
   final d = Directory(_backupDir(env, name, base));
   if (!d.existsSync()) return const [];
   final jsons = d.listSync().whereType<File>().where((f) => f.path.toLowerCase().endsWith('.json') && !p.basename(f.path).startsWith('.')).toList()
@@ -487,7 +486,7 @@ List<_Backup> _backups(ShowEnv env, String name, String? base) {
 typedef _NewBackup = ({String id, String dir, String json, String at, String what});
 
 /// Port of `Add-Backup`.
-_NewBackup _addBackup(ShowEnv env, String name, List<int> bytes, String what, String? base) {
+_NewBackup _addBackup(ShowEnv env, String name, List<int> bytes, String what, String base) {
   final d = _backupDir(env, name, base);
   Directory(d).createSync(recursive: true);
   final t = env.now();
@@ -503,7 +502,7 @@ _NewBackup _addBackup(ShowEnv env, String name, List<int> bytes, String what, St
 }
 
 /// Port of `Save-BackupInfo`: the backup's note, then the oldest past [_maxBackups] go.
-void _saveBackupInfo(ShowEnv env, _NewBackup bk, String written, String name, String? base) {
+void _saveBackupInfo(ShowEnv env, _NewBackup bk, String written, String name, String base) {
   File(bk.json).writeAsStringSync('{"at":${psJsonString(bk.at)},"what":${psJsonString(bk.what)},"written":${psJsonString(written)}}');
   for (final old in _backups(env, name, base).skip(_maxBackups)) {
     for (final f in [old.path, old.path.replaceFirst(RegExp(r'\.gpj$'), '.json')]) {

@@ -110,6 +110,10 @@ class Engine {
     }
     final Json out = switch (r.url.path) {
       '/api/sx' => {'open': sxOpen},
+      '/api/sx/close' => (() {
+        sxOpen = false;
+        return <String, Object?>{'ok': true};
+      })(),
       '/api/moves' => {
         'ok': true,
         'show': 'show',
@@ -337,9 +341,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
     final first = '${e.postsTo('/api/live/out').first['l']}';
     // Clears the interface first, then the patched head's pan and tilt. The dimmer graph is off.
-    expect(first, startsWith('z b:1:'));
-    expect(first, contains(' b:2:'));
-    expect(first, isNot(contains('b:3:')));
+    expect(first, matches(RegExp(r'^z b:1:\d+ b:2:\d+$')));
     expect(find.text('Output: DMX USB'), findsOneWidget);
 
     app.go('home');
@@ -348,6 +350,64 @@ void main() {
     expect(e.postsTo('/api/live/stop'), hasLength(1));
     expect(e.postsTo('/api/sx/launch'), isEmpty);
     await t.pump(const Duration(seconds: 1));
+    await end(t, app);
+  });
+
+  testWidgets('with ShowXpress open the preview asks, closes it for the lights, and opens it again on Stop', (t) async {
+    final e = Engine()..sxOpen = true;
+    final app = await pumpMove(t, e);
+    await open(t);
+    await t.tap(find.text('Show on the lights'));
+    await t.pump();
+    await t.pump();
+    expect(find.text('Close ShowXpress to see the movement on the lights?'), findsOneWidget);
+    await t.tap(find.text('Close and preview'));
+    await t.pump();
+    await t.pump();
+    expect(e.postsTo('/api/sx/close').single, {'force': false, 'live': true});
+    expect(e.postsTo('/api/live/start'), isEmpty, reason: 'waits for ShowXpress to let go first');
+    // One status poll a second, then 2.5 s for the interface.
+    await t.pump(const Duration(seconds: 1));
+    await t.pump();
+    await t.pump(const Duration(milliseconds: 2600));
+    await t.pump();
+    expect(e.postsTo('/api/live/start'), hasLength(1));
+    expect(find.text('Open ShowXpress again when I stop'), findsOneWidget);
+
+    await t.tap(find.text('Stop'));
+    await t.pump();
+    await t.pump();
+    expect(e.postsTo('/api/live/stop'), hasLength(1));
+    expect(e.postsTo('/api/sx/launch'), hasLength(1));
+    await t.pump(const Duration(seconds: 1));
+    await end(t, app);
+  });
+
+  testWidgets('another tab can open a movement here', (t) async {
+    final e = Engine();
+    final app = await pumpMove(t, e);
+    app.openFile('move', 'CIRCLE.gpj');
+    for (var i = 0; i < 4; i++) {
+      await t.pump();
+    }
+    expect(find.text('On MOVES: CIRCLE · 2 heads'), findsOneWidget);
+    await end(t, app);
+  });
+
+  testWidgets('another tab asking to open a movement over unsaved edits asks first', (t) async {
+    final e = Engine();
+    final app = await pumpMove(t, e);
+    await open(t);
+    await typeIn(t, 'Each next head behind by', '25');
+    app.openFile('move', 'ROOM.gpj');
+    await t.pump();
+    await t.pump();
+    expect(find.text('Leave this movement?'), findsOneWidget);
+    await t.tap(find.text('Cancel'));
+    await t.pump();
+    expect(find.text('Pan / Tilt: shift. Only that is changed in the file.'), findsOneWidget);
+    expect(e.gets.where((g) => g == '/api/move'), hasLength(1));
+    expect(app.takeFile('move'), isNull, reason: 'the request was used up');
     await end(t, app);
   });
 

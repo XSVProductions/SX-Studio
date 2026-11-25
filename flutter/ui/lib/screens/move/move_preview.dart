@@ -57,22 +57,25 @@ class MovePreview {
     return r;
   }
 
-  /// Works out the frame now and sends what changed.
+  /// Works out the frame now and sends what changed: first a 0 for channels
+  /// that left the frame, then the new values, each in channel order like the
+  /// old page (it walked JavaScript objects, which list number keys in order).
   void push() {
     if (!_on) return;
     final fr = frame();
-    for (final ch in _sent.keys.toList()) {
+    for (final ch in _sent.keys.toList()..sort()) {
       if (!fr.containsKey(ch) && _sent[ch] != 0) {
         _sent[ch] = 0;
         _pend[ch] = 'b:$ch:0';
       }
     }
-    fr.forEach((ch, v) {
+    for (final ch in fr.keys.toList()..sort()) {
+      final v = fr[ch]!;
       if (_sent[ch] != v) {
         _sent[ch] = v;
         _pend[ch] = 'b:$ch:$v';
       }
-    });
+    }
     _schedule();
   }
 

@@ -33,7 +33,7 @@ void registerMoveRoutes(Engine e) {
   e.api.get('/api/move/backups', (req) {
     final f = req.query['f'] ?? '';
     if (!isMoveName(f)) throw ToolError('Unknown movement.');
-    return moveBackups(e.show(), f);
+    return moveBackups(e.show(), f, backups: moveBackupsIn(e.settingsFolder));
   });
 
   e.api.post(
@@ -53,7 +53,12 @@ void registerMoveRoutes(Engine e) {
         final x => [x],
       };
       final env = e.show();
-      final out = moveSave(env, {'move': f, 'sha': req.body.str('sha'), 'secs': items('secs'), 'heads': items('heads')});
+      final out = moveSave(env, {
+        'move': f,
+        'sha': req.body.str('sha'),
+        'secs': items('secs'),
+        'heads': items('heads'),
+      }, backups: moveBackupsIn(e.settingsFolder));
       return _afterChange(e, env, f, out);
     },
   );
@@ -63,7 +68,7 @@ void registerMoveRoutes(Engine e) {
     if (!isMoveName(f) || !RegExp(r'^\d{8}-\d{6}-\d{3}$').hasMatch(id)) throw ToolError('Unknown backup.');
     if (e.sx.running) throw ToolError('ShowXpress is open. Close it (save first), then press Revert again.');
     final env = e.show();
-    return switch (moveRevert(env, f, id, force: req.body['force'] == true)) {
+    return switch (moveRevert(env, f, id, force: req.body['force'] == true, backups: moveBackupsIn(e.settingsFolder))) {
       MoveRevertConflict() => {'ok': true, 'conflict': true, 'out': ''},
       MoveReverted(:final out) => _afterChange(e, env, f, out),
     };

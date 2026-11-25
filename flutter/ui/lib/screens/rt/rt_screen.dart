@@ -172,14 +172,12 @@ class _RtScreenState extends State<RtScreen> with ShowWatcher, RigReloads {
                 ),
               ),
               // The old `#rtrem`, under the header (`margin: 12px 0 0`).
-              const Padding(
-                padding: EdgeInsets.only(top: 12),
-                child: RemoteRow(
-                  tab: 'rt',
-                  sets: [
-                    RemoteSet('RIG ID', ['RIG ID']),
-                  ],
-                ),
+              const RemoteRow(
+                tab: 'rt',
+                margin: EdgeInsets.only(top: 12),
+                sets: [
+                  RemoteSet('RIG ID', ['RIG ID']),
+                ],
               ),
               ErrorBox(_error),
               if (d == null && _error.isEmpty)

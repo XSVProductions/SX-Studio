@@ -1,5 +1,7 @@
 import '../ps_compat.dart';
 
+export '../ps_compat.dart' show psTruthy;
+
 // How the old server (`df_aim_gui.ps1`) read a request body. It decoded the
 // JSON with `ConvertFrom-Json` and checked the raw values with PowerShell's
 // own habits, before any tool saw them. The routes use these to refuse
@@ -19,18 +21,6 @@ String bodyText(Object? v) => switch (v) {
   List l => l.map(bodyText).join(' '),
   Map m => '@{${m.entries.map((e) => '${e.key}=${bodyText(e.value)}').join('; ')}}',
   _ => '$v',
-};
-
-/// PowerShell's `if ($body.x)` / `[bool]$body.x` on a value decoded from a
-/// request: null, false, 0, '' and an empty list are false. A list of one is
-/// as true as its item. Anything else is true.
-bool psTruthy(Object? v) => switch (v) {
-  null => false,
-  bool b => b,
-  num n => n != 0,
-  String s => s.isNotEmpty,
-  List l => l.length > 1 || (l.length == 1 && psTruthy(l.first)),
-  _ => true,
 };
 
 /// `@($body.x)` of a value decoded from a request: a list stays a list, a

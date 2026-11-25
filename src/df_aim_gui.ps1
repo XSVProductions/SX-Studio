@@ -253,7 +253,13 @@ function Invoke-Engine([string]$engineArgs, [string]$script = $engine) {
   $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
   $p = [Diagnostics.Process]::Start($psi)
   $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
-  if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; return @{ ok = $false; out = ''; error = 'Timed out.' } }
+  # wait up to 180 s, one second at a time. The DMX children (SX Player, live aim, the editors' previews) put the lights
+  # out after 30 s without a line, and while this waits nobody else can send them one, so send the keep-alive here
+  for ($waited = 0; -not $p.WaitForExit(1000); $waited++) {
+    if ($waited -ge 180) { try { $p.Kill() } catch {}; return @{ ok = $false; out = ''; error = 'Timed out.' } }
+    Step-PlayerKeep
+    if (Test-Live) { try { $script:liveP.StandardInput.WriteLine('k') } catch {} }
+  }
   $esc = [string][char]27 + '\[[0-9;]*m'; $out = $o.Result -replace $esc, ''; $err = $e.Result -replace $esc, ''
   $msg = ''
   if ($p.ExitCode -ne 0 -or $err.Trim()) {

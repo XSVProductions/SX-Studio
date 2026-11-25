@@ -8,7 +8,6 @@ import 'screens/look/look_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'screens/apc/apc_screen.dart';
 import 'screens/health/health_screen.dart';
-import 'screens/home/home_screen.dart';
 import 'screens/pre/pre_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';

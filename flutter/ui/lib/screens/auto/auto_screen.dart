@@ -61,6 +61,9 @@ class _AutoScreenState extends State<AutoScreen> {
   AppState get _app => AppScope.read(context);
   bool get _running => _st?.running ?? false;
 
+  /// [AppState.imports] as last seen.
+  late int _imports = _app.imports;
+
   @override
   void initState() {
     super.initState();
@@ -74,6 +77,11 @@ class _AutoScreenState extends State<AutoScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final app = AppScope.of(context);
+    // a settings import replaced the Auto Show
+    if (_imports != app.imports) {
+      _imports = app.imports;
+      _load();
+    }
     // the status poll carries the Auto Show's status too
     final a = app.status?.auto;
     if (a != null && a.at != _polledAt) {

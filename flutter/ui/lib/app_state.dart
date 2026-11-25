@@ -62,6 +62,17 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Goes up each time a settings file was imported.
+  int imports = 0;
+
+  /// A settings import just replaced the APC40 pages and the Auto Show along
+  /// with show files. Those two tabs read again whatever they hold (the old
+  /// page's `Q4=null;AU=null`), the rest as after [showEdited].
+  void settingsImported() {
+    imports++;
+    showEdited();
+  }
+
   /// Dark, light, or the same as this device (`ThemeMode.system`). Each
   /// device keeps its own choice, as the old app kept it in the browser.
   ThemeMode themeMode;

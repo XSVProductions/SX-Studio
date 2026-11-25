@@ -110,9 +110,12 @@ class ScreenBody extends StatelessWidget {
 /// On a phone the hint gets its own line and the buttons share the row under
 /// it, as the old phone rule did.
 class SaveBar extends StatelessWidget {
-  const SaveBar({super.key, required this.hint, this.actions = const []});
+  const SaveBar({super.key, required this.hint, this.failed = false, this.actions = const []});
 
   final String hint;
+
+  /// The hint reports a save that failed, so it is red.
+  final bool failed;
   final List<Widget> actions;
 
   @override
@@ -120,7 +123,7 @@ class SaveBar extends StatelessWidget {
     final phone = MediaQuery.sizeOf(context).width <= 640;
     final text = Text(
       hint,
-      style: TextStyle(color: Sx.dim, fontSize: phone ? 12 : 13),
+      style: TextStyle(color: failed ? Sx.red : Sx.dim, fontSize: phone ? 12 : 13),
     );
     return Container(
       decoration: BoxDecoration(

@@ -32,10 +32,14 @@ class _Apc40ScreenState extends State<Apc40Screen> {
 
   /// What the bar says for 5 s after a save, a fill or a move to another page.
   var _msg = '';
+  var _msgFailed = false;
   Timer? _msgT;
 
   Timer? _pollT;
   var _polling = false;
+
+  /// [AppState.imports] as last seen.
+  late int _imports = AppScope.read(context).imports;
 
   /// The grid, the side panel, the page tabs and the bar: a press outside
   /// them lets go of the picked pad.
@@ -60,7 +64,13 @@ class _Apc40ScreenState extends State<Apc40Screen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (AppScope.of(context).tab == _tab) {
+    final app = AppScope.of(context);
+    // a settings import replaced the pages
+    if (_imports != app.imports) {
+      _imports = app.imports;
+      _load();
+    }
+    if (app.tab == _tab) {
       if (_pollT == null && !_polling) _poll();
     } else {
       _pollT?.cancel();
@@ -141,9 +151,12 @@ class _Apc40ScreenState extends State<Apc40Screen> {
   }
 
   /// Shows [m] in the bar for 5 s, the old `a4Say`.
-  void _say(String m) {
+  void _say(String m, {bool failed = false}) {
     _msgT?.cancel();
-    setState(() => _msg = m);
+    setState(() {
+      _msg = m;
+      _msgFailed = failed;
+    });
     _msgT = Timer(const Duration(seconds: 5), () {
       if (mounted) setState(() => _msg = '');
     });
@@ -181,7 +194,7 @@ class _Apc40ScreenState extends State<Apc40Screen> {
       app.setDirty(_tab, _e!.dirty);
       _say('Saved. The APC40 uses it straight away.');
     } on ApiException catch (x) {
-      if (mounted) _say('Not saved: ${x.message.isEmpty ? 'unknown problem' : x.message}');
+      if (mounted) _say('Not saved: ${x.message.isEmpty ? 'unknown problem' : x.message}', failed: true);
     } finally {
       app.setBusy('');
     }
@@ -237,6 +250,7 @@ class _Apc40ScreenState extends State<Apc40Screen> {
         bar: TapRegion(
           groupId: _keep,
           child: SaveBar(
+            failed: _msg.isNotEmpty && _msgFailed,
             hint: _msg.isNotEmpty
                 ? _msg
                 : e == null

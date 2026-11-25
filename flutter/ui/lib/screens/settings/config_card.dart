@@ -162,7 +162,7 @@ class _ConfigCardState extends State<ConfigCard> {
     // take it all up now, as the old page did: theme, tabs, and every tab's data
     app.setThemeMode(await loadThemeMode());
     await SettingsModel.of(app).load();
-    app.showEdited();
+    app.settingsImported();
     if (mounted) setState(() => _line = _Imported(done, r.warn));
   }
 

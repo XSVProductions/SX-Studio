@@ -116,6 +116,49 @@ void main() {
     expect(readApc40Layout(apc40LayoutFile(settings.path)).pages.single.name, 'Listed');
   });
 
+  test('a settings export carries the pages, and an import saves them through the same checks', () async {
+    engine.provide(ExportFolders([p.join(t.tmp.path, 'out')]));
+    await post('/api/apc40/save', {
+      'layout': {
+        'pages': [
+          {
+            'name': 'Mine',
+            'pads': {'0': 'RED'},
+          },
+        ],
+        'faders': {'1': 2},
+      },
+    });
+    final saved = await post('/api/config/export', {'device': <String, Object?>{}});
+    final file = (jsonDecode(File(saved['path']! as String).readAsStringSync()) as Map).cast<String, Object?>();
+    expect(file['apc40'], {
+      'pages': [
+        {
+          'name': 'Mine',
+          'pads': {'0': 'RED'},
+        },
+      ],
+      'faders': {'1': 2},
+    });
+
+    // pad 99 and fader 12 don't exist, so the APC40 tab's checks drop them
+    file['apc40'] = {
+      'pages': [
+        {
+          'name': 'Theirs',
+          'pads': {'5': 'BLUE', '99': 'RED'},
+        },
+      ],
+      'faders': {'2': 1, '12': 0},
+    };
+    final r = await post('/api/config/import', {'data': file});
+    expect(r['done'], contains('the APC40 pads and faders'), reason: '$r');
+    final lay = readApc40Layout(apc40LayoutFile(settings.path));
+    expect(lay.pages.single.name, 'Theirs');
+    expect(lay.pages.single.pads, {5: 'BLUE'});
+    expect(lay.faders, {2: 1});
+  });
+
   test('phones reach all three routes, and only save is a POST', () {
     final routes = {for (final r in engine.api.routes) r.path: r};
     expect(routes['/api/apc40']!.method, 'GET');

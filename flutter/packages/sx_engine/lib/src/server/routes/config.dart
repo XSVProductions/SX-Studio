@@ -1,5 +1,11 @@
+import 'dart:io';
+
+import '../../apc40/runner.dart';
 import '../../settings/config_io.dart';
 import '../../settings/open_on_computer.dart';
+import '../../show/show_env.dart';
+import '../../show/text_files.dart';
+import '../../tools/apc40.dart';
 import '../engine.dart';
 import '../ps_body.dart';
 
@@ -11,13 +17,29 @@ import '../ps_body.dart';
 void registerConfigRoutes(Engine e) {
   e.provide(LastExport());
 
-  // TODO(merge): connect the APC40 tab's functions from `tools/apc40.dart`:
-  //   readText: the text of `apc40LayoutFile(e.settingsFolder)` when it exists, else null.
-  //   save: `saveApc40Layout(apc40LayoutFile(e.settingsFolder), raw)`, true when it
-  //   returns, false on `ToolError`, then have the bridge reload the layout.
-  // `readApc40Layout(File)` and `cleanApc40Layout(Json?)` are the APC40 tab's own
-  // reader and checks, which `saveApc40Layout` uses.
-  final apc40 = Apc40Part(readText: () => null, save: (raw) => false);
+  // The APC40 tab's own file and checks (`tools/apc40.dart`), and its bridge.
+  File layout() => apc40LayoutFile(e.settingsFolder);
+  final apc40 = Apc40Part(
+    readText: () {
+      try {
+        final f = layout();
+        return f.existsSync() ? readText(f.path) : null;
+      } on FileSystemException {
+        return null;
+      }
+    },
+    save: (raw) {
+      try {
+        saveApc40Layout(layout(), raw);
+      } on ToolError {
+        return false;
+      } on FileSystemException {
+        return false;
+      }
+      e.find<Apc40Runner>()?.send('reload');
+      return true;
+    },
+  );
 
   e.api.post('/api/config/export', (req) {
     if (req.fromPhone) return {'ok': false, 'error': 'Export the settings on the computer.'};

@@ -119,7 +119,7 @@ class _RtScreenState extends State<RtScreen> with ReloadWhenShown {
     final placed = d == null ? const <String, String>{} : _placed(d);
     final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
     return ScreenBody(
-      bar: SaveBar(
+      bar: RigBar(
         hint: _hint(app, d),
         actions: [
           TextButton(onPressed: d != null && _assign.isNotEmpty ? () => _edit(_assign.clear) : null, child: const Text('New event')),
@@ -258,7 +258,7 @@ class _RtScreenState extends State<RtScreen> with ReloadWhenShown {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${slots.first.towerName} tower'.toUpperCase(), style: Sx.label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text('${slots.first.towerName} tower'.toUpperCase(), style: Sx.label),
             const SizedBox(height: 6),
             IntrinsicHeight(
               child: Row(
@@ -452,19 +452,18 @@ class _SlotTile extends StatelessWidget {
           Text(
             '${slot.side} mover',
             style: TextStyle(color: Sx.mute, fontSize: 10.5),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
           ),
           if (h == null)
             Text(
               'tap to set',
               style: TextStyle(color: Sx.dim, fontSize: 11),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
             )
           else ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _Dot(h),
                 Text(
@@ -477,8 +476,6 @@ class _SlotTile extends StatelessWidget {
               h.flash ? '${h.look} flashing' : h.look,
               style: TextStyle(color: Sx.dim, fontSize: 11),
               textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
           ],
         ],

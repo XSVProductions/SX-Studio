@@ -224,6 +224,45 @@ class RigHeader extends StatelessWidget {
   }
 }
 
+/// The save bar for the rig tabs. On a laptop it is the shared [SaveBar].
+/// On a phone it follows the old `.bar` phone rule: the hint gets its own
+/// line and the buttons share the row under it. [SaveBar] keeps the hint and
+/// up to three buttons on one row, which leaves the hint no room at 380 px.
+class RigBar extends StatelessWidget {
+  const RigBar({super.key, required this.hint, required this.actions});
+
+  final String hint;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.sizeOf(context).width > 640) return SaveBar(hint: hint, actions: actions);
+    return Container(
+      decoration: BoxDecoration(
+        color: Sx.bg,
+        border: Border(top: BorderSide(color: Sx.line)),
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hint.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(hint, style: TextStyle(color: Sx.dim, fontSize: 12)),
+            ),
+          Row(
+            children: [
+              for (final (i, a) in actions.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: a)],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// A box with a dashed 1 px border, like CSS `border: 1px dashed`. Flutter's
 /// own borders are solid only.
 class DashedBox extends StatelessWidget {

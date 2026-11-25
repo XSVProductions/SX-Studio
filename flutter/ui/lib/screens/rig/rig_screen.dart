@@ -111,7 +111,7 @@ class _RigScreenState extends State<RigScreen> with ReloadWhenShown {
     final d = _data;
     final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
     return ScreenBody(
-      bar: SaveBar(
+      bar: RigBar(
         hint: _hint(app),
         actions: [
           TextButton(onPressed: d != null && dirty ? _undo : null, child: const Text('Undo')),
@@ -256,24 +256,27 @@ class _RigScreenState extends State<RigScreen> with ReloadWhenShown {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          runSpacing: 4,
-          children: [
-            Text('Chase scenes', style: Sx.title),
-            Text.rich(
-              TextSpan(
-                style: TextStyle(color: Sx.dim, fontSize: 13),
-                children: [
-                  TextSpan(text: '${d.scenes.length}', style: b),
-                  const TextSpan(text: ' chase scenes · '),
-                  TextSpan(text: '$trimmed', style: b),
-                  const TextSpan(text: ' trimmed for this rig'),
-                ],
+        SizedBox(
+          width: double.infinity,
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            runSpacing: 4,
+            children: [
+              Text('Chase scenes', style: Sx.title),
+              Text.rich(
+                TextSpan(
+                  style: TextStyle(color: Sx.dim, fontSize: 13),
+                  children: [
+                    TextSpan(text: '${d.scenes.length}', style: b),
+                    const TextSpan(text: ' chase scenes · '),
+                    TextSpan(text: '$trimmed', style: b),
+                    const TextSpan(text: ' trimmed for this rig'),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         if (d.scenes.isEmpty) Text('No chase scenes found on your live buttons.', style: Sx.sub),

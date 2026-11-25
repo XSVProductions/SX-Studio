@@ -77,7 +77,7 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
     final app = AppScope.of(context);
     final d = _data;
     return ScreenBody(
-      bar: SaveBar(
+      bar: RigBar(
         hint: _hint(app),
         actions: [
           TextButton(
@@ -169,22 +169,25 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          runSpacing: 4,
-          children: [
-            Text('Flash order', style: Sx.title),
-            Text.rich(
-              TextSpan(
-                style: TextStyle(color: Sx.dim, fontSize: 13),
-                children: [
-                  TextSpan(text: '${o.length}', style: b),
-                  TextSpan(text: ' heads · ${_trim(each)} s each · one loop '),
-                  TextSpan(text: '${(o.length * each).toStringAsFixed(2)} s', style: b),
-                ],
+        SizedBox(
+          width: double.infinity,
+          child: Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runSpacing: 4,
+            children: [
+              Text('Flash order', style: Sx.title),
+              Text.rich(
+                TextSpan(
+                  style: TextStyle(color: Sx.dim, fontSize: 13),
+                  children: [
+                    TextSpan(text: '${o.length}', style: b),
+                    TextSpan(text: ' heads · ${_trim(each)} s each · one loop '),
+                    TextSpan(text: '${(o.length * each).toStringAsFixed(2)} s', style: b),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         if (o.isEmpty)

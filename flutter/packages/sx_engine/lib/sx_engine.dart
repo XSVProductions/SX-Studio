@@ -14,6 +14,8 @@ export 'src/show/live_ini.dart';
 export 'src/show/movers.dart';
 export 'src/show/show_env.dart';
 export 'src/show/text_files.dart';
+export 'src/sx/auto_player.dart';
+export 'src/sx/pending_presses.dart';
 export 'src/sx/remote_setup.dart';
 export 'src/sx/sx_app.dart';
 export 'src/sx/sx_remote.dart';

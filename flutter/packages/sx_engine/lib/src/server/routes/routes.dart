@@ -1,4 +1,6 @@
 import '../engine.dart';
+import 'auto.dart';
+import 'remote.dart';
 import 'speed.dart';
 import 'sx.dart';
 
@@ -6,4 +8,6 @@ import 'sx.dart';
 void registerRoutes(Engine e) {
   registerSxRoutes(e);
   registerSpeedRoutes(e);
+  registerRemoteRoutes(e);
+  registerAutoRoutes(e);
 }

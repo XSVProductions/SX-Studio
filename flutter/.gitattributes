@@ -1,0 +1,5 @@
+# Files where every area adds a line. Keep both sides when branches meet.
+packages/sx_api/lib/sx_api.dart merge=union
+packages/sx_engine/lib/sx_engine.dart merge=union
+packages/sx_engine/lib/src/server/routes/routes.dart merge=union
+ui/lib/tabs.dart merge=union

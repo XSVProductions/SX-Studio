@@ -56,7 +56,7 @@ cd ui && flutter run -d windows                        # the app
 
 The engine suite's weight is in `test/parity`, the old-versus-new checks. Each runs the PowerShell tool from `../src` and its Dart port on the same copy of a real show, then compares the answer and every file left behind, byte for byte. They need PowerShell on PATH and `SX_SHOW` set to a real show folder. Without those they skip themselves and the suite still passes, with 377 engine tests run where 843 would. A green run with no `SX_SHOW` proves much less, and that is what GitHub's run is, because a show folder is never in git. Set it on your own machine.
 
-The counts above are from Linux with PowerShell 7. The suites also pass on Windows with Windows PowerShell 5.1, which matters because the two PowerShells differ (number formatting, sort order of ties, JSON layout) and the port follows 5.1.
+The counts above are from Linux with PowerShell 7. The suites also pass on Windows 11 with Windows PowerShell 5.1, where the engine count is 840 because three tests of the Mac DMX helper don't run there. That run matters because the two PowerShells differ (number formatting, sort order of ties, JSON layout) and the port follows 5.1.
 
 ## Keeping the two apps in step
 
@@ -123,12 +123,15 @@ Checked:
 - All three suites, on Linux with PowerShell 7 and on Windows with Windows PowerShell 5.1.
 - A real install on Windows 11 with real ShowXpress: the silent switch from the PowerShell app, all tabs, the save queue while ShowXpress is open, force close, closing the window with the Auto Show running, the five-minute idle quit, phone pairing and the laptop-only refusals, a silent reinstall, the setup program refusing an unsigned release, uninstall.
 - The Mac package builds on Apple Silicon, the app starts, opens and closes real ShowXpress, and the DMX helper loads both of ShowXpress's Mac drivers (Intel under Rosetta and Apple Silicon).
-- Settings files exported by each app import into the other with the same result.
+- Settings files exported by each app import into the other with the same result. On Windows the export lands in Downloads, "Show the file" selects it in Explorer, and the Import dialog works. The same three work in the built Mac app with Finder.
+- The switch from an installed 1.9.15 with its window open: the installer stops the old server, the new app comes up on port 47321 and closes the old window, and other browser windows are left alone. The old APC40 bridge process exits by itself.
+- The APC40 bridge in the installed Windows app with no controller: it reports the APC40 as missing, keeps polling, and the app stays up.
+- The MIDI code against the real `winmm.dll`: listing devices, a missing device, and the whole output side (short message, sysex, reset, close) through Windows' built-in synth.
 
 Not checked, and the reason:
 
 - **No light has gone through a DMX interface.** There was no interface on either test machine. Live output, the SX Player and Rig Test are ported and tested against recorded frames, and that is all. Try these first with a real rig.
-- **No APC40 or APC mini was plugged in.** The APC40 bridge's logic is tested with fakes. Its MIDI code (`apc40/win_midi.dart`) is new FFI code that has not seen a controller.
+- **No APC40 or APC mini was plugged in.** The APC40 bridge's logic is tested with fakes. Its MIDI code (`apc40/win_midi.dart`) is new FFI code. The input side, which is how a pad press arrives, cannot run without a controller and never has. Sysex has not gone to a real APC40.
 - **An update from a real GitHub release.** The update path was tested against local files and a staged release, never against a published one.
 - **`flutter.yml` has never run on GitHub.** It was written and read, and its steps were run by hand on the test machines.
 - **The Mac package was not installed.** It was built and its contents were run from the build folder. `packaging/mac/smoke.sh` installs it and needs `sudo`.

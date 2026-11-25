@@ -1,0 +1,35 @@
+name: sx_studio
+description: SX Studio. Lighting control for ShowXpress.
+publish_to: none
+version: 2.0.0+1
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  shared_preferences: ^2.5.0
+  sx_api:
+    path: ../packages/sx_api
+  sx_engine:
+    path: ../packages/sx_engine
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/img/
+  fonts:
+    - family: Saira
+      fonts:
+        - asset: assets/fonts/Saira.ttf
+    - family: Orbitron
+      fonts:
+        - asset: assets/fonts/Orbitron.ttf

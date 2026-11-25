@@ -198,3 +198,7 @@ The scene and movement editors' tests and the looks tests (`tools/test_scene_edi
 Pushing a tag such as `v1.1.0` makes GitHub Actions build both installers and publish them as a release.
 - **Windows:** Inno Setup, `windows/aim_movers.iss`
 - **Mac:** `pkgbuild`, `mac/build_pkg.sh`
+
+## Flutter port
+
+`flutter/` holds a like-for-like port of SX Studio to Dart and Flutter. It is not released. The PowerShell app above is still what the installers ship. Start with `flutter/HANDOVER.md`.

@@ -1,0 +1,19 @@
+name: sx_release
+description: How SX Studio releases are signed and checked. Shared by the app's update and the setup program (SX-Studio-Setup.exe), plus the release tool that makes the key and signs release.json.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  crypto: ^3.0.0
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
+
+executables:
+  release_tool:
+  setup_stub:

@@ -8,6 +8,17 @@ import 'package:test/test.dart';
 
 import 'parity.dart';
 
+class _FakeSx implements SxApp {
+  @override
+  bool running = false;
+
+  @override
+  Future<ToolResult> launch() async => const ToolResult(ok: true);
+
+  @override
+  Future<ToolResult> close({bool force = false}) async => const ToolResult(ok: true);
+}
+
 /// The save time in tonights_color.json is the only thing allowed to differ.
 final _savedInFile = RegExp(r'"saved": "\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d"');
 
@@ -83,6 +94,73 @@ void main() {
       expect(washValues('ff0000', ['dimmer', 'red', 'green', 'blue', 'white', 'amber', 'uv', 'strobe_dimmer', 'auto_focus', 'animation_speed']), [
         (0, 'dimmer', 255), (1, 'red', 255), (2, 'green', 0), (3, 'blue', 0), (4, 'white', 0), (5, 'amber', 0), (6, 'uv', 0), (7, 'strobe_dimmer', 0), //
       ]);
+    });
+  });
+
+  // The one allowed difference from the old tool: it wrote each file straight
+  // away, so a failure part way left the show half changed.
+  group('writes all or nothing', () {
+    late ShowEnv env;
+    setUp(() {
+      final t = Directory.systemTemp.createTempSync('sx_color_');
+      addTearDown(() => t.deleteSync(recursive: true));
+      void write(String rel, String text) => (File('${t.path}/$rel')..parent.createSync(recursive: true)).writeAsStringSync(text);
+      write('Live/live.ini', '[page1]\r\nname = MOVER COLORS\r\nnb_buttons = 0\r\n[page2]\r\nname = UPLIGHTS\r\nnb_buttons = 0\r\n');
+      write('fixtures.ini', '[Fixture1]\r\nid = 1\r\naddress = 1\r\n[Fixture2]\r\nid = 2\r\naddress = 20\r\n');
+      write('fixtures/UPLIGHT.txt', 'Channel = dimmer\r\nChannel = red\r\nChannel = green\r\nChannel = blue\r\n');
+      write(
+        'scenes/CENTER SPOT.scex',
+        '<Scene>\n  <Fixtures>\n    <Fixture id="1" name="140 #1" model="$model140"/>\n    <Fixture id="2" name="UPLIGHT" model="UPLIGHT"/>\n  </Fixtures>\n</Scene>\n',
+      );
+      env = ShowEnv(t.path);
+    });
+
+    Map<String, String> files() => {
+      for (final f in Directory(env.root).listSync(recursive: true).whereType<File>()) f.path.substring(env.root.length + 1): f.readAsStringSync(),
+    };
+
+    test('a failed last write puts the scenes and live.ini back', () {
+      final before = files();
+      Directory(env.path('tonights_color.json')).createSync(); // the state can't be written
+      expect(() => colorApply(env, 'ff0000'), throwsA(isA<FileSystemException>()));
+      expect({...files()}..remove('tonights_color.json.sxtmp'), before);
+    });
+
+    test('a good run writes the scenes, both buttons and the state', () {
+      final out = colorApply(env, 'ff0000', name: 'Red');
+      expect(out, contains('added the TONIGHTS COLOR button to the UPLIGHTS page (line 1, column 1)'));
+      expect(files().keys, containsAll(['scenes/TONIGHTS COLOR MOVERS.scex', 'scenes/TONIGHTS COLOR UPLIGHT.scex', 'tonights_color.json']));
+      expect(files().keys.where((k) => k.endsWith('.sxtmp')), isEmpty);
+    });
+
+    test('the routes check the color, clean the name, and queue with the hex in the label', () async {
+      final sx = _FakeSx();
+      final engine = Engine(
+        EngineConfig(port: 0, token: 't', showPath: env.root),
+        sx: sx,
+      );
+      await engine.start();
+      final client = SxClient(Uri.parse('http://127.0.0.1:${engine.port}'), token: 't');
+      addTearDown(() async {
+        client.close();
+        await engine.stop();
+      });
+      expect((await client.colorApply('nope', '')).error, 'Pick a colour first.');
+      expect((await client.color()).buttons.map((b) => b.there), [false, false]);
+      final r = await client.colorApply('#FF0000', ' Red <b>"x"</b>, and a much longer name than fits ');
+      expect(r.ok, isTrue, reason: r.error);
+      final p = await client.color();
+      expect((p.hex, p.name), ('ff0000', 'Red bxb and a much longer name'));
+      expect(p.buttons.map((b) => b.there), [true, true]);
+      sx.running = true;
+      final q = await client.colorApply('#00A8A8', 'Teal');
+      expect((q.extra['queued'], q.extra['label']), (true, "Tonight's Color (#00a8a8)"));
+    });
+
+    test('refuses while ShowXpress is open', () {
+      final before = files();
+      expect(() => colorApply(ShowEnv(env.root, sxRunning: () => true), 'ff0000'), throwsA(isA<ToolError>()));
+      expect(files(), before);
     });
   });
 

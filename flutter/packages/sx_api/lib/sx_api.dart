@@ -6,6 +6,7 @@ export 'src/aim.dart';
 export 'src/client.dart';
 export 'src/color.dart';
 export 'src/json.dart';
+export 'src/move_edit.dart';
 export 'src/lab.dart';
 export 'src/looks.dart';
 export 'src/gdrive.dart';

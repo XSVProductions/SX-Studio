@@ -10,6 +10,7 @@ import 'screens/apc/apc_screen.dart';
 import 'screens/health/health_screen.dart';
 import 'screens/pre/pre_screen.dart';
 import 'screens/scene/scene_screen.dart';
+import 'screens/move/move_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
 import 'theme.dart';
@@ -55,7 +56,7 @@ const tabs = [
   TabDef('apc', 'APC mini', TabGroup.rig, 'Pads and their lights', ApcScreen.new),
   TabDef('speed', 'Speed Faders', TabGroup.rig, 'Which master fader each button follows', SpeedScreen.new),
   TabDef('scene', 'Scene Editor', TabGroup.edit, 'Edit step scenes', SceneScreen.new),
-  TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', _todo),
+  TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', MoveScreen.new),
   TabDef('look', 'Looks', TabGroup.edit, 'Make color looks for the whole rig', LookScreen.new),
   TabDef('health', 'Health Check', TabGroup.edit, 'Find problems in the show', HealthScreen.new),
 ];

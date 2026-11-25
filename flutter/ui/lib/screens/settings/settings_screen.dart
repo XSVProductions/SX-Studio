@@ -11,30 +11,54 @@ import 'settings_bits.dart';
 import 'settings_model.dart';
 import 'update_card.dart';
 
-/// Settings (the cogwheel): the tabs, Google Drive, phones and tablets,
-/// ShowXpress and updates. A phone sees the tabs and Google Drive only.
-/// Every change saves straight away.
+/// Settings (the cogwheel, `#v-settings`): light or dark, the tabs, Google
+/// Drive, phones and tablets, ShowXpress and updates. A phone sees the look,
+/// the tabs and Google Drive. Every change saves straight away.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final m = SettingsModel.of(AppScope.of(context));
+    final app = AppScope.of(context);
+    final m = SettingsModel.of(app);
     return ListenableBuilder(
       listenable: m,
       builder: (context, _) => ScreenBody(
         children: [
           SxCard(
-            child: SxHeader(
-              'Settings',
-              sub: m.error.isNotEmpty
-                  ? null
-                  : m.loaded
-                  ? 'The tab order is the same on this computer, the phone and the iPad.'
-                  : 'Reading the settings.',
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SetTitle('Settings', icon: Icons.settings),
+                const SizedBox(height: 4),
+                Text(
+                  m.loaded
+                      ? 'Light or dark is set for each device. The tab order is the same on this computer, the phone and the iPad.'
+                      : m.error.isEmpty
+                      ? 'Reading the settings.'
+                      : '',
+                  style: Sx.sub,
+                ),
+                ErrorBox(m.error),
+              ],
             ),
           ),
-          if (m.error.isNotEmpty) ErrorBox(m.error),
+          SxCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SetTitle('Look'),
+                const SizedBox(height: 4),
+                Text('Light is easier to read in daylight; dark is kinder in a dark venue.', style: Sx.sub),
+                const SizedBox(height: 12),
+                Seg<ThemeMode>(
+                  value: app.themeMode,
+                  options: const {ThemeMode.dark: 'Dark', ThemeMode.light: 'Light', ThemeMode.system: 'Same as this device'},
+                  onChanged: app.setThemeMode,
+                ),
+              ],
+            ),
+          ),
           if (m.loaded) ...[
             _TabsCard(m),
             const DriveCard(),
@@ -46,7 +70,7 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-/// Order, show or hide, and rename the tabs.
+/// Order, show or hide, and rename the tabs (`#stabs`).
 class _TabsCard extends StatefulWidget {
   const _TabsCard(this.m);
 
@@ -79,24 +103,25 @@ class _TabsCardState extends State<_TabsCard> {
     if (mounted) setState(() => _error = err);
   }
 
+  List<String> get _order => [for (final t in m.ordered()) t.id];
+
   List<String> get _hidden => [
     for (final t in m.ordered())
       if (m.hidden(t)) t.id,
   ];
 
-  void _move(List<TabDef> order, int i, int by) {
-    final ids = [for (final t in order) t.id];
-    final j = i + by;
+  void _move(int i, int by) {
+    final ids = _order;
     final a = ids[i];
-    ids[i] = ids[j];
-    ids[j] = a;
+    ids[i] = ids[i + by];
+    ids[i + by] = a;
     _save(SettingsChange(tabOrder: ids, tabHidden: _hidden));
   }
 
-  void _show(TabDef t, bool on) =>
-      _save(SettingsChange(tabOrder: [for (final x in m.ordered()) x.id], tabHidden: on ? [..._hidden.where((id) => id != t.id)] : [..._hidden, t.id]));
+  void _show(TabDef t, bool on) => _save(SettingsChange(tabOrder: _order, tabHidden: on ? [..._hidden.where((id) => id != t.id)] : [..._hidden, t.id]));
 
-  /// Every typed name that differs from the tab's own, cleaned like the old page.
+  /// Every typed name that differs from the tab's own, cleaned like the old
+  /// page (`namesNow`).
   void _rename() {
     final names = <String, String>{};
     for (final t in tabs) {
@@ -104,7 +129,7 @@ class _TabsCardState extends State<_TabsCard> {
       if (v.length > 24) v = v.substring(0, 24);
       if (v.isNotEmpty && v != t.name) names[t.id] = v;
     }
-    _save(SettingsChange(tabOrder: [for (final x in m.ordered()) x.id], tabHidden: _hidden, tabNames: names));
+    _save(SettingsChange(tabOrder: _order, tabHidden: _hidden, tabNames: names));
   }
 
   Future<void> _reset() async {
@@ -122,80 +147,157 @@ class _TabsCardState extends State<_TabsCard> {
     for (final (i, t) in order.indexed) {
       final first = i == 0 || order[i - 1].group != t.group;
       final last = i == order.length - 1 || order[i + 1].group != t.group;
-      if (first) rows.add(GroupLabel(t.group.title));
-      rows.add(_row(order, i, t, first: first, last: last));
+      if (first) {
+        rows.add(
+          Padding(
+            padding: EdgeInsets.fromLTRB(2, i == 0 ? 0 : 10, 2, 0),
+            child: Text(
+              t.group.title.toUpperCase(),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.3, color: Sx.mute),
+            ),
+          ),
+        );
+      }
+      rows.add(_row(i, t, first: first, last: last));
     }
     return SxCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SxHeader(
-            'Tabs',
-            sub:
-                'The tabs are in four menus along the top. Use the arrows to change the order in a menu, and type in a name to rename the tab (empty gives it its own name back). '
-                'Untick a tab to hide it. It leaves the Home page too.',
-            actions: [OutlinedButton(onPressed: _reset, child: const Text('Reset'))],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SetTitle('Tabs'),
+                    const SizedBox(height: 4),
+                    Text(
+                      'The tabs are in four menus along the top. Use the arrows to change the order in a menu, and type a new name to rename a tab '
+                      '(Enter to keep it, empty gives it its own name back). Untick a tab to hide it (it leaves the Home page too).',
+                      style: Sx.sub,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              MiniButton('Reset', onPressed: _reset),
+            ],
           ),
           ErrorBox(_error),
-          ...rows,
+          const SizedBox(height: 12),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [for (final r in rows) Padding(padding: const EdgeInsets.only(bottom: 6), child: r)],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _row(List<TabDef> order, int i, TabDef t, {required bool first, required bool last}) {
+  /// One tab, the old `.tabrow`.
+  Widget _row(int i, TabDef t, {required bool first, required bool last}) {
     final c = _names.putIfAbsent(t.id, TextEditingController.new);
     final f = _focus.putIfAbsent(t.id, () {
       final node = FocusNode();
       node.addListener(() {
-        if (!node.hasFocus && (_names[t.id]!.text.trim()) != m.nameOf(t)) _rename();
+        if (!node.hasFocus && _names[t.id]!.text.trim() != m.nameOf(t)) _rename();
       });
       return node;
     });
     if (!f.hasFocus && c.text != m.nameOf(t)) c.text = m.nameOf(t);
     final hidden = m.hidden(t);
     final renamed = m.nameOf(t) != t.name;
+    final field = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(7),
+      borderSide: const BorderSide(color: Colors.transparent),
+    );
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Sx.line)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: Sx.panel,
+        border: Border.all(color: Sx.line),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
         children: [
-          Checkbox(value: !hidden, onChanged: (v) => _show(t, v ?? true)),
+          SizedBox(
+            width: 22,
+            height: 22,
+            child: Checkbox(
+              value: !hidden,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              visualDensity: VisualDensity.compact,
+              onChanged: (v) => _show(t, v ?? true),
+            ),
+          ),
+          const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: c,
               focusNode: f,
               maxLength: 24,
-              style: TextStyle(color: hidden ? Sx.mute : Sx.text),
+              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14, color: hidden ? Sx.mute : Sx.text),
               decoration: InputDecoration(
                 hintText: t.name,
                 counterText: '',
-                border: InputBorder.none,
-                enabledBorder: InputBorder.none,
-                filled: false,
-                suffixText: renamed ? t.name : null,
-                suffixStyle: const TextStyle(color: Sx.mute, fontSize: 12),
+                isDense: true,
+                filled: true,
+                fillColor: Sx.well,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                border: field,
+                enabledBorder: field,
+                focusedBorder: field.copyWith(borderSide: BorderSide(color: Sx.accent)),
               ),
               onSubmitted: (_) => f.unfocus(),
             ),
           ),
-          IconButton(
-            tooltip: 'Move up',
-            visualDensity: VisualDensity.compact,
-            onPressed: first ? null : () => _move(order, i, -1),
-            icon: const Icon(Icons.arrow_drop_up),
-          ),
-          IconButton(
-            tooltip: 'Move down',
-            visualDensity: VisualDensity.compact,
-            onPressed: last ? null : () => _move(order, i, 1),
-            icon: const Icon(Icons.arrow_drop_down),
-          ),
+          if (renamed)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text(t.name, style: TextStyle(color: Sx.mute, fontSize: 11.5)),
+            ),
+          const SizedBox(width: 8),
+          _Arrow(Icons.arrow_drop_up, 'Move up', first ? null : () => _move(i, -1)),
+          const SizedBox(width: 4),
+          _Arrow(Icons.arrow_drop_down, 'Move down', last ? null : () => _move(i, 1)),
         ],
       ),
     );
   }
+}
+
+/// The small up and down buttons of a tab row (`.tabrow .mini`).
+class _Arrow extends StatelessWidget {
+  const _Arrow(this.icon, this.tip, this.onPressed);
+
+  final IconData icon;
+  final String tip;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: tip,
+    child: OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(32, 26),
+        fixedSize: const Size(32, 26),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        shape: const StadiumBorder(),
+        backgroundColor: Sx.hover,
+        foregroundColor: Sx.text,
+        disabledForegroundColor: Sx.mute,
+        side: BorderSide(color: Sx.line),
+      ),
+      child: Icon(icon, size: 18),
+    ),
+  );
 }
 
 /// After queued changes, open ShowXpress again; open the show folder.
@@ -227,9 +329,9 @@ class _SxCardState extends State<_SxCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SxHeader('ShowXpress'),
-          const SizedBox(height: 6),
-          CheckRow(
+          const SetTitle('ShowXpress'),
+          const SizedBox(height: 10),
+          LinkCheck(
             'After queued changes are done, open ShowXpress again',
             value: widget.m.settings.reopen,
             onChanged: (v) async {
@@ -237,20 +339,20 @@ class _SxCardState extends State<_SxCard> {
               if (mounted) setState(() => _error = err);
             },
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 10,
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              OutlinedButton(
+              MiniButton(
+                'Open the show folder',
                 onPressed: () async {
                   final r = await app.client.openOnComputer(OpenTarget.show);
                   if (mounted) setState(() => _error = r.ok ? '' : r.error);
                 },
-                child: const Text('Open the show folder'),
               ),
-              if (_show.isNotEmpty) Text(_show, style: Sx.sub),
+              if (_show.isNotEmpty) Text(_show, style: TextStyle(fontSize: 13, color: Sx.dim)),
             ],
           ),
           ErrorBox(_error),

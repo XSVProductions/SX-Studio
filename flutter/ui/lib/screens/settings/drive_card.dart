@@ -7,9 +7,9 @@ import '../../widgets/sx_widgets.dart';
 import 'settings_bits.dart';
 import 'settings_model.dart';
 
-/// The Google Drive card: is Google Drive here, Sync, Import, and (on the
-/// laptop) the My Drive folder and the import backups. Used by Settings, and
-/// Home can show it too.
+/// The Google Drive card (`#gdcard`): is Google Drive here, Sync, Import,
+/// and on the laptop the My Drive folder and the import backups. In the old
+/// app it sits in Settings; Home can show it too.
 class DriveCard extends StatefulWidget {
   const DriveCard({super.key});
 
@@ -65,8 +65,7 @@ class _DriveCardState extends State<DriveCard> {
   }
 
   Future<void> _setFolder(String v) async {
-    final m = SettingsModel.of(AppScope.read(context));
-    final err = await m.save(SettingsChange(driveFolder: v));
+    final err = await SettingsModel.of(AppScope.read(context)).save(SettingsChange(driveFolder: v));
     if (!mounted) return;
     if (err.isNotEmpty) {
       setState(() => _error = err);
@@ -77,7 +76,7 @@ class _DriveCardState extends State<DriveCard> {
 
   Future<void> _open(OpenTarget what) async {
     final r = await AppScope.read(context).client.openOnComputer(what);
-    if (mounted && !r.ok) setState(() => _error = r.error);
+    if (mounted) setState(() => _error = r.ok ? '' : r.error);
   }
 
   @override
@@ -85,116 +84,221 @@ class _DriveCardState extends State<DriveCard> {
     final app = AppScope.of(context);
     final phone = SettingsModel.of(app).phone;
     final g = _g;
-    final (acct, warn) = g == null
-        ? ('Looking for Google Drive.', false)
-        : g.found
-        ? ('Google Drive is signed in${g.account.isEmpty ? '' : ' as ${g.account}'}. It uploads and downloads the show by itself.', false)
-        : g.appFound
-        ? ('Google Drive is installed but not signed in. Press Open Google Drive and sign in with the AWAAZ Google account.', true)
-        : ("Google Drive for desktop isn't on this computer. Press Get Google Drive, install it and sign in.", true);
+    final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
+    final sub = TextStyle(fontSize: 13, color: Sx.dim, height: 1.45);
+
+    Widget account() {
+      if (g == null) return Text('Looking for Google Drive.', style: sub);
+      if (g.found) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 2, right: 6),
+              child: Icon(Icons.check, size: 15, color: Sx.green),
+            ),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  style: sub,
+                  children: [
+                    const TextSpan(text: 'Google Drive is signed in'),
+                    if (g.account.isNotEmpty) ...[const TextSpan(text: ' as '), TextSpan(text: g.account, style: b)],
+                    const TextSpan(text: '. It uploads and downloads the show by itself.'),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
+      }
+      return Text(
+        g.appFound
+            ? 'Google Drive is installed but not signed in. Press Open Google Drive and sign in with the AWAAZ Google account.'
+            : "Google Drive for desktop isn't on this computer. Press Get Google Drive, install it and sign in.",
+        style: sub.copyWith(color: Sx.amber),
+      );
+    }
+
+    Widget what(DriveInfo g) {
+      if (!g.found) {
+        return Text.rich(
+          TextSpan(
+            style: sub,
+            children: [
+              const TextSpan(text: "Google Drive isn't on this computer. Install "),
+              TextSpan(text: 'Google Drive for desktop', style: b),
+              const TextSpan(text: ' and sign in.'),
+            ],
+          ),
+        );
+      }
+      return Text.rich(
+        TextSpan(
+          style: sub,
+          children: [
+            const TextSpan(text: 'Copies the show to '),
+            TextSpan(text: g.target, style: b),
+            const TextSpan(text: '. New and changed files go up, and a file deleted here since the last sync is removed there. '),
+            if (g.last.isEmpty)
+              const TextSpan(text: 'Not synced yet.')
+            else ...[
+              const TextSpan(text: 'Last sync: '),
+              TextSpan(text: whenText(g.last), style: b),
+              const TextSpan(text: '.'),
+            ],
+            const TextSpan(text: '\n'),
+            TextSpan(text: 'Import', style: b),
+            const TextSpan(text: ' copies the show from Google Drive into '),
+            TextSpan(text: g.show, style: b),
+            const TextSpan(text: ' and replaces the one on this computer'),
+            if (g.srcFound)
+              TextSpan(text: ' (Google Drive copy saved ${whenText(g.srcTime)})')
+            else ...[
+              const TextSpan(text: ', '),
+              TextSpan(
+                text: 'no show on Google Drive yet',
+                style: TextStyle(color: Sx.amber),
+              ),
+            ],
+            const TextSpan(text: '.'),
+            if (g.lastImport.isNotEmpty) ...[
+              const TextSpan(text: ' Last import: '),
+              TextSpan(text: whenText(g.lastImport), style: b),
+              const TextSpan(text: '.'),
+            ],
+          ],
+        ),
+      );
+    }
+
+    final buttons = g == null
+        ? const SizedBox.shrink()
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton(
+                onPressed: g.found && g.here ? () => runSave(context, app.client.gdriveSync, after: _load) : null,
+                child: const Text('Sync to Google Drive'),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton(onPressed: g.found && g.srcFound ? () => _import(g) : null, child: const Text('Import from Google Drive')),
+            ],
+          );
+
     return SxCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SxHeader(
-            'Google Drive',
-            actions: [
-              if (!phone && g != null && g.appFound)
-                OutlinedButton(onPressed: () => _open(OpenTarget.gdapp), child: Text(g.found ? 'Open Google Drive' : 'Sign in to Google Drive')),
-              if (!phone) OutlinedButton(onPressed: () => _open(OpenTarget.gddl), child: const Text('Get Google Drive')),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 620),
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const SetTitle('Google Drive'), const SizedBox(height: 4), account()]),
+              ),
+              if (!phone)
+                Wrap(
+                  spacing: 6,
+                  children: [
+                    if (g != null && g.appFound)
+                      MiniButton(g.found ? 'Open Google Drive' : 'Sign in to Google Drive', onPressed: () => _open(OpenTarget.gdapp)),
+                    MiniButton('Get Google Drive', onPressed: () => _open(OpenTarget.gddl)),
+                  ],
+                ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(acct, style: Sx.sub.copyWith(color: warn ? Sx.amber : Sx.dim)),
           if (g != null) ...[
-            const SizedBox(height: 12),
-            if (!g.found)
-              const Text("Google Drive isn't on this computer. Install Google Drive for desktop and sign in.", style: Sx.sub)
-            else ...[
-              Text(
-                'Copies the show to ${g.target}. New and changed files go up, and a file deleted here since the last sync is removed there. '
-                '${g.last.isEmpty ? 'Not synced yet.' : 'Last sync: ${whenText(g.last)}.'}',
-                style: Sx.sub,
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Import copies the show from Google Drive into ${g.show} and replaces the one on this computer'
-                '${g.srcFound ? ' (Google Drive copy saved ${whenText(g.srcTime)}).' : '.'}'
-                '${g.lastImport.isEmpty ? '' : ' Last import: ${whenText(g.lastImport)}.'}',
-                style: Sx.sub,
-              ),
-              if (!g.srcFound) const Text('No show on Google Drive yet.', style: TextStyle(color: Sx.amber, fontSize: 13)),
-            ],
-            if (g.found && app.sxOpen)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text(
-                  'ShowXpress is open. This is queued and done as soon as you save and close ShowXpress.',
-                  style: TextStyle(color: Sx.amber, fontSize: 13),
-                ),
-              ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: g.found && g.here ? () => runSave(context, app.client.gdriveSync, after: _load) : null,
-                  child: const Text('Sync to Google Drive'),
-                ),
-                OutlinedButton(onPressed: g.found && g.srcFound ? () => _import(g) : null, child: const Text('Import from Google Drive')),
-              ],
+            const SizedBox(height: 14),
+            LayoutBuilder(
+              builder: (context, box) {
+                final text = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    what(g),
+                    if (g.found && app.sxOpen)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          'ShowXpress is open. This is queued and done as soon as you save and close ShowXpress.',
+                          style: TextStyle(color: Sx.amber, fontSize: 13),
+                        ),
+                      ),
+                  ],
+                );
+                return box.maxWidth < 560
+                    ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [text, const SizedBox(height: 12), buttons])
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: text),
+                          const SizedBox(width: 10),
+                          SizedBox(width: 230, child: buttons),
+                        ],
+                      );
+              },
             ),
           ],
           ErrorBox(_error),
           if (!phone && g != null)
-            Theme(
-              data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: const EdgeInsets.only(bottom: 4),
-                expandedCrossAxisAlignment: CrossAxisAlignment.start,
-                title: const Text('Google Drive folder and import backups', style: TextStyle(fontSize: 13.5, color: Sx.text2)),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Details(
+                'Google Drive folder and import backups',
                 children: [
                   Wrap(
-                    spacing: 8,
+                    spacing: 10,
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      SizedBox(
-                        width: 320,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 220, maxWidth: 420),
                         child: TextField(
                           controller: _folder,
-                          decoration: InputDecoration(hintText: g.my.isNotEmpty && g.override.isEmpty ? 'Found: ${g.my}' : 'Found automatically'),
+                          style: TextStyle(fontSize: 13, color: Sx.text),
+                          decoration: txtDecoration(hint: g.my.isNotEmpty && g.override.isEmpty ? 'Found: ${g.my}' : 'Found automatically'),
                         ),
                       ),
-                      OutlinedButton(
-                        onPressed: () => _folder.text.trim().isEmpty ? null : _setFolder(_folder.text.trim()),
-                        child: const Text('Use this folder'),
+                      MiniButton(
+                        'Use this folder',
+                        onPressed: () {
+                          if (_folder.text.trim().isNotEmpty) _setFolder(_folder.text.trim());
+                        },
                       ),
-                      OutlinedButton(
+                      MiniButton(
+                        'Find automatically',
                         onPressed: () {
                           _folder.clear();
                           _setFolder('');
                         },
-                        child: const Text('Find automatically'),
                       ),
                     ],
                   ),
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      "Google Drive's My Drive folder (the one with AWAAZ in it). Only needed if SX Studio can't find Google Drive by itself.",
-                      style: Sx.sub,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text.rich(
+                      TextSpan(
+                        style: sub,
+                        children: [
+                          const TextSpan(text: "Google Drive's "),
+                          TextSpan(text: 'My Drive', style: b),
+                          const TextSpan(text: " folder (the one with AWAAZ in it). Only needed if SX Studio can't find Google Drive by itself."),
+                        ],
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 10,
+                    runSpacing: 6,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      OutlinedButton(onPressed: () => _open(OpenTarget.backups), child: const Text('Open import backups')),
-                      const Text('The show as it was before each import (newest 3).', style: Sx.sub),
+                      MiniButton('Open import backups', onPressed: () => _open(OpenTarget.backups)),
+                      Text('The show as it was before each import (newest 3).', style: sub),
                     ],
                   ),
                 ],

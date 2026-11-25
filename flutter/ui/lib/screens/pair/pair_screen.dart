@@ -52,66 +52,115 @@ class _PairScreenState extends State<PairScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(22),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Image.asset('assets/img/sx_mark.png', height: 56, filterQuality: FilterQuality.medium),
-                const SizedBox(height: 16),
-                const Text('Connect to the laptop', style: Sx.title, textAlign: TextAlign.center),
-                const SizedBox(height: 10),
-                const Text(
-                  'On the laptop, open SX Studio, press the cogwheel (top right), and in Phone & iPad press Pair a phone. Type the 6-digit code here.',
-                  style: Sx.sub,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 18),
-                TextField(
-                  controller: _pin,
-                  autofocus: true,
-                  enabled: !_busy,
-                  keyboardType: TextInputType.number,
-                  autofillHints: const [AutofillHints.oneTimeCode],
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 28, letterSpacing: 10, fontWeight: FontWeight.w600),
-                  decoration: const InputDecoration(hintText: '------'),
-                  onChanged: (v) {
-                    if (v.length == 6) _pair();
-                  },
-                  onSubmitted: (_) => _pair(),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(onPressed: _busy ? null : _pair, child: Text(_busy ? 'Connecting' : 'Connect')),
-                ),
-                if (_msg.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      _msg,
-                      style: const TextStyle(color: Sx.redText),
+  Widget build(BuildContext context) {
+    final wide = BoxConstraints(maxWidth: 280);
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 380),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset('assets/img/sx_mark.png', width: 64, height: 64, filterQuality: FilterQuality.medium),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Connect to the laptop',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontFamily: Sx.display, fontSize: 21, fontWeight: FontWeight.w600, letterSpacing: .5, color: Sx.text),
+                  ),
+                  const SizedBox(height: 12),
+                  Text.rich(
+                    TextSpan(
+                      style: TextStyle(fontSize: 13, color: Sx.dim, height: 1.45),
+                      children: [
+                        const TextSpan(text: 'On the laptop, open '),
+                        TextSpan(
+                          text: 'SX Studio',
+                          style: TextStyle(color: Sx.text, fontWeight: FontWeight.w700),
+                        ),
+                        const TextSpan(text: ': press the cogwheel (top right), and in '),
+                        TextSpan(
+                          text: 'Phone & iPad',
+                          style: TextStyle(color: Sx.text, fontWeight: FontWeight.w700),
+                        ),
+                        const TextSpan(text: ' press '),
+                        TextSpan(
+                          text: 'Pair a phone',
+                          style: TextStyle(color: Sx.text, fontWeight: FontWeight.w700),
+                        ),
+                        const TextSpan(text: '. Type the 6-digit code here.'),
+                      ],
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: wide,
+                    child: TextField(
+                      controller: _pin,
+                      autofocus: true,
+                      enabled: !_busy,
+                      keyboardType: TextInputType.number,
+                      autofillHints: const [AutofillHints.oneTimeCode],
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(6)],
                       textAlign: TextAlign.center,
+                      style: TextStyle(fontFamily: 'monospace', fontSize: 30, height: 1, fontWeight: FontWeight.w600, letterSpacing: 10, color: Sx.text),
+                      decoration: InputDecoration(
+                        hintText: '------',
+                        filled: true,
+                        fillColor: Sx.well,
+                        contentPadding: const EdgeInsets.all(12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Sx.line),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Sx.line),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Sx.accent),
+                        ),
+                      ),
+                      onChanged: (v) {
+                        if (v.length == 6) _pair();
+                      },
+                      onSubmitted: (_) => _pair(),
                     ),
                   ),
-                const SizedBox(height: 18),
-                const Text(
-                  'Tip: first add this page to your Home Screen (Share, then Add to Home Screen), then open it from there and pair. The Home Screen icon keeps its own pairing.',
-                  style: TextStyle(fontSize: 12, color: Sx.dim, height: 1.4),
-                  textAlign: TextAlign.center,
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: wide,
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(onPressed: _busy ? null : _pair, child: Text(_busy ? 'Connecting' : 'Connect')),
+                    ),
+                  ),
+                  if (_msg.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        _msg,
+                        style: TextStyle(color: Sx.red, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Tip: first add this page to your Home Screen (Share, then Add to Home Screen), then open it from there and pair. The Home Screen icon keeps its own pairing.',
+                    style: TextStyle(fontSize: 12, color: Sx.dim, height: 1.4),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }

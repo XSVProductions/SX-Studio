@@ -8,8 +8,8 @@ import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'settings_bits.dart';
 
-/// The Phone & iPad card: phone access on or off, the addresses a phone
-/// opens, the pairing code, and the paired phones. Laptop only.
+/// The Phone & iPad card (`#phcard`): phone access on or off, the addresses
+/// a phone opens, the pairing code, and the paired phones. Laptop only.
 class PhoneCard extends StatefulWidget {
   const PhoneCard({super.key});
 
@@ -28,7 +28,7 @@ class _PhoneCardState extends State<PhoneCard> {
     super.initState();
     _load();
     // While phone access is on and Settings is showing, keep the code's
-    // minutes and "last phone" current.
+    // minutes and "last phone" current, like the old page's 5 second poll.
     _timer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (mounted && (_p?.on ?? false) && AppScope.read(context).tab == 'settings') _load();
     });
@@ -69,13 +69,29 @@ class _PhoneCardState extends State<PhoneCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SxHeader(
-            'Phone & iPad',
-            sub:
-                "Use SX Studio from your iPhone or iPad on the same Wi-Fi: rig setup, aim live with your finger, tonight's color, the pre-show check and the Auto Show.",
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SetTitle('Phone & iPad', icon: Icons.phone_iphone),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Use SX Studio from your iPhone or iPad on the same Wi-Fi: rig setup, aim live with your finger, tonight's color, the pre-show check and the Auto Show.",
+                      style: Sx.sub,
+                    ),
+                  ],
+                ),
+              ),
+              LinkCheck('Let my phone and iPad connect', value: p?.on ?? false, onChanged: p == null || _busy ? null : _turn),
+            ],
           ),
-          const SizedBox(height: 6),
-          CheckRow('Let my phone and iPad connect', value: p?.on ?? false, onChanged: p == null || _busy ? null : _turn),
           ErrorBox(_error),
           if (p != null) ..._body(p),
         ],
@@ -84,104 +100,181 @@ class _PhoneCardState extends State<PhoneCard> {
   }
 
   List<Widget> _body(PhoneInfo p) {
-    if (!p.on) return const [Text('Off. Tick the box, then open the address it shows in Safari on the iPhone or iPad.', style: Sx.sub)];
+    final sub = TextStyle(fontSize: 13, color: Sx.dim, height: 1.45);
+    final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
+    if (!p.on) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text('Off. Tick the box, then open the address it shows in Safari on the iPhone or iPad.', style: sub),
+        ),
+      ];
+    }
     if (!p.running) return [ErrorBox(p.error.isEmpty ? 'The phone connection is not running.' : p.error)];
     String url(String host) => 'http://$host:${p.port}';
     final addresses = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('ON THE PHONE OR IPAD, OPEN SAFARI AND GO TO', style: Sx.label),
-        const SizedBox(height: 6),
-        if (p.local.isEmpty && p.addrs.isEmpty) const Text("This computer isn't on a network right now.", style: TextStyle(color: Sx.red)),
-        if (p.local.isNotEmpty) _address(url(p.local), 'same at every venue, try this first'),
-        for (final a in p.addrs) _address(url(a.ip), a.name),
-        const SizedBox(height: 8),
-        Text(
-          'Then Share, Add to Home Screen for an app icon. The phone and the laptop must be on the same Wi-Fi. '
-          "Venue Wi-Fi often keeps devices apart. The surest way is your own small travel router, or the laptop on your iPhone's Personal Hotspot. "
-          '${p.mac ? 'If macOS asks whether SX Studio may accept incoming connections, press Allow.' : 'The first time, Windows may ask whether SX Studio may use the network. Tick Private networks and press Allow.'}',
-          style: Sx.sub,
+        PanelBox(
+          title: 'ON THE PHONE OR IPAD, OPEN SAFARI AND GO TO',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (p.local.isEmpty && p.addrs.isEmpty) Text("This computer isn't on a network right now.", style: TextStyle(color: Sx.red, fontSize: 13)),
+              if (p.local.isNotEmpty) _address(url(p.local), 'same at every venue, try this first'),
+              for (final a in p.addrs) _address(url(a.ip), a.name),
+            ],
+          ),
         ),
-        if (p.lastSeen.isNotEmpty) Text('Last phone: ${p.lastIp}, ${whenText(p.lastSeen)}.', style: Sx.sub),
+        const SizedBox(height: 10),
+        Text.rich(
+          TextSpan(
+            style: sub,
+            children: [
+              const TextSpan(text: 'Then '),
+              TextSpan(text: 'Share, Add to Home Screen', style: b),
+              const TextSpan(text: ' for an app icon. The phone and the laptop must be on the '),
+              TextSpan(text: 'same Wi-Fi', style: b),
+              const TextSpan(
+                text:
+                    ". Venue Wi-Fi often keeps devices apart. The surest way is your own small travel router, or the laptop on your iPhone's Personal Hotspot. ",
+              ),
+              TextSpan(
+                text: p.mac
+                    ? 'If macOS asks whether SX Studio may accept incoming connections, press Allow.'
+                    : 'The first time, Windows may ask whether SX Studio may use the network. Tick Private networks and press Allow.',
+              ),
+            ],
+          ),
+        ),
+        if (p.lastSeen.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 10),
+            child: Text.rich(
+              TextSpan(
+                style: sub,
+                children: [
+                  const TextSpan(text: 'Last phone: '),
+                  TextSpan(text: p.lastIp, style: b),
+                  TextSpan(text: ', ${whenText(p.lastSeen)}.'),
+                ],
+              ),
+            ),
+          ),
       ],
     );
-    final pair = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('PAIR A PHONE', style: Sx.label),
-        const SizedBox(height: 6),
-        if (p.pin.isNotEmpty) ...[
-          Row(
-            children: [
-              SelectableText(
-                p.pin,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 30, fontWeight: FontWeight.w700, letterSpacing: 6, color: Sx.accent),
+    final pair = PanelBox(
+      title: 'PAIR A PHONE',
+      center: true,
+      child: Column(
+        children: [
+          if (p.pin.isNotEmpty) ...[
+            SelectableText(
+              p.pin,
+              style: TextStyle(fontFamily: 'monospace', fontSize: 34, height: 1.1, fontWeight: FontWeight.w700, letterSpacing: 8, color: Sx.accent),
+            ),
+            const SizedBox(height: 6),
+            CopyButton(p.pin, label: 'Copy code'),
+            const SizedBox(height: 6),
+            Text(
+              'Type this on the phone. Good for ${(p.pinLeft / 60).ceil().clamp(1, 10)} more min. One phone per code.',
+              style: sub,
+              textAlign: TextAlign.center,
+            ),
+          ] else ...[
+            Text('Each phone or iPad is paired once, with a 6-digit code.', style: sub, textAlign: TextAlign.center),
+            const SizedBox(height: 10),
+            FilledButton(
+              style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10), textStyle: const TextStyle(fontSize: 14)),
+              onPressed: () => _do((c) => c.phonePin()),
+              child: const Text('Pair a phone'),
+            ),
+          ],
+          const SizedBox(height: 14),
+          for (final ph in p.phones)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      [
+                        ph.name,
+                        if (ph.paired.isNotEmpty) 'paired ${whenText(ph.paired)}',
+                        if (ph.lastSeen.isNotEmpty) 'seen ${whenText(ph.lastSeen)}',
+                      ].join(', '),
+                      style: TextStyle(fontSize: 12.5, color: Sx.text2),
+                    ),
+                  ),
+                  MiniButton('Unpair', onPressed: () => _do((c) => c.phoneUnpair(ph.id))),
+                ],
               ),
-              CopyButton(p.pin, label: 'Copy code'),
-            ],
-          ),
-          Text('Type this on the phone. Good for ${(p.pinLeft / 60).ceil().clamp(1, 10)} more min. One phone per code.', style: Sx.sub),
-        ] else ...[
-          const Text('Each phone or iPad is paired once, with a 6-digit code.', style: Sx.sub),
-          const SizedBox(height: 8),
-          FilledButton(onPressed: () => _do((c) => c.phonePin()), child: const Text('Pair a phone')),
+            ),
+          if (p.phones.isEmpty) Text('No phone paired yet.', style: sub),
+          if (p.phones.length > 1)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: MiniButton(
+                'Unpair all phones',
+                onPressed: () async {
+                  if (await confirm(context, 'Unpair all phones?', 'Every paired phone and iPad has to be paired again with a new code.', 'Unpair')) {
+                    await _do((c) => c.phoneUnpair('*'));
+                  }
+                },
+              ),
+            ),
         ],
-        const SizedBox(height: 14),
-        Text('PAIRED (${p.phones.length})', style: Sx.label),
-        const SizedBox(height: 4),
-        if (p.phones.isEmpty) const Text('None yet.', style: Sx.sub),
-        for (final ph in p.phones)
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  [ph.name, if (ph.paired.isNotEmpty) 'paired ${whenText(ph.paired)}', if (ph.lastSeen.isNotEmpty) 'seen ${whenText(ph.lastSeen)}'].join(', '),
-                  style: const TextStyle(fontSize: 13, color: Sx.text2),
-                ),
-              ),
-              TextButton(onPressed: () => _do((c) => c.phoneUnpair(ph.id)), child: const Text('Unpair')),
-            ],
-          ),
-        if (p.phones.length > 1)
-          TextButton(
-            onPressed: () async {
-              if (await confirm(context, 'Unpair all phones?', 'Every paired phone and iPad has to be paired again with a new code.', 'Unpair')) {
-                await _do((c) => c.phoneUnpair('*'));
-              }
-            },
-            child: const Text('Unpair all phones'),
-          ),
-      ],
+      ),
     );
     return [
-      const SizedBox(height: 10),
+      const SizedBox(height: 12),
       LayoutBuilder(
-        builder: (context, box) => box.maxWidth < 640
+        builder: (context, box) => box.maxWidth < 700
             ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [addresses, const SizedBox(height: 18), pair])
             : Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: addresses),
-                  const SizedBox(width: 24),
-                  SizedBox(width: 300, child: pair),
+                  const SizedBox(width: 18),
+                  SizedBox(width: 280, child: pair),
                 ],
               ),
       ),
     ];
   }
 
-  Widget _address(String url, String note) => Row(
-    children: [
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SelectableText(url, style: const TextStyle(fontFamily: 'monospace', fontSize: 14)),
-            Text(note, style: const TextStyle(fontSize: 12, color: Sx.mute)),
-          ],
+  /// One address, the old `.phrow` with its `.phaddr` box and Copy button.
+  Widget _address(String url, String note) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 4),
+    child: Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: Sx.well,
+            border: Border.all(color: Sx.line),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: url,
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 16, fontWeight: FontWeight.w600, color: Sx.text),
+                ),
+                TextSpan(
+                  text: '   $note',
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w500, color: Sx.dim),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
-      CopyButton(url),
-    ],
+        CopyButton(url),
+      ],
+    ),
   );
 }

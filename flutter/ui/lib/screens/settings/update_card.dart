@@ -20,7 +20,7 @@ Future<void> startUpdate(BuildContext context, UpdateInfo u) async {
     return;
   }
   if (!context.mounted) return;
-  await runSave(context, app.client.updateInstall);
+  await runSave(context, app.client.updateInstall, quiet: true);
 }
 
 /// The Updates section of Settings: the version, "Check now", and whether
@@ -53,23 +53,42 @@ class _UpdateCardState extends State<UpdateCard> {
   @override
   Widget build(BuildContext context) {
     final m = SettingsModel.of(AppScope.of(context));
+    final u = _u;
     return ListenableBuilder(
       listenable: m,
       builder: (context, _) => SxCard(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SxHeader(
-              'Updates',
-              actions: [
-                if (_u case final u? when u.newer) FilledButton(onPressed: () => startUpdate(context, u), child: Text('Update to ${u.latest}')),
-                OutlinedButton(onPressed: _check, child: const Text('Check now')),
+            const SetTitle('Updates'),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      style: TextStyle(fontSize: 13, color: Sx.dim),
+                      children: [
+                        const TextSpan(text: 'Version '),
+                        TextSpan(
+                          text: m.ver,
+                          style: TextStyle(color: Sx.text, fontWeight: FontWeight.w700),
+                        ),
+                        if (_line.isNotEmpty) TextSpan(text: '. $_line'),
+                      ],
+                    ),
+                  ),
+                ),
+                if (u != null && u.newer)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: MiniButton('Update to ${u.latest}', icon: Icons.arrow_upward, primary: true, onPressed: () => startUpdate(context, u)),
+                  ),
+                MiniButton('Check now', onPressed: _check),
               ],
             ),
-            const SizedBox(height: 8),
-            Text('Version ${m.ver}${_line.isEmpty ? '' : '. $_line'}', style: Sx.sub),
-            const SizedBox(height: 6),
-            CheckRow(
+            const SizedBox(height: 10),
+            LinkCheck(
               'Check for a new version when SX Studio opens',
               value: m.settings.autoUpd,
               onChanged: (v) => m.save(SettingsChange(autoUpd: v)),
@@ -81,9 +100,9 @@ class _UpdateCardState extends State<UpdateCard> {
   }
 }
 
-/// One line for Home: the version, and an Update button when GitHub has a
-/// newer one. Checks once when shown, unless the user turned that off. Shows
-/// nothing on a phone.
+/// For Home: the version line (`#hver`) and an Update button when GitHub has
+/// a newer one. Checks once when shown, unless the user turned that off.
+/// Shows nothing on a phone.
 class UpdateNotice extends StatefulWidget {
   const UpdateNotice({super.key});
 
@@ -114,19 +133,20 @@ class _UpdateNoticeState extends State<UpdateNotice> {
         if (!m.loaded || m.phone) return const SizedBox.shrink();
         if (!_asked && m.settings.autoUpd) _ask(m);
         final u = _u;
-        return Row(
+        return Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Expanded(
-              child: Text(
-                'Version ${m.ver}${u == null
-                    ? ''
-                    : u.newer
-                    ? '. Version ${u.latest} is available'
-                    : '. Up to date'}',
-                style: Sx.sub,
-              ),
+            Text(
+              'Version ${m.ver}${u == null
+                  ? ''
+                  : u.newer
+                  ? ', version ${u.latest} is available'
+                  : ', up to date'}',
+              style: TextStyle(fontSize: 12.5, color: Sx.mute),
             ),
-            if (u != null && u.newer) FilledButton(onPressed: () => startUpdate(context, u), child: Text('Update to ${u.latest}')),
+            if (u != null && u.newer) MiniButton('Update to ${u.latest}', icon: Icons.arrow_upward, primary: true, onPressed: () => startUpdate(context, u)),
           ],
         );
       },

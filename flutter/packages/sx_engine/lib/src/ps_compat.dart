@@ -186,3 +186,14 @@ String _psJsonString(String s) {
   b.write('"');
   return b.toString();
 }
+
+/// PowerShell's `if ($x)` for a JSON value: null, false, 0, '' and an empty
+/// list are false, and a list of one item is as true as that item.
+bool psTruthy(Object? v) => switch (v) {
+  null => false,
+  bool b => b,
+  num n => n != 0,
+  String s => s.isNotEmpty,
+  List<Object?> l => l.isEmpty ? false : (l.length == 1 ? psTruthy(l.first) : true),
+  _ => true,
+};

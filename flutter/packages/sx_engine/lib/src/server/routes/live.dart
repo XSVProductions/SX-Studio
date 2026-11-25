@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:sx_api/sx_api.dart';
 
+import '../../ps_compat.dart';
 import '../../dmx/dmx_output.dart';
 import '../../dmx/nova.dart';
 import '../../show/show_env.dart';

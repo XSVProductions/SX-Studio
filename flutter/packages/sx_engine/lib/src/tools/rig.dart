@@ -82,16 +82,6 @@ List<String> rigHeadIds(Iterable<String> raw) => [
 /// The text of PowerShell's `"$x"` for a JSON value.
 String _psStr(Object? v) => v == null ? '' : '$v';
 
-/// PowerShell's `if ($x)` for a JSON value.
-bool _psTrue(Object? v) => switch (v) {
-  null => false,
-  bool b => b,
-  num n => n != 0,
-  String s => s.isNotEmpty,
-  List l => l.isEmpty ? false : (l.length == 1 ? _psTrue(l.first) : true),
-  _ => true,
-};
-
 /// `rig_state.json`: the heads saved as hung (null = all of them) and the
 /// full version of every scene that is trimmed now.
 class RigState {
@@ -102,7 +92,7 @@ class RigState {
     final scenes = psMap<({String original, String written})>();
     if (j == null) return RigState(null, scenes);
     final h = j['hung'];
-    final hung = _psTrue(h)
+    final hung = psTruthy(h)
         ? [
             for (final x in h is List ? h : [h]) _psStr(x),
           ]

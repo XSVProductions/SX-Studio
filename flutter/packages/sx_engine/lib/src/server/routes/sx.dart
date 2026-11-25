@@ -1,10 +1,10 @@
 import 'package:sx_api/sx_api.dart';
 
+import '../../ps_compat.dart';
 import '../../show/show_env.dart';
 import '../../sx/auto_player.dart';
 import '../../sx/pending_presses.dart';
 import '../engine.dart';
-import 'aim.dart' show psTruthy;
 
 /// ShowXpress open/close, the status poll and the save queue.
 void registerSxRoutes(Engine e) {

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import '../../ps_compat.dart';
 import '../../player/cs_compat.dart';
 import '../../player/lab_player.dart';
 import '../../player/player_commands.dart';
@@ -14,13 +15,6 @@ String _psText(Object? v) => switch (v) {
   false => 'False',
   double d when d == d.truncateToDouble() && d.abs() < 1e15 => '${d.toInt()}',
   _ => '$v',
-};
-
-/// PowerShell's truth of a JSON value: false, 0, '' and null are false.
-bool _psTrue(Object? v) => switch (v) {
-  null || false || '' => false,
-  num n => n != 0,
-  _ => true,
 };
 
 /// The SX Player: its list, start, stop, commands, status, and the hand-over
@@ -47,7 +41,7 @@ void registerLabRoutes(Engine e) {
     return lab.handoff(launch: true, why: 'Handed over to ShowXpress.');
   });
 
-  e.api.post('/api/lab/start', (req) => lab.startFromScreen(stopNova: _psTrue(req.body['stopNova'])));
+  e.api.post('/api/lab/start', (req) => lab.startFromScreen(stopNova: psTruthy(req.body['stopNova'])));
 
   e.api.post('/api/lab/cmd', (req) {
     const gone = {'ok': false, 'gone': true, 'error': 'The SX Player stopped.'};
@@ -107,7 +101,7 @@ void registerLabRoutes(Engine e) {
       case 'alloff':
         cmd = const AllOffCommand();
       case 'bo':
-        cmd = BlackoutCommand(_psTrue(body['on']));
+        cmd = BlackoutCommand(psTruthy(body['on']));
       default:
         err = 'Unknown player command.';
     }

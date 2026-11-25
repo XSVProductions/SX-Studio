@@ -11,13 +11,6 @@ import 'move.dart';
 /// `"$($body.mode)" -eq 'room'` in the old server: anything else is the dance floor.
 AimMode aimModeOf(String mode) => psEq(mode, 'room') ? AimMode.room : AimMode.floor;
 
-/// PowerShell's `if ($body.x)`: null, false, 0 and '' are false.
-bool psTruthy(Object? v) => switch (v) {
-  null || false || '' => false,
-  num n => n != 0,
-  _ => true,
-};
-
 /// The Aim Movers tab: preview, apply at a size, reset to normal and the ROOM buttons.
 ///
 /// Port of the `/api/preview`, `/api/apply`, `/api/home` and `/api/aim/install`

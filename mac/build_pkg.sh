@@ -18,7 +18,7 @@ cp "$ROOT/mac/launch.sh" "$APP/Contents/Resources/launch.sh"
 xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/mac/dmx/main.swift" -o "$APP/Contents/MacOS/sxh_dmx"
 codesign --force --sign - "$APP/Contents/MacOS/sxh_dmx"
 sed "s/__VERSION__/$VER/g" "$ROOT/mac/Info.plist" > "$APP/Contents/Info.plist"
-cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/flip.ps1" "$ROOT/src/player.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/rig_test.ps1" "$ROOT/src/preshow.ps1" "$ROOT/src/color.ps1" "$ROOT/src/gdrive.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/sx_remote.ps1" "$ROOT/src/scene_edit.ps1" "$ROOT/src/move_edit.ps1" "$ROOT/src/looks.ps1" "$ROOT/src/version.txt" "$ROOT/assets/aim_movers_1024.png" "$ROOT/assets/brand.png" "$APP/Contents/Resources/"
+cp "$ROOT/src/df_aim.ps1" "$ROOT/src/df_aim_gui.ps1" "$ROOT/src/skip_flash.ps1" "$ROOT/src/rig.ps1" "$ROOT/src/flip.ps1" "$ROOT/src/player.ps1" "$ROOT/src/apc.ps1" "$ROOT/src/speed.ps1" "$ROOT/src/health.ps1" "$ROOT/src/rig_test.ps1" "$ROOT/src/preshow.ps1" "$ROOT/src/color.ps1" "$ROOT/src/gdrive.ps1" "$ROOT/src/show_common.ps1" "$ROOT/src/sx_remote.ps1" "$ROOT/src/scene_edit.ps1" "$ROOT/src/move_edit.ps1" "$ROOT/src/looks.ps1" "$ROOT/src/version.txt" "$ROOT/assets/aim_movers_1024.png" "$ROOT/assets/brand.png" "$ROOT/assets/sx_logo.png" "$ROOT/assets/sx_mark.png" "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/fonts" && cp "$ROOT"/assets/fonts/* "$APP/Contents/Resources/fonts/"
 chmod 755 "$APP/Contents/MacOS/SXHelper" "$APP/Contents/MacOS/sxh_dmx" "$APP/Contents/Resources/launch.sh"
 

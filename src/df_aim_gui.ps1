@@ -1213,6 +1213,12 @@ function Get-PhoneInfo {
 # routes a phone may use without its key, and routes only the computer itself may use
 $phoneOpen = @('/', '/icon.png', '/brand.png', '/logo.png', '/mark.png', '/api/phone/pair', '/fonts/saira.woff2', '/fonts/orbitron.woff2')
 $phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open')
+# the only routes a GET may use: they just read. Everything else changes something and must be a POST, so a link to it
+# on another web page can't set it off (a phone's key is a cookie, and the phone sends it along when such a link is opened)
+$getOk = @('/', '/icon.png', '/brand.png', '/logo.png', '/mark.png', '/fonts/saira.woff2', '/fonts/orbitron.woff2',
+  '/api/phone', '/api/sx', '/api/remote', '/api/auto', '/api/auto/status', '/api/lab', '/api/lab/status', '/api/settings', '/api/update',
+  '/api/preview', '/api/color', '/api/gdrive', '/api/skip', '/api/rig', '/api/apc', '/api/speed', '/api/health', '/api/rt', '/api/pre',
+  '/api/scenes', '/api/scene', '/api/scene/backups', '/api/moves', '/api/move', '/api/move/backups', '/api/looks')
 if ($script:ph.on) { Start-PhoneRelay }
 
 $html = @'
@@ -3955,7 +3961,7 @@ function renderPhone(){const p=PHI,b=$('phbody');if(!p)return;$('phon').checked=
   '<div class="phbox" style="text-align:center"><h3>PAIR A PHONE</h3>'+(p.pin?'<div class="phpin">'+esc(p.pin)+'</div><div style="margin:6px 0 2px">'+cb(p.pin).replace('&#128203; Copy','&#128203; Copy code')+'</div><p class="sub" style="margin:4px 0 10px">Type this on the phone. Good for '+Math.max(1,Math.ceil(p.pinLeft/60))+' more min.</p>':
    '<p class="sub" style="margin:0 0 10px">Each phone or iPad is paired once, with a 6-digit code.</p><button id="phpinb" class="primary" style="padding:10px 22px;font-size:14px">Pair a phone</button>')+
   '<div style="margin-top:12px"><button id="phunp" class="mini">Unpair all phones</button></div></div></div>';
- const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await getJ('/api/phone/pin');renderPhone();};
+ const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await api('/api/phone/pin',{}).catch(()=>PHI);renderPhone();};
  $('phunp').onclick=async()=>{if(!await ask('Unpair all phones?','Every paired phone and iPad has to be paired again with a new code.','Unpair'))return;PHI=await api('/api/phone/unpair',{});renderPhone();};}
 $('phon').onchange=async e=>{busy(true,e.target.checked?'Turning on phone access…':'Turning off phone access…');try{PHI=await api('/api/phone/set',{on:e.target.checked});}catch(x){PHI={ok:false,error:'Lost connection.'};}busy(false);renderPhone();};
 if(!PH){loadPhone();setInterval(()=>{if(PHI&&PHI.on&&$('v-settings').classList.contains('on')&&!document.hidden)loadPhone();},5000);}
@@ -3993,9 +3999,14 @@ try {
         if ($phoneNever -contains $path) { Send-Text $ctx 403 'text/plain' 'Only on the computer.'; continue }
         if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and ($req.QueryString['t'] -ceq $script:ph.key -or (Get-PhoneCookieKey $req)))) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
       } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open SX Studio from its icon.'; continue }
+      if ($req.HttpMethod -ne 'POST' -and $getOk -notcontains $path) { Send-Text $ctx 405 'text/plain' 'Use POST.'; continue }
       $last = Get-Date
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
+      # a phone may not restart the laptop or force ShowXpress closed (anything not saved in it is lost)
+      if ($fromPhone -and (($path -eq '/api/pre/fix' -and "$($body.key)" -eq 'restart') -or ($path -eq '/api/sx/close' -and $body -and $body.force))) {
+        Send-Json $ctx @{ ok = $false; error = 'Only on the computer.'; out = '' }; continue
+      }
       if ($req.HttpMethod -eq 'POST' -and $queueable.ContainsKey($path)) {
         # ShowXpress open + the page asked to queue -> do it when ShowXpress closes; else now
         if ($body -and $body.queue -and (Test-SxOpen)) { Send-Json $ctx (Add-Queue $path $body) } else { Send-Json $ctx (Invoke-Action $path $body) }

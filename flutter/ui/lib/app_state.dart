@@ -1,12 +1,18 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
+
+const _themeKey = 'theme';
+
+/// The theme this device chose last time. Dark until someone picks another.
+Future<ThemeMode> loadThemeMode() async => ThemeMode.values.asNameMap()[(await SharedPreferences.getInstance()).getString(_themeKey)] ?? ThemeMode.dark;
 
 /// What every screen shares: the engine client, the tab on show, and the
 /// status the app polls from the engine.
 class AppState extends ChangeNotifier {
-  AppState(this.client, {this.tab = 'home'}) {
+  AppState(this.client, {this.tab = 'home', this.themeMode = ThemeMode.dark}) {
     _poll();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
   }
@@ -31,6 +37,17 @@ class AppState extends ChangeNotifier {
   final dirtyTabs = <String>{};
 
   bool get sxOpen => status?.open ?? false;
+
+  /// Dark, light, or the same as this device (`ThemeMode.system`). Each
+  /// device keeps its own choice, as the old app kept it in the browser.
+  ThemeMode themeMode;
+
+  void setThemeMode(ThemeMode mode) {
+    if (mode == themeMode) return;
+    themeMode = mode;
+    notifyListeners();
+    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_themeKey, mode.name)));
+  }
 
   void go(String id) {
     if (id == tab) return;

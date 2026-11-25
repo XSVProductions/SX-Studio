@@ -102,6 +102,19 @@ install(CODE "
 install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
+# The page phones and tablets load from the laptop: the web build (flutter build web
+# --release --no-web-resources-cdn, run first) goes into "web" next to the program,
+# where the engine serves it from. Re-copied each build so no stale file stays.
+set(SX_WEB_BUILD_DIR "${PROJECT_BUILD_DIR}web")
+install(CODE "
+  file(REMOVE_RECURSE \"${CMAKE_INSTALL_PREFIX}/web\")
+  if(EXISTS \"${SX_WEB_BUILD_DIR}/index.html\")
+    file(COPY \"${SX_WEB_BUILD_DIR}/\" DESTINATION \"${CMAKE_INSTALL_PREFIX}/web\")
+  else()
+    message(WARNING \"No web build in ${SX_WEB_BUILD_DIR}: phones get no page. Run flutter build web first.\")
+  endif()
+  " COMPONENT Runtime)
+
 # Install the AOT library on non-Debug builds only.
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release

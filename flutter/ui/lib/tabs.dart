@@ -1,6 +1,9 @@
 import 'package:flutter/widgets.dart';
 
+import 'screens/apc/apc_screen.dart';
+import 'screens/health/health_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'screens/pre/pre_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
 import 'theme.dart';
@@ -38,17 +41,17 @@ const tabs = [
   TabDef('rt', 'Rig Test', TabGroup.gig, 'Which mover hangs where', _todo),
   TabDef('aim', 'Aim Movers', TabGroup.gig, "Fit the dance floor and AROUND ROOM to tonight's venue", _todo),
   TabDef('color', "Tonight's Color", TabGroup.gig, 'The decor color on the movers and uplights', _todo),
-  TabDef('pre', 'Pre-show Check', TabGroup.gig, 'One look before the guests arrive', _todo),
+  TabDef('pre', 'Pre-show Check', TabGroup.gig, 'One look before the guests arrive', PreScreen.new),
   TabDef('lab', 'SX Player', TabGroup.live, 'Play the show without ShowXpress', _todo),
   TabDef('auto', 'Auto Show', TabGroup.live, 'Your looks change every few bars while you mix', _todo),
   TabDef('rig', "Tonight's Rig", TabGroup.rig, 'Which movers are hung tonight', _todo),
   TabDef('skip', 'Skip Flash', TabGroup.rig, 'Which heads the flash skips', _todo),
-  TabDef('apc', 'APC mini', TabGroup.rig, 'Pads and their lights', _todo),
+  TabDef('apc', 'APC mini', TabGroup.rig, 'Pads and their lights', ApcScreen.new),
   TabDef('speed', 'Speed Faders', TabGroup.rig, 'Which master fader each button follows', SpeedScreen.new),
   TabDef('scene', 'Scene Editor', TabGroup.edit, 'Edit step scenes', _todo),
   TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', _todo),
   TabDef('look', 'Looks', TabGroup.edit, 'Make color looks for the whole rig', _todo),
-  TabDef('health', 'Health Check', TabGroup.edit, 'Find problems in the show', _todo),
+  TabDef('health', 'Health Check', TabGroup.edit, 'Find problems in the show', HealthScreen.new),
 ];
 
 /// Builds the screen for a tab id. `home` and `settings` are not in [tabs].

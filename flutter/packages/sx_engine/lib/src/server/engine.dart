@@ -16,6 +16,7 @@ import '../sx/default_sx_app.dart';
 import '../sx/live_hold.dart';
 import '../sx/sx_app.dart';
 import 'api.dart';
+import 'lifetime.dart';
 import 'phone.dart';
 import 'queue.dart';
 import 'routes/routes.dart';
@@ -117,6 +118,9 @@ class Engine {
   /// Live output and the player. Only one thing sends DMX at a time.
   final DmxHub dmx;
 
+  /// When the app quits by itself: the old five-minute idle rule.
+  late final lifetime = Lifetime.of(this);
+
   HttpServer? _server;
   HttpServer? _phoneServer;
   Timer? _tick;
@@ -136,7 +140,10 @@ class Engine {
   Future<void> start() async {
     _server = await shelf_io.serve(_withWeb((req) => _handle(req, fromPhone: false)), InternetAddress.loopbackIPv4, config.port);
     if (phones.on) await setPhoneListener(true);
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) => queue.step());
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      queue.step();
+      lifetime.step();
+    });
   }
 
   /// Starts or stops the network listener for phones. A failure to start is
@@ -148,6 +155,11 @@ class Engine {
       return;
     }
     if (_phoneServer != null) return;
+    // the app always names its web build: a phone must not be told to open a page that isn't there
+    if (config.webDir case final web? when !File('$web/index.html').existsSync()) {
+      phoneError = 'The phone page of SX Studio is missing - install SX Studio again.';
+      return;
+    }
     final handler = _withWeb((req) => _handle(req, fromPhone: true));
     try {
       // IPv6 and IPv4 together where the computer has both
@@ -212,6 +224,7 @@ class Engine {
     } else if (!sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
       return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
     }
+    lifetime.touch();
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
     if (fromPhone && (req.contentLength ?? 0) > 4000000) return _json({'ok': false, 'error': 'Too big.', 'out': ''}, 413);
 

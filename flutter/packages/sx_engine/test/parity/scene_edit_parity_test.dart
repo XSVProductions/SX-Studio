@@ -365,6 +365,33 @@ void main() {
       }, scene: big);
     }
 
+    // old-app bug, kept: two channels added into the same gap are refused by the self-check
+    final gapPair = () {
+      final miss = [
+        for (final c in model.chans)
+          if (!has.contains(c.ix)) c.ix,
+      ]..sort();
+      for (var i = 0; i + 1 < miss.length; i++) {
+        if (!has.any((h) => h > miss[i] && h < miss[i + 1])) return (miss[i], miss[i + 1]);
+      }
+      return null;
+    }();
+    if (gapPair != null) {
+      save(
+        'two channels added into the same gap (old bug: refused)',
+        (o) => SceneChanges(
+          scene: o.file,
+          sha: o.sha,
+          steps: same(o).steps,
+          addch: [
+            SceneChannelRef(fx: head.id, ix: gapPair.$1),
+            SceneChannelRef(fx: head.id, ix: gapPair.$2),
+          ],
+        ),
+        scene: big,
+        expect: 'two ways',
+      );
+    }
     save('nothing to change', same, expect: 'nothing to change');
     save(
       'refused: the file changed since',

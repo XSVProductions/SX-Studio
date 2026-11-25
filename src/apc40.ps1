@@ -5,7 +5,8 @@
 #   (the same "External App" connection sx_remote.ps1 uses, TCP 7348, buttons by TITLE).
 #
 #   Layout = SX Studio's own settings file apc40.json (never a ShowXpress file):
-#     { "pages":[ { "name":"Dancefloor", "pads":{ "<0..39>":"<button title>", ... } }, ... up to 8 ],
+#     { "pages":[ { "name":"Dancefloor", "pads":{ "<0..39>":"<button title>", ... },
+#                   "colors":{ "<0..39>":{ "on":<0..127>, "off":<0..127> } } }, ... up to 8 ],   (colors optional)
 #       "faders":{ "<1..9>":<master fader index> } }        (fader 9 = the APC40's master fader)
 #
 #   On the APC40 (verified on the user's unit 2026-11-25):
@@ -13,7 +14,8 @@
 #     - grid pads = notes 0..39 on channel 1, 0 = bottom left, 39 = top right
 #     - Track Select 1..8 (note 51, channel = column) = pages 1..8; the lit one is the page you're on
 #     - a pad press toggles its button (PRESS turns a button on, RELEASE off - both verified); a flash button is held
-#     - a pad shows its button's ShowXpress colour: bright while the button is on, dim when off, dark = no button
+#     - a pad shows its button's ShowXpress colour: bright while the button is on, dim when off, dark = no button.
+#       A pad can have its own colours instead (layout "colors": APC40 palette numbers, playing / idle)
 #     - Scene Launch 1 = connection light: green = ShowXpress connected, red = not (closed / remote off)
 #     - faders (CC 7 on channel 1..8, master CC 14) move ShowXpress's master faders: a speed fader's middle = normal
 #       speed (ShowXpress keeps speed faders at 0 = normal, -100..100), a dimmer fader 0..100
@@ -152,9 +154,15 @@ function Read-Layout($from = $null) {
   $pages = New-Object Collections.Generic.List[object]
   if ($j -and $j.pages) { foreach ($p in @($j.pages)) { if ($pages.Count -ge 8) { break }
     $pads = @{}; if ($p.pads) { foreach ($q in $p.pads.PSObject.Properties) { $n = -1; if ([int]::TryParse($q.Name, [ref]$n) -and $n -ge 0 -and $n -le 39 -and "$($q.Value)".Trim()) { $pads[$n] = "$($q.Value)".Trim() } } }
+    $cols = @{}
+    if ($p.colors) { foreach ($q in $p.colors.PSObject.Properties) { $n = -1
+      if (-not ([int]::TryParse($q.Name, [ref]$n) -and $pads.ContainsKey($n))) { continue }
+      $on = -1; $off = -1
+      if (-not ([int]::TryParse("$($q.Value.on)", [ref]$on) -and [int]::TryParse("$($q.Value.off)", [ref]$off))) { continue }
+      if ($on -ge 0 -and $on -le 127 -and $off -ge 0 -and $off -le 127) { $cols[$n] = @($on, $off) } } }
     $nm = ("$($p.name)" -replace '[\x00-\x1f]', '').Trim(); if ($nm.Length -gt 30) { $nm = $nm.Substring(0, 30) }
-    $pages.Add([pscustomobject]@{ name = $(if ($nm) { $nm } else { "Page $($pages.Count + 1)" }); pads = $pads }) } }
-  if (-not $pages.Count) { $pages.Add([pscustomobject]@{ name = 'Dancefloor'; pads = @{} }) }
+    $pages.Add([pscustomobject]@{ name = $(if ($nm) { $nm } else { "Page $($pages.Count + 1)" }); pads = $pads; colors = $cols }) } }
+  if (-not $pages.Count) { $pages.Add([pscustomobject]@{ name = 'Dancefloor'; pads = @{}; colors = @{} }) }
   $fd = @{}
   if ($j -and $j.faders) { foreach ($q in $j.faders.PSObject.Properties) { $n = 0; if ([int]::TryParse($q.Name, [ref]$n) -and $n -ge 1 -and $n -le 9 -and "$($q.Value)" -match '^\d+$') { $fd[$n] = [int]$q.Value } } }
   elseif (-not $j -or $null -eq $j.faders) { for ($k = 1; $k -le 4; $k++) { $fd[$k] = $k - 1 } }   # default: faders 1-4 = master faders 1-4
@@ -262,7 +270,7 @@ function Update-Leds {
     $v = 0
     if ($pg.pads.ContainsKey($n)) {
       $t = $pg.pads[$n]
-      if ($script:btns.ContainsKey($t)) { $b = $script:btns[$t]; $c = Get-PadColor $b.color; $v = if ($conn -and $b.on) { $c[0] } else { $c[1] } }
+      if ($script:btns.ContainsKey($t)) { $b = $script:btns[$t]; $c = if ($pg.colors.ContainsKey($n)) { $pg.colors[$n] } else { Get-PadColor $b.color }; $v = if ($conn -and $b.on) { $c[0] } else { $c[1] } }
       elseif (-not $conn) { $v = 1 }   # not connected yet: assigned pads dim grey
     }
     Set-Led 0x90 $n $v
@@ -320,7 +328,10 @@ function Step-Midi {
 # ---------------------------------------------------------------- Info / Save (the APC40 tab)
 function ConvertTo-LayoutJson {
   [ordered]@{
-    pages = @(foreach ($p in @($lay.pages)) { $o = [ordered]@{}; foreach ($n in @($p.pads.Keys | Sort-Object)) { $o["$n"] = $p.pads[$n] }; [ordered]@{ name = $p.name; pads = $o } })
+    pages = @(foreach ($p in @($lay.pages)) { $o = [ordered]@{}; foreach ($n in @($p.pads.Keys | Sort-Object)) { $o["$n"] = $p.pads[$n] }
+      $pg = [ordered]@{ name = $p.name; pads = $o }
+      if ($p.colors.Count) { $c = [ordered]@{}; foreach ($n in @($p.colors.Keys | Sort-Object)) { $c["$n"] = [ordered]@{ on = $p.colors[$n][0]; off = $p.colors[$n][1] } }; $pg.colors = $c }
+      $pg })
     faders = $($o = [ordered]@{}; foreach ($n in @($lay.faders.Keys | Sort-Object)) { $o["$n"] = $lay.faders[$n] }; $o)
   }
 }
@@ -344,9 +355,9 @@ if ($Action -ne 'Run') {
       if (-not $j -or -not $j.pages) { throw 'Nothing to save.' }
       $st.error = ''; Read-Layout $j
       $d = Split-Path $Layout; if (-not (Test-Path -LiteralPath $d)) { [void](New-Item -ItemType Directory -Path $d -Force) }
-      [IO.File]::WriteAllText($Layout, ((ConvertTo-LayoutJson) | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false)))
+      [IO.File]::WriteAllText($Layout, ((ConvertTo-LayoutJson) | ConvertTo-Json -Depth 7), (New-Object Text.UTF8Encoding($false)))
     } else { Read-Layout }
-    (Get-Info) | ConvertTo-Json -Depth 6 -Compress
+    (Get-Info) | ConvertTo-Json -Depth 8 -Compress
   } catch { [ordered]@{ ok = $false; error = "$($_.Exception.Message)" } | ConvertTo-Json -Compress }
   exit 0
 }

@@ -1133,7 +1133,7 @@ header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .a4conn{margin-top:12px;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .a4conn .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;background:var(--amber);vertical-align:0}.a4conn .dot.green{background:var(--green)}.a4conn .dot.red{background:var(--red)}
 .a4pages{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.a4pages .mini.on{border-color:var(--acc);color:var(--acc)}
-.a4grid .pad>*,#apgrid .pad>*{pointer-events:none}.a4drop{outline:2px dashed var(--acc)!important;outline-offset:1px}
+.a4grid .pad>*,#apgrid .pad>*{pointer-events:none}.a4col summary{cursor:pointer;margin:2px 0 8px;font-weight:600}.a4drop{outline:2px dashed var(--acc)!important;outline-offset:1px}
 .a4list{max-height:360px;overflow:auto;margin:8px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 4px}
 .a4g{font-size:11px;color:var(--dim);margin:8px 4px 2px;text-transform:uppercase;letter-spacing:.04em}
 .a4b{padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12.5px}.a4b:hover{background:var(--hover)}.a4b.cur{color:var(--acc);font-weight:650}
@@ -1644,7 +1644,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
  <div class="view" id="v-apc40">
   <section class="card">
     <div class="row"><div class="grow"><h2>APC40 pads</h2>
-      <p class="sub" style="margin-bottom:0">Up to 8 pages of your own, 40 pads each &mdash; put any ShowXpress button on any pad. On the APC40 the numbered <b>Track Select</b> buttons under the pads switch pages. A pad turns its button on (press again for off) and shows its ShowXpress colour, bright while it&rsquo;s on. The top <b>Scene Launch</b> button is green while ShowXpress is connected. The APC mini, ShowXpress&rsquo;s pages and the show aren&rsquo;t changed.</p></div>
+      <p class="sub" style="margin-bottom:0">Up to 8 pages of your own, 40 pads each &mdash; put any ShowXpress button on any pad. On the APC40 the numbered <b>Track Select</b> buttons under the pads switch pages. A pad turns its button on (press again for off) and shows its ShowXpress colour (or a colour you pick for that pad), bright while it&rsquo;s on. The top <b>Scene Launch</b> button is green while ShowXpress is connected. The APC mini, ShowXpress&rsquo;s pages and the show aren&rsquo;t changed.</p></div>
       <span id="a4state" class="state ok" style="display:none"></span><button id="a4refresh">&#8635; Refresh</button></div>
     <div id="a4err" class="warnbox"></div>
     <div id="a4conn" class="a4conn"></div>
@@ -2141,13 +2141,16 @@ $('aprefresh').onclick=loadApc;$('apundo').onclick=()=>{A.pads.forEach(p=>apN[p.
 $('apsave').onclick=()=>saveTo('/api/apc/apply',{changes:A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).map(p=>{const c={sec:p.sec,title:p.title,note:apN[p.sec]};if(colChg(p)&&apN[p.sec]>=0){c.on=apC[p.sec].on;c.off=apC[p.sec].off;}return c;})},'Saving pads…',async()=>{await loadApc();SP=null;H=null;},'apc');
 
 // ---------------- APC40 mk2 (user 2026-11-25): pages of the user's own pads, played through ShowXpress's remote by apc40.ps1
+let a4ColOpen=false;
 let Q4=null,L4=null,a4Pg=0,a4Sel=-1,a4Q='',a4St=null,a4T=null,a4Msg='',a4MsgT=null;
 const a4Copy=l=>JSON.parse(JSON.stringify(l));
-function a4Fix(l){l=a4Copy(l||{});if(!Array.isArray(l.pages))l.pages=l.pages?[l.pages]:[];if(!l.pages.length)l.pages=[{name:'Dancefloor',pads:{}}];l.pages.forEach(p=>{if(!p.pads||Array.isArray(p.pads))p.pads={};});if(!l.faders||Array.isArray(l.faders))l.faders={};return l;}
-const a4Norm=l=>JSON.stringify({p:l.pages.map(p=>[p.name,Object.keys(p.pads).map(Number).sort((a,b)=>a-b).map(k=>[k,p.pads[k]])]),f:Object.keys(l.faders).map(Number).sort((a,b)=>a-b).map(k=>[k,+l.faders[k]])});
+function a4Fix(l){l=a4Copy(l||{});if(!Array.isArray(l.pages))l.pages=l.pages?[l.pages]:[];if(!l.pages.length)l.pages=[{name:'Dancefloor',pads:{}}];l.pages.forEach(p=>{if(!p.pads||Array.isArray(p.pads))p.pads={};if(!p.colors||Array.isArray(p.colors))p.colors={};Object.keys(p.colors).forEach(k=>{if(!p.pads[k])delete p.colors[k];});});if(!l.faders||Array.isArray(l.faders))l.faders={};return l;}
+const a4Norm=l=>JSON.stringify({p:l.pages.map(p=>[p.name,Object.keys(p.pads).map(Number).sort((a,b)=>a-b).map(k=>[k,p.pads[k],p.colors&&p.colors[k]?[+p.colors[k].on,+p.colors[k].off]:0])]),f:Object.keys(l.faders).map(Number).sort((a,b)=>a-b).map(k=>[k,+l.faders[k]])});
 function a4Dirty(){return !!(Q4&&Q4.ok&&L4&&a4Norm(L4)!==a4Norm(a4Fix(Q4.layout)));}
 function a4B(){const m={};(Q4.buttons||[]).forEach(b=>{if(!b.dup&&!m[b.title])m[b.title]=b;});return m;}
 const a4rc=n=>'row '+(5-Math.floor(n/8))+', column '+(n%8+1);
+const a4On=(pg,n,b)=>{const c=pg.colors&&pg.colors[n];return c?+c.on:b?b.on:null;},a4Off=(pg,n,b)=>{const c=pg.colors&&pg.colors[n];return c?+c.off:b?b.off:null;};
+function a4SwRow(k,cur){return [...SWB,...SWD,0].map(v=>`<i class="psw${v===cur?' cur':''}" data-a4sw="${k}" data-v="${v}" style="background:#${PAL[v]}" title="${v?'colour '+v:'off'}"></i>`).join('');}
 function a4Next(n){const i=(4-Math.floor(n/8))*8+n%8+1;return i>=40?-1:(4-Math.floor(i/8))*8+i%8;}
 async function loadA40(){Q4=await getJ('/api/apc40');if(Q4.ok){L4=a4Fix(Q4.layout);if(Q4.status)a4St=Q4.status;}a4Pg=L4?Math.min(a4Pg,L4.pages.length-1):0;a4Sel=-1;renderA40();}
 function a4Say(m){a4Msg=m;clearTimeout(a4MsgT);a4MsgT=setTimeout(()=>{a4Msg='';updA40();},5000);updA40();}
@@ -2171,18 +2174,25 @@ function renderA40(){if(!Q4)return;
  let h='';
  for(let r=0;r<5;r++)for(let c=0;c<8;c++){const n=(4-r)*8+c,t=pg.pads[n];
   if(!t){h+=`<div class="pad empty${a4Sel===n?' sel':''}" data-a4="${n}" title="${a4rc(n)} - empty"><div class="t">empty</div></div>`;continue;}
-  const b=B[t];
-  h+=`<div class="pad${a4Sel===n?' sel':''}${b?'':' miss'}" data-a4="${n}" draggable="true" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${b?PAL[b.off]:'151820'}" title="${esc(t)} - ${a4rc(n)}${b?'':' - not in ShowXpress!'}"><div class="on" style="background:#${b?PAL[b.on]:'444444'}"></div><div class="t">${esc(t)}</div><div class="p">${b?esc(b.pageName):'not in ShowXpress!'}</div></div>`;}
+  const b=B[t],on=a4On(pg,n,b),off=a4Off(pg,n,b);
+  h+=`<div class="pad${a4Sel===n?' sel':''}${b?'':' miss'}" data-a4="${n}" draggable="true" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${b?PAL[off]:'151820'}" title="${esc(t)} - ${a4rc(n)}${b?'':' - not in ShowXpress!'}"><div class="on" style="background:#${b?PAL[on]:'444444'}"></div><div class="t">${esc(t)}</div><div class="p">${b?esc(b.pageName):'not in ShowXpress!'}</div></div>`;}
  $('a4grid').innerHTML=h;document.querySelectorAll('[data-a4]').forEach(e=>e.onclick=()=>{const n=+e.dataset.a4;a4Sel=a4Sel===n?-1:n;renderA40();if(a4Sel>=0){const q=$('a4q');if(q)q.focus();}});a4Dnd();
  if(a4Sel>=0){const cur=pg.pads[a4Sel];
-  $('a4side').innerHTML=`<h3>Pad: ${a4rc(a4Sel)}</h3><div class="kv"><span>Plays</span><b>${cur?esc(cur)+(B[cur]?' <span class="tag">'+esc(B[cur].pageName)+'</span>':' <span style="color:var(--red)">&mdash; not in ShowXpress!</span>'):'nothing yet'}</b></div>`+
+  const own=!!(cur&&pg.colors[a4Sel]),cb=B[cur];
+  $('a4side').innerHTML=`<h3>Pad: ${a4rc(a4Sel)}</h3><div class="kv"><span>Plays</span><b>${cur?esc(cur)+(B[cur]?' <span class="tag">'+esc(B[cur].pageName)+'</span>':' <span style="color:var(--red)">&mdash; not in ShowXpress!</span>'):'nothing yet'}</b>`+
+   (cur&&cb?`<span>Light</span><b><span class="sw" style="background:#${PAL[a4On(pg,a4Sel,cb)]}"></span>playing &nbsp; <span class="sw" style="background:#${PAL[a4Off(pg,a4Sel,cb)]}"></span>idle &nbsp;<span class="tag${own?' blue':''}">${own?'own':'from ShowXpress'}</span></b>`:'')+`</div>`+
+   (cur&&cb?`<details class="a4col"${own||a4ColOpen?' open':''}><summary>Pad colour</summary><div class="pcl"><span>Colour while playing</span><div class="pals">${a4SwRow('on',a4On(pg,a4Sel,cb))}</div><span>Colour when idle</span><div class="pals">${a4SwRow('off',a4Off(pg,a4Sel,cb))}</div></div>`+
+    `<div class="row" style="margin:6px 0 10px"><button class="mini" id="a4colx"${own?'':' disabled'}>Use the ShowXpress button colour</button></div></details>`:'')+
    `<input type="text" id="a4q" placeholder="Search ShowXpress buttons&hellip;" value="${esc(a4Q)}"><div class="a4list" id="a4list"></div>`+
    `<p class="sub" style="margin:0 0 10px">Tap a button to put it on this pad &mdash; then it moves on to the next pad, so you can fill a row quickly.</p><div class="row"><button id="a4clr"${cur?'':' disabled'}>Clear this pad</button><button id="a4done">Done</button></div>`;
   $('a4q').oninput=e=>{a4Q=e.target.value;a4List();};a4List();
-  $('a4clr').onclick=()=>{delete pg.pads[a4Sel];renderA40();};$('a4done').onclick=()=>{a4Sel=-1;renderA40();};}
+  $('a4clr').onclick=()=>{delete pg.pads[a4Sel];delete pg.colors[a4Sel];renderA40();};
+  const dt=document.querySelector('#a4side .a4col');if(dt)dt.ontoggle=()=>{a4ColOpen=dt.open;};
+  document.querySelectorAll('[data-a4sw]').forEach(e=>e.onclick=()=>{const c=pg.colors[a4Sel]||{on:a4On(pg,a4Sel,cb),off:a4Off(pg,a4Sel,cb)};c[e.dataset.a4sw]=+e.dataset.v;pg.colors[a4Sel]=c;a4ColOpen=true;renderA40();});
+  if($('a4colx'))$('a4colx').onclick=()=>{delete pg.colors[a4Sel];renderA40();};$('a4done').onclick=()=>{a4Sel=-1;renderA40();};}
  else{const used=Object.keys(pg.pads).length,pn=[...new Set((Q4.buttons||[]).map(b=>b.pageName))];
   $('a4side').innerHTML=`<h3>Page ${a4Pg+1}</h3><div class="kv"><span>Name</span><b><input type="text" id="a4name" maxlength="30" value="${esc(pg.name)}"></b><span>Pads</span><b>${used} of 40 used</b><span>On the APC40</span><b>Track Select ${a4Pg+1}</b></div>`+
-   `<p class="sub" style="margin:0 0 6px">Tap a pad to choose what it plays. Drag a pad to move it (onto another pad to swap, onto a page tab to send it to that page). Right-click a pad to clear it.</p>`+
+   `<p class="sub" style="margin:0 0 6px">Tap a pad to choose what it plays and its colour (pads take the ShowXpress button colour until you pick one). Drag a pad to move it (onto another pad to swap, onto a page tab to send it to that page). Right-click a pad for more.</p>`+
    `<div style="margin:10px 0"><select id="a4fill"><option value="">Fill the empty pads from a ShowXpress page&hellip;</option>${pn.map(n=>`<option>${esc(n)}</option>`).join('')}</select></div>`+
    `<div class="row">${a4Pg>0?'<button class="mini" id="a4left">&larr; Move page left</button>':''}${a4Pg<L4.pages.length-1?'<button class="mini" id="a4right">Move page right &rarr;</button>':''}${L4.pages.length>1?'<button class="mini" id="a4del">Delete this page</button>':''}${used?'<button class="mini" id="a4clear">Clear all pads</button>':''}</div>`;
   $('a4name').oninput=e=>{pg.name=e.target.value;const b=document.querySelector('[data-a4p="'+a4Pg+'"]');if(b)b.innerHTML=(a4Pg+1)+' &middot; '+esc(pg.name);updA40();};
@@ -2193,7 +2203,7 @@ function renderA40(){if(!Q4)return;
   const sw=(a,b)=>{const x=L4.pages[a];L4.pages[a]=L4.pages[b];L4.pages[b]=x;a4Pg=b;renderA40();};
   if($('a4left'))$('a4left').onclick=()=>sw(a4Pg,a4Pg-1);if($('a4right'))$('a4right').onclick=()=>sw(a4Pg,a4Pg+1);
   if($('a4del'))$('a4del').onclick=()=>{if(!confirm('Delete page '+(a4Pg+1)+' ('+pg.name+')?'))return;L4.pages.splice(a4Pg,1);a4Pg=Math.max(0,a4Pg-1);renderA40();};
-  if($('a4clear'))$('a4clear').onclick=()=>{if(!confirm('Clear every pad on '+pg.name+'?'))return;pg.pads={};renderA40();};}
+  if($('a4clear'))$('a4clear').onclick=()=>{if(!confirm('Clear every pad on '+pg.name+'?'))return;pg.pads={};pg.colors={};renderA40();};}
  const FD=['1','2','3','4','5','6','7','8','9'];
  $('a4faders').innerHTML=FD.map(f=>`<div class="fd"><b>${f==='9'?'Master fader':'Fader '+f}</b><select data-a4f="${f}"><option value="">nothing</option>${(Q4.faders||[]).map(x=>`<option value="${x.k}"${L4.faders[f]!==undefined&&+L4.faders[f]===x.k?' selected':''}>${esc(x.caption||'Fader '+(x.k+1))} ${x.type}</option>`).join('')}</select></div>`).join('');
  document.querySelectorAll('[data-a4f]').forEach(s=>s.onchange=()=>{if(s.value==='')delete L4.faders[s.dataset.a4f];else L4.faders[s.dataset.a4f]=+s.value;updA40();});
@@ -2201,7 +2211,8 @@ function renderA40(){if(!Q4)return;
 // drag a pad onto another pad (swap) or onto a page tab (same spot on that page); right-click = menu
 let a4Drag=null;
 function a4Move(fp,f,tp,to){if(fp===tp&&f===to)return;const a=L4.pages[fp].pads,b=L4.pages[tp].pads,x=a[f],y=b[to];if(!x)return;
- if(y)a[f]=y;else delete a[f];b[to]=x;if(fp===a4Pg&&a4Sel===f)a4Sel=tp===a4Pg?to:-1;else if(tp===a4Pg&&a4Sel===to)a4Sel=f;}
+ const ca=L4.pages[fp].colors,cb=L4.pages[tp].colors,cx=ca[f],cy=cb[to];
+ if(y)a[f]=y;else delete a[f];b[to]=x;if(cy)ca[f]=cy;else delete ca[f];if(cx)cb[to]=cx;else delete cb[to];if(fp===a4Pg&&a4Sel===f)a4Sel=tp===a4Pg?to:-1;else if(tp===a4Pg&&a4Sel===to)a4Sel=f;}
 function a4Dnd(){const off=()=>document.querySelectorAll('.a4drop').forEach(x=>x.classList.remove('a4drop'));
  document.querySelectorAll('#a4grid [data-a4]').forEach(e=>{const n=+e.dataset.a4;
   e.ondragstart=ev=>{a4Drag=n;ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(n));ctxClose();};
@@ -2212,7 +2223,9 @@ function a4Dnd(){const off=()=>document.querySelectorAll('.a4drop').forEach(x=>x
   e.oncontextmenu=ev=>{ev.preventDefault();const t=L4.pages[a4Pg].pads[n];
    ctxOpen(ev.clientX,ev.clientY,(t||'Empty pad')+' - '+a4rc(n),[
     {h:t?'Change the button&hellip;':'Choose a button&hellip;',go:()=>{a4Sel=n;renderA40();const q=$('a4q');if(q)q.focus();}},
-    {h:'Clear this pad',off:!t,go:()=>{delete L4.pages[a4Pg].pads[n];if(a4Sel===n)a4Sel=-1;renderA40();}}]);};});
+    {h:'Pad colour&hellip;',off:!t||!a4B()[t],go:()=>{a4Sel=n;a4ColOpen=true;renderA40();}},
+    {h:'Use the ShowXpress button colour',off:!L4.pages[a4Pg].colors[n],go:()=>{delete L4.pages[a4Pg].colors[n];renderA40();}},
+    {h:'Clear this pad',off:!t,go:()=>{delete L4.pages[a4Pg].pads[n];delete L4.pages[a4Pg].colors[n];if(a4Sel===n)a4Sel=-1;renderA40();}}]);};});
  document.querySelectorAll('#a4pages [data-a4p]').forEach(b=>{const i=+b.dataset.a4p;if(i===a4Pg)return;
   b.ondragover=ev=>{if(a4Drag===null)return;ev.preventDefault();ev.dataTransfer.dropEffect='move';b.classList.add('a4drop');};
   b.ondragleave=()=>b.classList.remove('a4drop');
@@ -2225,7 +2238,7 @@ function a4List(){const e=$('a4list');if(!e)return;const pg=L4.pages[a4Pg],cur=p
  (Q4.buttons||[]).filter(b=>!b.dup&&(!q||b.title.toLowerCase().includes(q)||b.pageName.toLowerCase().includes(q))).forEach(b=>{if(b.pageName!==g){g=b.pageName;h+=`<div class="a4g">${esc(g)}</div>`;}
   h+=`<div class="a4b${b.title===cur?' cur':''}" data-a4t="${esc(b.title)}"><span class="sw" style="background:#${PAL[b.on]}"></span>${esc(b.title)}</div>`;});
  e.innerHTML=h||'<p class="sub" style="margin:8px">No button matches.</p>';
- e.querySelectorAll('[data-a4t]').forEach(x=>x.onclick=()=>{pg.pads[a4Sel]=x.dataset.a4t;a4Sel=a4Next(a4Sel);const st=e.scrollTop;renderA40();const l=$('a4list');if(l)l.scrollTop=st;});}
+ e.querySelectorAll('[data-a4t]').forEach(x=>x.onclick=()=>{if(pg.pads[a4Sel]!==x.dataset.a4t)delete pg.colors[a4Sel];pg.pads[a4Sel]=x.dataset.a4t;a4Sel=a4Next(a4Sel);const st=e.scrollTop;renderA40();const l=$('a4list');if(l)l.scrollTop=st;});}
 function updA40(){if(!$('a4save'))return;const ok=!!(Q4&&Q4.ok),d=a4Dirty();$('a4save').disabled=!ok||!d;$('a4undo').disabled=!ok||!d;if(ok){stateTag('a4state',d);if(!d)$('a4state').textContent='✓ Saved';}
  $('a4hint').innerHTML=a4Msg||(!ok?'':d?'Not saved yet. Saving only changes SX Studio&rsquo;s own APC40 settings &mdash; ShowXpress can stay open.':'The APC40 is using these pages.');}
 $('a4refresh').onclick=loadA40;

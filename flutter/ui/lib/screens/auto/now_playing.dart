@@ -130,6 +130,7 @@ class _NowPlayingState extends State<NowPlaying> {
           alignment: Alignment.centerLeft,
           child: FractionallySizedBox(
             widthFactor: p.fraction.clamp(0, 1).toDouble(),
+            heightFactor: 1,
             child: DecoratedBox(
               decoration: BoxDecoration(gradient: LinearGradient(colors: [Sx.green, Sx.accent])),
             ),

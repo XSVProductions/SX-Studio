@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:sx_api/sx_api.dart';
@@ -84,6 +83,10 @@ class _LabScreenState extends State<LabScreen> {
   Note? _err;
   var _lastPlayErr = '';
   var _reopen = false;
+
+  /// A phone or tablet runs this screen (the old PH, from `/api/settings`).
+  /// ShowXpress is the laptop's, so the phone doesn't offer to reopen it.
+  var _phone = false;
   var _test = false;
   var _arranging = false;
   var _gigHelp = false;
@@ -171,7 +174,9 @@ class _LabScreenState extends State<LabScreen> {
       _boardError = e.message;
     }
     try {
-      _lay = await _client.playerLayout();
+      final info = await _client.settings();
+      _lay = info.settings.playerLayout;
+      _phone = info.phone;
     } on ApiException {
       // Keep the layout we have.
     }
@@ -565,6 +570,14 @@ class _LabScreenState extends State<LabScreen> {
   /// Starts the player, and plays [first] when a tile started it (lbGo).
   Future<void> _go({String? first}) async {
     if (_running || _busy != null) return;
+    // The old page checked its own LV, CP, SEP, MVP and LKP. Here those are
+    // other screens, and all of them hold the engine's live output.
+    await _app.refresh();
+    if (!mounted) return;
+    if (_app.status?.live ?? false) {
+      _toast(_amber('Aim live, the colour preview or an editor or Looks preview is using the DMX interface. Finish that first.'));
+      return;
+    }
     var carry = const <String>[];
     if (_app.sxOpen) {
       try {
@@ -629,7 +642,7 @@ class _LabScreenState extends State<LabScreen> {
 
   /// Stops the player (lbStop). Asks first while something plays.
   Future<void> _stop() async {
-    final reo = !kIsWeb && _reopen;
+    final reo = !_phone && _reopen;
     final st = _st;
     final autoHere = _autoRunning && _app.status?.auto?.target == 'player';
     if ((st != null && st.on.isNotEmpty) || autoHere) {
@@ -719,16 +732,12 @@ class _LabScreenState extends State<LabScreen> {
     _draw();
     if (widget.fixture != null) return;
     try {
-      final r = await _client.savePlayerLayout(lay);
+      final r = await _client.settingsSet(SettingsChange(playerLayout: lay));
       if (!mounted) return;
-      if (r == null) {
-        _toast(_amber("The layout wasn't saved."));
-      } else {
-        setState(() => _lay = r);
-        _draw();
-      }
-    } on ApiException {
-      _toast(_amber("The layout wasn't saved. Lost connection."));
+      setState(() => _lay = r.playerLayout);
+      _draw();
+    } on ApiException catch (e) {
+      _toast(_amber("The layout wasn't saved. ${e.message}"));
     }
   }
 
@@ -1007,7 +1016,7 @@ class _LabScreenState extends State<LabScreen> {
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (!kIsWeb)
+            if (!_phone)
               InkWell(
                 onTap: () => setState(() => _reopen = !_reopen),
                 child: Row(
@@ -1241,7 +1250,63 @@ class _LabScreenState extends State<LabScreen> {
     );
   }
 
-  Widget _tile(LabTile t, double w) => TileView(key: ValueKey(t.sec), tile: t, state: _live.tile(t), width: w, idle: !_running, onTap: () => _press(t));
+  Widget _tile(LabTile t, double w) =>
+      TileView(key: ValueKey(t.sec), tile: t, state: _live.tile(t), width: w, idle: !_running, onTap: () => _press(t), onMenu: (at) => _menu(t, at));
+
+  /// The button's menu at [at], the old right-click and long-press `ctxOpen`:
+  /// opens its scene or movement in that editor (lbEditFile).
+  Future<void> _menu(LabTile t, Offset at) async {
+    final tab = editorTab(t.file);
+    final overlay = Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final edit = await showMenu<bool>(
+      context: context,
+      position: RelativeRect.fromRect(at & Size.zero, Offset.zero & overlay.size),
+      color: Sx.panel,
+      surfaceTintColor: Colors.transparent,
+      // `box-shadow: 0 10px 28px rgba(0,0,0,.45)`: dark in both themes.
+      shadowColor: Sx.isLight ? Sx.text : Sx.bg,
+      elevation: 10,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: Sx.line2),
+      ),
+      constraints: const BoxConstraints(minWidth: 190, maxWidth: 284),
+      menuPadding: const EdgeInsets.all(4),
+      items: [
+        PopupMenuItem(
+          enabled: false,
+          height: 0,
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+          child: Text(
+            t.title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: Sx.mute, fontWeight: FontWeight.w600, letterSpacing: .5),
+          ),
+        ),
+        PopupMenuItem(
+          value: true,
+          enabled: !t.missing && tab != null,
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Icon(Icons.edit, size: 14, color: t.missing ? Sx.mute : Sx.text),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Edit ${tab == 'move' ? 'movement' : 'scene'}${t.missing ? ' (file missing)' : ''}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 13, color: t.missing ? Sx.mute : Sx.text),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (edit == true && tab != null && mounted) _app.openFile(tab, t.file);
+  }
 
   Widget _dragTile(String page, LabTile t, double w, List<LabTile> tiles) {
     Widget view({bool delete = true}) => TileView(
@@ -1250,6 +1315,7 @@ class _LabScreenState extends State<LabScreen> {
       width: w,
       idle: !_running,
       arranging: true,
+      onMenu: (at) => _menu(t, at),
       onDelete: delete && t.custom ? () => _deleteButton(page, t.sec) : null,
     );
     return Builder(

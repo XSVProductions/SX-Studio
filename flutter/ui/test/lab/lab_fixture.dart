@@ -56,6 +56,12 @@ Json playerStatus({List<Json> on = const [], bool bo = false, String iface = 'ok
 class Script {
   var sxOpen = false;
   var running = false;
+
+  /// Live aim, the colour preview or an editor preview holds the DMX output.
+  var live = false;
+
+  /// `/api/settings` says a phone asked.
+  var phone = false;
   Json? status;
   Json? event;
   Json layout = {'pages': [], 'order': {}, 'hidden': [], 'collapsed': [], 'custom': []};
@@ -85,7 +91,7 @@ class Script {
         j = {
           'open': sxOpen,
           'q': {'items': [], 'reopen': true, 'done': null},
-          'live': false,
+          'live': live,
           'play': running,
           'pend': false,
           'auto': null,
@@ -98,6 +104,7 @@ class Script {
           'ok': true,
           'settings': {'playerLayout': layout},
           'ver': '2.0.0',
+          'phone': phone,
         };
       case '/api/settings/set':
         layout = (body['playerLayout']! as Map).cast<String, Object?>();

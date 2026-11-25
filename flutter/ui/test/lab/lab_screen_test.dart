@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -329,6 +330,68 @@ void main() {
     expect(find.textContaining('ShowXpress is open - it has to be closed'), findsOneWidget);
     expect(find.text('Start the player'), findsOneWidget);
     await h.end();
+  });
+
+  testWidgets('starting is refused while another screen sends DMX, before ShowXpress is touched', (t) async {
+    final s = Script()
+      ..sxOpen = true
+      ..live = true;
+    final h = await pumpLab(t, s);
+    await t.tap(find.text('Start the player'));
+    await t.pump();
+    await t.pump();
+    expect(find.text('Aim live, the colour preview or an editor or Looks preview is using the DMX interface. Finish that first.'), findsOneWidget);
+    expect(s.posts, isEmpty);
+    await h.end();
+  });
+
+  testWidgets('right-click a scene: Edit scene opens it in the Scene Editor', (t) async {
+    final h = await pumpLab(t, Script());
+    await t.tap(find.text('RED'), buttons: kSecondaryButton);
+    await t.pumpAndSettle();
+    await t.tap(find.text('Edit scene'));
+    await t.pumpAndSettle();
+    expect(h.app.tab, 'scene');
+    expect(h.app.takeFile('scene'), 'RED.scex');
+    await h.end();
+  });
+
+  testWidgets('long-press a movement: Edit movement opens it in the Movement Editor', (t) async {
+    final s = Script()
+      ..running = true
+      ..status = playerStatus();
+    final h = await pumpLab(t, s);
+    await t.longPress(find.text('CIRCLE'));
+    await t.pumpAndSettle();
+    expect(s.cmds, isEmpty, reason: 'a long press is not a press');
+    await t.tap(find.text('Edit movement'));
+    await t.pumpAndSettle();
+    expect(h.app.tab, 'move');
+    expect(h.app.takeFile('move'), 'CIRCLE.gpj');
+    await h.end();
+  });
+
+  testWidgets('a missing file can not be edited', (t) async {
+    final h = await pumpLab(t, Script());
+    await t.tap(find.text('GONE'), buttons: kSecondaryButton);
+    await t.pumpAndSettle();
+    await t.tap(find.text('Edit scene (file missing)'), warnIfMissed: false);
+    await t.pumpAndSettle();
+    expect(h.app.tab, 'lab');
+    expect(h.app.takeFile('scene'), isNull);
+    await h.end();
+  });
+
+  testWidgets('the "open ShowXpress again" box is on the laptop only', (t) async {
+    for (final phone in [false, true]) {
+      final s = Script()
+        ..running = true
+        ..phone = phone
+        ..status = playerStatus();
+      final h = await pumpLab(t, s);
+      expect(find.text('Open ShowXpress again when I stop'), phone ? findsNothing : findsOneWidget);
+      await h.end();
+    }
   });
 
   testWidgets('works at 380 px wide', (t) async {

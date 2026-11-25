@@ -91,6 +91,7 @@ class TileView extends StatefulWidget {
     required this.idle,
     this.arranging = false,
     this.onTap,
+    this.onMenu,
     this.onDelete,
   });
 
@@ -102,6 +103,10 @@ class TileView extends StatefulWidget {
   final bool idle;
   final bool arranging;
   final VoidCallback? onTap;
+
+  /// Opens the button's menu at a screen position: right-click, or a long
+  /// press outside Arrange (where a press drags).
+  final void Function(Offset at)? onMenu;
 
   /// Takes a player page's button off its page (Arrange only).
   final VoidCallback? onDelete;
@@ -123,7 +128,7 @@ class _TileViewState extends State<TileView> {
       valueListenable: widget.state,
       builder: (context, s, _) {
         final on = s.on && !widget.arranging;
-        final hover = _hover && !t.missing;
+        final hover = _hover && !t.missing && !widget.arranging;
         final edge = on
             ? Sx.green
             : widget.arranging
@@ -191,18 +196,24 @@ class _TileViewState extends State<TileView> {
           children: [
             Opacity(
               opacity: opacity,
-              child: widget.onTap == null
+              child: widget.onTap == null && widget.onMenu == null
                   ? box
                   : MouseRegion(
-                      cursor: t.missing ? SystemMouseCursors.basic : SystemMouseCursors.click,
+                      cursor: widget.onTap == null
+                          ? MouseCursor.defer
+                          : t.missing
+                          ? SystemMouseCursors.basic
+                          : SystemMouseCursors.click,
                       onEnter: (_) => setState(() => _hover = true),
                       onExit: (_) => setState(() => _hover = false),
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
-                        onTapDown: (_) => setState(() => _down = true),
-                        onTapUp: (_) => setState(() => _down = false),
-                        onTapCancel: () => setState(() => _down = false),
+                        onTapDown: widget.onTap == null ? null : (_) => setState(() => _down = true),
+                        onTapUp: widget.onTap == null ? null : (_) => setState(() => _down = false),
+                        onTapCancel: widget.onTap == null ? null : () => setState(() => _down = false),
                         onTap: widget.onTap,
+                        onSecondaryTapUp: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
+                        onLongPressStart: widget.onMenu == null || widget.onTap == null ? null : (d) => widget.onMenu!(d.globalPosition),
                         // `.lbb:active{transform:scale(.97)}`
                         child: Transform.scale(scale: _down ? .97 : 1, child: box),
                       ),

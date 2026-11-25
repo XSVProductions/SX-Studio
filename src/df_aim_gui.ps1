@@ -1,7 +1,7 @@
 ﻿# SX Studio (was SX Helper, before that AIM MOVERS) - small GUI (Windows PowerShell 5.1 + macOS pwsh 7).
 # Runs a private web page on this computer only (localhost + random key) and opens it as an app window
 # (Edge/Chrome "app" mode, else the normal browser). Each tab is backed by a script that does the work:
-#   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Skip Flash -> skip_flash.ps1
+#   Tonight's Rig -> rig.ps1   Aim Movers -> df_aim.ps1       Strobe (the SKIP FLASH heads) -> skip_flash.ps1
 #   APC mini -> apc.ps1        Speed Faders -> speed.ps1      Health Check -> health.ps1 (check, fix, revert)
 #   Rig Test -> rig_test.ps1   Pre-show Check -> preshow.ps1
 #   Auto Show -> sx_remote.ps1 (also presses RIG ID / DF CHECK / ROOM CHECK in a running ShowXpress through its remote)
@@ -39,6 +39,45 @@ $psExe  = (Get-Process -Id $PID).Path
 # a copy on other ports (testing) keeps its own info file, so the real Helper never opens the test copy's window
 $infoF  = Join-Path ([IO.Path]::GetTempPath()) $(if ($Port -eq 47321) { 'showxpress_helper_gui.json' } else { "showxpress_helper_gui_$Port.json" })
 $idleMax = 300   # seconds without the window checking in -> quit
+
+# ---- a window left from an earlier start (user 2026-11-24: after an update the old window stayed open with
+#      "this window can be closed"). This server has only just started, so any SX Studio window already open belongs
+#      to a server that's gone - it can't work any more. It's closed before the new one opens. Found like the taskbar
+#      code: an app window titled exactly "SX Studio" (a normal Edge window has " - Microsoft Edge" after the title)
+function Close-OldWindows {
+  if ($onMac -or $TestRoot -or $Port -ne 47321) { return }
+  try {
+    if (-not ('SxOldWin' -as [type])) {
+      Add-Type -TypeDefinition @'
+using System; using System.Collections.Generic; using System.Runtime.InteropServices; using System.Text;
+public static class SxOldWin {
+  delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc f, IntPtr l);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  // asks every app window titled exactly <title> to close, then waits up to <ms> for them to go; returns how many
+  public static int Close(string title, int ms) {
+    List<IntPtr> found = new List<IntPtr>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      StringBuilder c = new StringBuilder(64); GetClassName(h, c, 64);
+      if (c.ToString() != "Chrome_WidgetWin_1") return true;
+      StringBuilder t = new StringBuilder(256); GetWindowText(h, t, 256);
+      if (t.ToString() == title) found.Add(h);
+      return true; }, IntPtr.Zero);
+    foreach (IntPtr h in found) PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);   // WM_CLOSE
+    for (int w = 0; w < ms; w += 50) { if (!found.Exists(h => IsWindow(h))) break; System.Threading.Thread.Sleep(50); }
+    return found.Count;
+  }
+}
+'@
+    }
+    [void][SxOldWin]::Close('SX Studio', 1500)
+  } catch {}
+}
 
 function Open-AppWindow($url) {
   if ($NoBrowser) { return }
@@ -570,7 +609,7 @@ function Invoke-Action([string]$path, $body) {
 # earlier one. The Helper doesn't quit while something is queued.
 $queueable = @{
   '/api/apply' = 'Aim Movers'; '/api/home' = 'Aim Movers (reset)'; '/api/aim/install' = 'ROOM buttons on the SETUP page'
-  '/api/color/apply' = "Tonight's Color"; '/api/skip/apply' = 'Skip Flash'; '/api/rig/apply' = "Tonight's Rig"
+  '/api/color/apply' = "Tonight's Color"; '/api/skip/apply' = 'Strobe'; '/api/rig/apply' = "Tonight's Rig"
   '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
   '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive'
   '/api/gdrive/import' = 'Import from Google Drive'
@@ -776,6 +815,8 @@ function Get-Settings {
   $s.tabHidden = @(@($s.tabHidden) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
   $s.reopen = [bool]$s.reopen; $s.autoUpd = [bool]$s.autoUpd; $s.driveFolder = "$($s.driveFolder)"
   $s.tabNames = Get-TabNames $s.tabNames; $s.playerLayout = Get-PlayerLayout $s.playerLayout
+  # the Skip Flash tab is called Strobe now (user 2026-11-24): their own name for it, Strobes, isn't needed any more
+  if ($s.tabNames.Contains('skip') -and $s.tabNames['skip'] -match '^\s*strobes?\s*$') { $s.tabNames.Remove('skip') }
   $s
 }
 function Save-Settings($s) {
@@ -1343,7 +1384,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
  <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
 </defs></svg>
 <header><div class="brandmk" id="logo" title="Home"><img class="mk" data-img="mark" alt="SX"><h1 id="ttl">STUDIO</h1></div>
-  <nav class="tabs"><button class="tgh" id="tghome">Home</button><div class="tg" data-g="gig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Before the gig</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rt">Rig Test</button><button data-tab="aim">Aim Movers</button><button data-tab="color">Tonight's Color</button><button data-tab="pre">Pre-show Check</button></div></div><div class="tg" data-g="live"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Live</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="lab">SX Player</button><button data-tab="auto">Auto Show</button></div></div><div class="tg" data-g="rig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Rig &amp; Control</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rig">Tonight's Rig</button><button data-tab="skip">Skip Flash</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button></div></div><div class="tg" data-g="edit"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Editors</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button><button data-tab="health">Health Check</button></div></div></nav>
+  <nav class="tabs"><button class="tgh" id="tghome">Home</button><div class="tg" data-g="gig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Before the gig</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rt">Rig Test</button><button data-tab="aim">Aim Movers</button><button data-tab="color">Tonight's Color</button><button data-tab="pre">Pre-show Check</button></div></div><div class="tg" data-g="live"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Live</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="lab">SX Player</button><button data-tab="auto">Auto Show</button></div></div><div class="tg" data-g="rig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Rig &amp; Control</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rig">Tonight's Rig</button><button data-tab="skip">Strobe</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button></div></div><div class="tg" data-g="edit"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Editors</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button><button data-tab="health">Health Check</button></div></div></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
@@ -1354,7 +1395,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
    <div id="brand" class="brand"><div class="brandtxt">XSV<span>PRODUCTIONS</span></div></div></div></section>
   <div class="hgrp"><div class="hsec">Before the gig</div></div>
   <div class="htiles hgrp">
-   <button class="ht" data-go="rt"><i class="st">STEP 01</i><b>Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Skip Flash</span></button>
+   <button class="ht" data-go="rt"><i class="st">STEP 01</i><b>Rig Test</b><span>Which mover hangs where &rarr; 2D view, Tonight&rsquo;s Rig and Strobe</span></button>
    <button class="ht" data-go="aim"><i class="st">STEP 02</i><b>Aim Movers</b><span>Fit the dance floor and AROUND ROOM to tonight&rsquo;s venue</span></button>
    <button class="ht" data-go="color"><i class="st">STEP 03</i><b>Tonight&rsquo;s Color</b><span>The decor colour on the movers and uplights</span></button>
    <button class="ht" data-go="pre"><i class="st">STEP 04</i><b>Pre-show Check</b><span>One look before the guests arrive</span></button>
@@ -1367,7 +1408,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
   <div class="hgrp"><div class="hsec">Show tools</div></div>
   <div class="htiles hgrp">
    <button class="ht" data-go="rig"><i>RIG</i><b>Tonight&rsquo;s Rig</b><span>Which heads are hung tonight</span></button>
-   <button class="ht" data-go="skip"><i>RIG</i><b>Skip Flash</b><span>The heads SKIP FLASH uses</span></button>
+   <button class="ht" data-go="skip"><i>RIG</i><b>Strobe</b><span>The heads the SKIP FLASH button uses</span></button>
    <button class="ht" data-go="apc"><i>CONTROL</i><b>APC mini</b><span>Move pads and pick their colours</span></button>
    <button class="ht" data-go="speed"><i>CONTROL</i><b>Speed Faders</b><span>Which fader drives which button</span></button>
    <button class="ht" data-go="health"><i>SHOW</i><b>Health Check</b><span>Find and fix problems in the show</span></button>
@@ -1463,7 +1504,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
     <div id="rtlegend" class="legend2"></div>
     <div id="rtmap" class="rtmap"></div>
     <div class="row" style="margin-top:12px"><label class="link"><input id="rtextra" type="checkbox"> Bigger event: 2 extra towers (top middle and bottom middle)</label><div class="grow"></div>
-      <label class="link"><input id="rtrig" type="checkbox" checked> Also update Tonight's Rig and Skip Flash (heads not on a truss = not hung)</label></div>
+      <label class="link"><input id="rtrig" type="checkbox" checked> Also update Tonight's Rig and Strobe (heads not on a truss = not hung)</label></div>
   </section>
  </div>
 
@@ -1504,7 +1545,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
 
  <div class="view" id="v-skip">
   <section class="card">
-    <div class="row"><div class="grow"><h2>Skip Flash heads</h2>
+    <div class="row"><div class="grow"><h2>Strobe heads</h2>
       <p class="sub" style="margin-bottom:0">Tap the movers that are set up tonight. <b>SKIP FLASH</b> will only flash those, so the chase has no dark gaps.</p></div>
       <span id="skstate" class="state ok" style="display:none"></span><button id="skrefresh">&#8635; Refresh</button></div>
     <div id="skerr" class="warnbox"></div>
@@ -1845,7 +1886,7 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
  updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();updScene();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
- catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — this window can be closed.';return;}
+ catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — opening the new version…';return;}
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
@@ -1875,7 +1916,7 @@ document.addEventListener('keydown',e=>{const g=document.querySelector('.tg.open
 $('tghome').onclick=()=>setTab('home');
 $('logo').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
-// ---------------- Skip Flash heads
+// ---------------- Strobe (the SKIP FLASH heads)
 let S=null,sel=new Set();
 const saved=()=>new Set(S&&S.ok?S.heads.filter(h=>h.on).map(h=>h.id):[]);
 function dirty(){if(!S||!S.ok)return false;const s=saved();return s.size!==sel.size||[...sel].some(i=>!s.has(i));}
@@ -3534,7 +3575,7 @@ else{setTab(location.hash.slice(1)||'home');draw();load();poll();loadSet().then(
 </script></body></html>
 '@
 
-if (-not $NoBrowser) { Open-AppWindow $url }
+if (-not $NoBrowser) { Close-OldWindows; Open-AppWindow $url }
 $last = Get-Date
 try {
   while ($l.IsListening) {

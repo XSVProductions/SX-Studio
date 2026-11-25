@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:sx_api/sx_api.dart';
 
+import '../app_state.dart';
 import '../screens/pair/pair_screen.dart';
 import '../theme.dart';
 
@@ -80,6 +81,16 @@ Future<SxClient> boot() async {
   );
   if (client.token.isNotEmpty && await _keyWorks(SxClient(client.base, token: client.token))) return client;
 
+  // The pairing screen comes before the app, so it picks this device's
+  // theme itself, the same way main does.
+  final mode = ThemeMode.values.asNameMap()[here.queryParameters['theme']] ?? await loadThemeMode();
+  Sx.use(
+    light: switch (mode) {
+      ThemeMode.light => true,
+      ThemeMode.dark => false,
+      ThemeMode.system => WidgetsBinding.instance.platformDispatcher.platformBrightness == Brightness.light,
+    },
+  );
   final paired = Completer<String>();
   runApp(
     MaterialApp(

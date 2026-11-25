@@ -72,6 +72,19 @@ class _MoveScreenState extends State<MoveScreen> {
     _loadScenes();
   }
 
+  /// Another tab asked to open a movement here (the SX Player's "Edit
+  /// movement"): like tapping it in the list, so unsaved edits are asked about
+  /// first. Port of the old `setTab('move'); mvOpen(f)`.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final f = AppScope.of(context).takeFile('move');
+    if (f == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _open(f);
+    });
+  }
+
   @override
   void dispose() {
     _app.removeListener(_tabChanged);
@@ -387,7 +400,7 @@ class _MoveScreenState extends State<MoveScreen> {
     if (!yes) return (go: false, reo: false);
     ToolResult r;
     try {
-      r = await _app.client.run('/api/sx/close', {'live': true});
+      r = await _app.client.sxClose(live: true);
     } on ApiException catch (e) {
       r = ToolResult.failed(e.message);
     }
@@ -547,15 +560,19 @@ class _MoveScreenState extends State<MoveScreen> {
             ? '${moveWhat(_w.diff(d))}. Only that is changed in the file.'
             : 'Matches the show.',
         actions: [
-          TextButton(onPressed: dirty ? _undo : null, child: Text(narrow ? 'Undo' : 'Undo changes')),
-          FilledButton(onPressed: dirty ? _save : null, child: Text(narrow ? 'Save' : 'Save movement')),
+          OutlinedButton(onPressed: dirty ? _undo : null, child: const Text('Undo changes')),
+          FilledButton(onPressed: dirty ? _save : null, child: const Text('Save movement')),
         ],
       ),
       children: [
         SxCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [_header(d, dirty, narrow), ErrorBox(d == null ? _listErr : _err), if (d == null) ..._picker(narrow) else ..._editor(d, narrow)],
+            children: [
+              _header(d, dirty, narrow),
+              ErrorBox(d == null && _err.isEmpty ? _listErr : _err),
+              if (d == null) ..._picker(narrow) else ..._editor(d, narrow),
+            ],
           ),
         ),
         if (d != null && (_bk?.backups.isNotEmpty ?? false)) _backups(_bk!, app.sxOpen, narrow),

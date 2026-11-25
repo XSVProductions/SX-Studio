@@ -589,7 +589,7 @@ void main() {
         if (d.readonly.isNotEmpty || old.containsKey('${d.file}\tERR')) continue;
         final st = MoveState.of(d);
         for (final t in sampleTimes(d)) {
-          final f = moveFrame(d, st, t);
+          final f = moveFrame(d, st, t, player: true);
           final mine = [
             for (final k in f.keys.toList()..sort())
               if (f[k] != 0) '$k:${f[k]}',

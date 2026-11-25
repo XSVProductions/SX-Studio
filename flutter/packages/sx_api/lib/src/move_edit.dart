@@ -676,13 +676,19 @@ int _c16(double v) {
   return r.clamp(0, moveMax).toInt();
 }
 
+/// JavaScript's `Math.round` (halves up), clamped to 16 bits. Port of the old
+/// page's `mvClamp`. A value that isn't a number goes out as 0, like `NaN >> 8`.
+int _page16(double v) => v.isNaN ? 0 : (v.isInfinite ? (v > 0 ? moveMax : 0) : v.round().clamp(0, moveMax));
+
 /// DMX values of the whole movement [el] ms after it starts: 1-based channel to
 /// value. Only what plays is in it, and only patched heads. Port of `mvFrame`
 /// (the page) and `Eval` (player.ps1).
 ///
-/// Rounding follows the player: halves go to the even number. The old page
-/// rounded halves up, which differs by one 16-bit step at an exact half.
-Map<int, int> moveFrame(MoveDoc d, MoveState s, double el) {
+/// Rounding follows the old page, which is what its preview sent to the
+/// lights: halves go up. With [player] it follows the SX Player instead:
+/// halves go to the even number. The two differ by one 16-bit step at an exact half.
+Map<int, int> moveFrame(MoveDoc d, MoveState s, double el, {bool player = false}) {
+  final r16 = player ? _c16 : _page16;
   final out = <int, int>{};
   final ptI = d.secs.indexWhere((x) => x.name == movePtSection);
   final pt = ptI >= 0 ? s.secs[ptI] : null;
@@ -699,7 +705,7 @@ Map<int, int> moveFrame(MoveDoc d, MoveState s, double el) {
 
     if (pt != null && pt.sel != 0 && pt.pts.isNotEmpty) {
       final q = moveHeadXY(h, s.heads[hi], c!, movePathAt(pt.pts, pt.tr, movePhase(pt, h.k, el)));
-      final pv = _c16(q.$1), tv = _c16(q.$2);
+      final pv = r16(q.$1), tv = r16(q.$2);
       put('pan', pv >> 8);
       put('upan', pv & 255);
       put('tilt', tv >> 8);
@@ -708,7 +714,7 @@ Map<int, int> moveFrame(MoveDoc d, MoveState s, double el) {
     for (final (i, o) in d.secs.indexed) {
       final w = s.secs[i];
       if (i == ptI || w.sel == 0 || w.pts.isEmpty) continue;
-      put(o.name.trim().toLowerCase(), _c16(moveValAt(moveSorted(w.pts), w.tr, _frac(movePhase(w, h.k, el)) * moveMax)) >> 8);
+      put(o.name.trim().toLowerCase(), r16(moveValAt(moveSorted(w.pts), w.tr, _frac(movePhase(w, h.k, el)) * moveMax)) >> 8);
     }
   }
   return out;

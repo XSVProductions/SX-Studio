@@ -1,9 +1,20 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../color/on_the_lights.dart';
+import '../lab/lab_board.dart' show nextButtonId, nextPageId;
+import 'look_play.dart';
+
+/// Where the Looks settings are kept between runs (the old page's localStorage key).
+const lookPrefsKey = 'sxh_looks';
 
 /// A light's color from the look: data, not a theme color.
 Color _hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
@@ -12,7 +23,8 @@ Color _hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
 ///
 /// The steps are worked out here with `buildLook`, the engine only checks
 /// them and writes the new file. No scene the show has and no live button is
-/// ever changed.
+/// ever changed. The look plays in the "How it looks" box while the tab is on
+/// show, and on the real lights on request.
 class LookScreen extends StatefulWidget {
   const LookScreen(BuildContext _, {super.key});
 
@@ -25,25 +37,48 @@ class _LookScreenState extends State<LookScreen> {
   var _error = '';
   var _t = LookTemplate.contrast;
 
-  /// Every template's settings. They stay while the app runs.
-  final _o = LookOptions();
+  /// Every template's settings, kept between runs under [lookPrefsKey].
+  var _o = LookOptions();
+  var _prefsRead = false;
   final _name = TextEditingController();
 
   /// True once the user typed a name, so the automatic one stops following the settings.
   var _nameSet = false;
 
   /// The last look made, for the "Made" card.
-  String? _made;
-  var _madeBeat = false;
+  ({String name, String file, bool beat})? _made;
+
+  /// The SX Player layout, for "Put it on this SX Player page", and the page picked ('' is a new page).
+  PlayerLayout? _layout;
+  var _page = '';
+
+  /// What happened on the last "Put it on this SX Player page": the text, and the page it went on.
+  ({String text, String page})? _pageMsg;
+
+  /// When the look on show started, for its steps. A new template starts it again.
+  var _t0 = DateTime.now();
+
+  /// The look on show, for the lights.
+  BuiltLook? _cur;
+
+  /// Wakes the "How it looks" box at the next step.
+  Timer? _anim;
+
+  late final OnTheLights _lights = OnTheLights(AppScope.read(context), raw: true, tick: const Duration(milliseconds: 40), frame: _frame);
 
   @override
   void initState() {
     super.initState();
+    _lights.addListener(_relight);
     _load();
   }
 
+  void _relight() => setState(() {});
+
   @override
   void dispose() {
+    _anim?.cancel();
+    _lights.dispose();
     _name.dispose();
     super.dispose();
   }
@@ -54,6 +89,17 @@ class _LookScreenState extends State<LookScreen> {
       _rig = null;
       _error = '';
     });
+    if (!_prefsRead) {
+      _prefsRead = true;
+      try {
+        final kept = (await SharedPreferences.getInstance()).getString(lookPrefsKey);
+        final j = kept == null ? null : jsonDecode(kept);
+        if (j is Map) _o = LookOptions.fromJson(j.cast<String, Object?>());
+      } on FormatException {
+        // a broken entry starts from the defaults, as the old page did
+      }
+      if (!mounted) return;
+    }
     try {
       final r = await app.client.looks();
       if (!mounted) return;
@@ -67,11 +113,103 @@ class _LookScreenState extends State<LookScreen> {
     }
   }
 
-  /// Rebuilds after a settings change. The name follows unless the user typed one.
-  void _changed(VoidCallback f) => setState(() {
-    f();
-    _syncName();
-  });
+  /// Rebuilds after a settings change and keeps the settings. The name
+  /// follows unless the user typed one.
+  void _changed(VoidCallback f) {
+    setState(() {
+      f();
+      _syncName();
+    });
+    final kept = jsonEncode(_o.toJson());
+    unawaited(SharedPreferences.getInstance().then((p) => p.setString(lookPrefsKey, kept)));
+  }
+
+  /// The look's channels now, for the lights. Port of `lkFrame`.
+  LiveFrame _frame() {
+    final rig = _rig, l = _cur;
+    if (rig == null || l == null || l.err.isNotEmpty || l.steps.isEmpty) return const {};
+    final q = lookAt(l, DateTime.now().difference(_t0).inMilliseconds);
+    return lookFrame(rig, l, q.at, q.frac);
+  }
+
+  /// "Show on the lights". Port of `lkPvGo`.
+  void _lightsOn() => _lights.go(context, title: 'Close ShowXpress to see the look on the lights?', again: 'Show on the lights', onLost: _lightsLost);
+
+  void _lightsLost(String error) => showReport(context, 'Not on the lights', '', error: '$error${_lights.reopen ? OnTheLights.reopenNote : ''}');
+
+  /// Shows the step on screen until the next one is due. Only while the tab is
+  /// on show; at most every 50 ms, so a fast strobe skips steps on screen.
+  void _animate(BuiltLook? l, bool onShow) {
+    _anim?.cancel();
+    _anim = null;
+    if (!onShow || l == null || l.err.isNotEmpty || (l.steps.length < 2 && !l.beat)) return;
+    final q = lookAt(l, DateTime.now().difference(_t0).inMilliseconds);
+    _anim = Timer(Duration(milliseconds: math.max(50, q.left)), () {
+      if (mounted) setState(() {});
+    });
+  }
+
+  /// "Put it on this SX Player page": a button for the look made, with BPM
+  /// and flash for a beat look, on the page picked or on a new LOOKS page.
+  /// Port of the old `lkaddpg` click.
+  Future<void> _toPlayer() async {
+    final m = _made;
+    if (m == null) return;
+    final client = AppScope.read(context).client;
+    void say(String text, [String page = '']) => setState(() => _pageMsg = (text: text, page: page));
+    PlayerLayout? lay;
+    try {
+      lay = await client.playerLayout();
+    } on ApiException {
+      lay = null;
+    }
+    if (!mounted) return;
+    if (lay == null) return say("It wasn't saved. Try again.");
+    final custom = [...lay.custom];
+    var pages = lay.pages;
+    var i = custom.indexWhere((p) => p.id == _page);
+    if (i < 0) {
+      if (custom.length >= 40) return say('The player already has 40 pages of its own. Pick one of them.');
+      final id = nextPageId(lay);
+      custom.add(PlayerPage(id: id, name: 'LOOKS'));
+      if (pages.isNotEmpty) pages = [...pages, id];
+      i = custom.length - 1;
+    }
+    final p = custom[i];
+    if (p.buttons.length >= 64) return say('That page is full (64 buttons).');
+    custom[i] = p.copyWith(
+      buttons: [
+        ...p.buttons,
+        PlayerButton(id: nextButtonId(p), title: m.name.length > 40 ? m.name.substring(0, 40) : m.name, file: m.file, bpm: m.beat, flash: m.beat),
+      ],
+    );
+    PlayerLayout? saved;
+    try {
+      saved = await client.savePlayerLayout(lay.copyWith(custom: custom, pages: pages));
+    } on ApiException {
+      saved = null;
+    }
+    if (!mounted) return;
+    if (saved == null) return say("It wasn't saved. Try again.");
+    setState(() {
+      _layout = saved;
+      _page = saved!.custom.any((c) => c.id == _page) ? _page : (saved.custom.isEmpty ? '' : saved.custom.first.id);
+      _pageMsg = (text: 'On the SX Player page ', page: p.name);
+    });
+  }
+
+  Future<void> _loadLayout() async {
+    try {
+      final l = await AppScope.read(context).client.playerLayout();
+      if (!mounted) return;
+      setState(() {
+        _layout = l;
+        _page = l.custom.isEmpty ? '' : l.custom.first.id;
+      });
+    } on ApiException {
+      // the card offers a new page only
+    }
+  }
 
   void _syncName() {
     final rig = _rig;
@@ -85,6 +223,8 @@ class _LookScreenState extends State<LookScreen> {
     final app = AppScope.of(context);
     final rig = _rig;
     final look = rig == null ? null : buildLook(rig, _t, _o);
+    _cur = look;
+    _animate(look, app.tab == 'look');
     final n = _clean, taken = rig != null && lookNameTaken(n, rig.scenes);
     final canMake = rig != null && look != null && look.err.isEmpty && n.isNotEmpty && !taken;
 
@@ -103,13 +243,16 @@ class _LookScreenState extends State<LookScreen> {
                 ? () => runSave(
                     context,
                     () => app.client.looksMake(look.draft('$n.scex')),
-                    after: () async => setState(() {
-                      rig.scenes.add('$n.scex');
-                      _made = n;
-                      _madeBeat = look.beat;
-                      _nameSet = false;
-                      _syncName();
-                    }),
+                    after: () async {
+                      setState(() {
+                        rig.scenes.add('$n.scex');
+                        _made = (name: n, file: '$n.scex', beat: look.beat);
+                        _pageMsg = null;
+                        _nameSet = false;
+                        _syncName();
+                      });
+                      await _loadLayout();
+                    },
                   )
                 : null,
             child: const Text('Make the scene'),
@@ -124,8 +267,8 @@ class _LookScreenState extends State<LookScreen> {
               SxHeader(
                 'One-click Looks',
                 sub:
-                    "Make a new scene from a template. It's always a new scene file: no scene you have is changed, and ShowXpress's live board "
-                    "isn't touched. Put the look on a button in ShowXpress.",
+                    "Make a new scene from a template and see it on the lights first. It's always a new scene file: no scene you have is changed, "
+                    "and ShowXpress's live board isn't touched. Put the look on a button in ShowXpress, or on one of the SX Player's own pages.",
                 actions: [OutlinedButton(onPressed: _load, child: const Text('Reload'))],
               ),
               ErrorBox(_error),
@@ -153,7 +296,8 @@ class _LookScreenState extends State<LookScreen> {
                     ],
                   );
                 }(),
-                const SizedBox(height: 16),
+                _lightsRow(),
+                const SizedBox(height: 14),
                 Wrap(
                   spacing: 10,
                   runSpacing: 8,
@@ -185,26 +329,7 @@ class _LookScreenState extends State<LookScreen> {
             ],
           ),
         ),
-        if (_made != null)
-          SxCard(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Icon(Icons.check, size: 18, color: Sx.green),
-                ),
-                Expanded(
-                  child: SxHeader(
-                    'Made: $_made',
-                    sub:
-                        "A new scene in the show. To play it, add a button for it on ShowXpress's live board (if ShowXpress is open, open the show "
-                        'again so it lists the new scene).${_madeBeat ? ' Set the button to BPM with flash, so it flashes on every beat.' : ''}',
-                  ),
-                ),
-              ],
-            ),
-          ),
+        if (_made case final m?) _madeCard(m),
       ],
     );
   }
@@ -218,6 +343,7 @@ class _LookScreenState extends State<LookScreen> {
           ? null
           : () => _changed(() {
               _t = t;
+              _t0 = DateTime.now();
               _nameSet = false;
             }),
       borderRadius: BorderRadius.circular(12),
@@ -358,7 +484,8 @@ class _LookScreenState extends State<LookScreen> {
             ),
             if (o.beat)
               Text(
-                'One short flash, then dark. Set its button to BPM with flash ("run from step 1") in ShowXpress and it flashes on every beat.',
+                'One short flash, then dark. Set its button to BPM with flash ("run from step 1") in ShowXpress, or put it on an SX Player page '
+                'from here, which does that for you, and it flashes on every beat.',
                 style: Sx.sub.copyWith(fontSize: 12.5),
               )
             else ...[
@@ -472,7 +599,7 @@ class _LookScreenState extends State<LookScreen> {
             look.err.isNotEmpty
                 ? ''
                 : look.beat
-                ? 'one flash, then dark till the next beat'
+                ? 'one flash, then dark till the next beat (shown at 120 BPM)'
                 : n == 1
                 ? 'one look that holds'
                 : '$n steps, ${(look.seconds * 100).round() / 100} s round',
@@ -495,53 +622,171 @@ class _LookScreenState extends State<LookScreen> {
     );
   }
 
-  /// The look as a table: a row per step, a dot per head in its color. It
-  /// stands still, unlike the old page's animation, so nothing repaints.
+  /// The old `.lkvis`: a row of dots per group of heads, each in its color
+  /// at the step on show. The dots change once per step, see [_animate].
   Widget _steps(List<LookGroup> groups, BuiltLook look) {
-    const most = 16;
-    final shown = look.steps.take(most).toList();
+    final s = look.steps.isEmpty ? null : look.steps[lookAt(look, DateTime.now().difference(_t0).inMilliseconds).at];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 10,
       children: [
-        for (final (i, s) in shown.indexed)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 4),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 58,
-                  child: Text('${i + 1}  ${s.len / 100} s', style: TextStyle(fontSize: 11.5, color: Sx.dim)),
-                ),
-                Expanded(
-                  child: Wrap(
-                    spacing: 3,
-                    runSpacing: 3,
-                    children: [
-                      for (final (gi, g) in groups.indexed) ...[
-                        if (gi > 0) const SizedBox(width: 8),
-                        for (final h in g.heads) _dot(s.show[h.id], prism: look.prism),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
+        for (final g in groups)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(g.label, style: TextStyle(fontSize: 11, color: Sx.dim)),
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final h in g.heads)
+                    Tooltip(
+                      message: h.name,
+                      child: _dot(s?.show[h.id], prism: look.prism),
+                    ),
+                ],
+              ),
+            ],
           ),
-        if (look.steps.length > most) Text('and ${look.steps.length - most} more steps', style: Sx.sub.copyWith(fontSize: 12)),
       ],
     );
   }
 
-  Widget _dot(String? hex, {required bool prism}) => Container(
-    width: 12,
-    height: 12,
-    decoration: BoxDecoration(
-      color: hex == null ? Sx.well : _hexColor(hex),
-      shape: prism ? BoxShape.rectangle : BoxShape.circle,
-      border: Border.all(color: Sx.line2),
-    ),
-  );
+  /// One head: dark, lit in its color with a glow, or a prism.
+  Widget _dot(String? hex, {required bool prism}) {
+    final lit = hex == null ? null : _hexColor(hex);
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: lit ?? Sx.panel,
+        border: Border.all(color: Sx.line2),
+        // the old page's prism: white and pale blue and violet facets, still
+        gradient: prism ? SweepGradient(colors: [for (final c in _facets) _hexColor(c)]) : null,
+        boxShadow: lit == null || prism ? null : [BoxShadow(color: lit, blurRadius: 12)],
+      ),
+    );
+  }
+
+  static const _facets = ['ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff'];
+
+  /// The old `.sepv` "On the lights" row.
+  Widget _lightsRow() {
+    final l = _lights, on = l.on;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Sx.panel,
+        border: Border.all(color: on ? Sx.green.withValues(alpha: .5) : Sx.line),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.adjust, size: 15, color: Sx.text),
+              const SizedBox(width: 5),
+              Text(
+                'On the lights',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Sx.text),
+              ),
+            ],
+          ),
+          if (l.busy.isNotEmpty)
+            Text(l.busy, style: TextStyle(fontSize: 12.5, color: Sx.amber))
+          else if (!on)
+            Text(
+              'See the look on the rig before you make it. ShowXpress is closed while this runs; nothing is written until you press Make.',
+              style: Sx.sub.copyWith(fontSize: 12.5),
+            ),
+          if (on) ...[OutputTag(l), ReopenBox(l)],
+          if (on)
+            MiniButton(
+              'Stop',
+              icon: Icons.stop,
+              onPressed: l.busy.isEmpty ? () => l.stop(reopen: l.reopen) : null,
+            )
+          else
+            MiniButton('Show on the lights', onPressed: l.busy.isEmpty ? _lightsOn : null),
+        ],
+      ),
+    );
+  }
+
+  /// "Made": what to do with the new scene. Port of `lkDoneDraw`.
+  Widget _madeCard(({String name, String file, bool beat}) m) {
+    final custom = _layout?.custom ?? const <PlayerPage>[];
+    final msg = _pageMsg;
+    return SxCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Icon(Icons.check, size: 18, color: Sx.green),
+              ),
+              Expanded(
+                child: SxHeader(
+                  'Made: ${m.name}',
+                  sub:
+                      "A new scene in the show. To play it, add a button for it on ShowXpress's live board (if ShowXpress is open, open the show "
+                      "again so it lists the new scene), or put it on one of the SX Player's own pages here"
+                      "${m.beat ? ', where it gets BPM + flash, so it flashes on every beat' : ''}.",
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              _menu<String>(
+                [for (final p in custom) p.id, ''],
+                custom.any((p) => p.id == _page) ? _page : '',
+                (id) => id.isEmpty ? '+ a new page: LOOKS' : custom.firstWhere((p) => p.id == id).name,
+                (id) => setState(() => _page = id),
+                width: 240,
+              ),
+              OutlinedButton(onPressed: _toPlayer, child: const Text('Put it on this SX Player page')),
+              OutlinedButton(onPressed: () => AppScope.read(context).openFile('scene', m.file), child: const Text('Change it in the Scene Editor')),
+            ],
+          ),
+          if (msg != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: msg.page.isEmpty
+                  ? Text(msg.text, style: TextStyle(fontSize: 13, color: Sx.amber))
+                  : Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Icon(Icons.check, size: 15, color: Sx.green),
+                        const SizedBox(width: 4),
+                        Text(msg.text, style: Sx.sub),
+                        Text(
+                          msg.page,
+                          style: Sx.sub.copyWith(fontWeight: FontWeight.w700, color: Sx.text),
+                        ),
+                        Text('. ', style: Sx.sub),
+                        TextButton(onPressed: () => AppScope.read(context).go('lab'), child: const Text('Open the SX Player')),
+                      ],
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
 
   // ---------------------------------------------------------------- small pieces
 

@@ -8,6 +8,7 @@ import 'package:sx_api/sx_api.dart';
 import 'package:sx_studio/app_state.dart';
 import 'package:sx_studio/screens/color/color_screen.dart';
 import 'package:sx_studio/screens/color/color_wheel.dart';
+import 'package:sx_studio/screens/color/on_the_lights.dart';
 import 'package:sx_studio/theme.dart';
 
 const _preview = {
@@ -85,6 +86,100 @@ void main() {
     expect(find.text("This is tonight's colour already."), findsOneWidget);
     expect(app.dirtyTabs, isNot(contains('color')));
     app.dispose();
+  });
+
+  testWidgets('shows the color on the lights, follows a new pick, and stops before saving', (tester) async {
+    final calls = <(String, Object?)>[];
+    final preview = {
+      ..._preview,
+      'washFix': [
+        {
+          'name': 'UPLIGHT',
+          'addr': 100,
+          'chs': ['dimmer', 'red', 'green', 'blue', 'white', 'strobe'],
+        },
+      ],
+    };
+    final client = SxClient(
+      Uri.parse('http://engine'),
+      token: 't',
+      client: MockClient((req) async {
+        final body = req.body.isEmpty ? null : jsonDecode(req.body);
+        if (req.url.path != '/api/sx') calls.add((req.url.path, body));
+        return http.Response(
+          jsonEncode(switch (req.url.path) {
+            '/api/color' => preview,
+            '/api/live/start' => {
+              'ok': true,
+              'iface': 'FAKE',
+              'test': true,
+              'info': {
+                'heads': [
+                  {
+                    'id': '7',
+                    'is140': true,
+                    'addr': 10,
+                    'c': [30000, 20000],
+                    'look': [
+                      [5, 0],
+                      [6, 255],
+                      [7, 200],
+                    ],
+                    'dimI': 6,
+                    'shutI': 7,
+                  },
+                ],
+              },
+            },
+            '/api/live/out' || '/api/live/stop' || '/api/color/apply' => {'ok': true, 'out': '', 'error': ''},
+            _ => {'open': false},
+          }),
+          200,
+        );
+      }),
+    );
+    final app = AppState(client, tab: 'color');
+    await tester.binding.setSurfaceSize(const Size(1300, 1200));
+    await tester.pumpWidget(
+      AppScope(
+        state: app,
+        child: MaterialApp(
+          theme: sxTheme(),
+          home: Scaffold(body: Builder(builder: ColorScreen.new)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Show it on the lights'));
+    await tester.pumpAndSettle();
+    expect(calls.firstWhere((c) => c.$1 == '/api/live/start').$2, {'mode': 'floor', 'raw': false});
+    expect(find.text('Live on the lights'), findsOneWidget);
+    String out() => calls.where((c) => c.$1 == '/api/live/out').map((c) => (c.$2! as Map)['l'] as String).join(' ');
+    // the saved blush: White on the 140's wheel, the uplight mixed with its white LED, strobe at 0
+    expect(out().split(' '), containsAll(['z', 's:10:11:30000', 's:12:13:20000', 'b:15:1', 'b:16:255', 'b:17:200']));
+    expect(out().split(' '), containsAll(['b:100:244', 'b:101:255', 'b:102:0', 'b:103:137', 'b:104:222', 'b:105:0']));
+
+    calls.clear();
+    await tester.tap(find.text('Red').first);
+    await tester.pumpAndSettle();
+    expect(out().split(' '), containsAll(['b:15:5', 'b:100:255', 'b:103:0', 'b:104:0']));
+    expect(out(), isNot(contains('s:10'))); // only what changed goes out
+
+    calls.clear();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect([for (final c in calls) c.$1].where((p) => p != '/api/color').toList(), ['/api/live/stop', '/api/color/apply']);
+    expect(find.text('Show it on the lights'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    app.dispose();
+  });
+
+  test('the uplight mix for the lights matches the saved scene on the pinned colors', () {
+    const chs = ['dimmer', 'red', 'green', 'blue', 'white'];
+    expect(uplightValues('f4a6b8', chs), [(0, 244), (1, 255), (2, 0), (3, 137), (4, 222)]);
+    expect(uplightValues('f4a6b8', const ['red', 'green', 'blue', 'amber']), [(0, 255), (1, 173), (2, 192), (3, 0)]);
+    expect(OnTheLights.reopenNote, contains('Launch ShowXpress'));
   });
 
   test('wheel maths match the old page', () {

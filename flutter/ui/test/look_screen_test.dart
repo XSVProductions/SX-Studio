@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:sx_api/sx_api.dart';
 import 'package:sx_studio/app_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_studio/screens/look/look_screen.dart';
 import 'package:sx_studio/theme.dart';
 
@@ -46,20 +47,43 @@ LookRig _rig() => LookRig(
 
 void main() {
   late List<Object?> sent;
+  late List<(String, Object?)> calls;
   late AppState app;
+  const ok = {'ok': true, 'out': '', 'error': ''};
+
+  setUp(() => SharedPreferences.setMockInitialValues({}));
 
   Future<void> open(WidgetTester tester) async {
     sent = [];
+    calls = [];
+    var layout = <String, Object?>{
+      'pages': ['1'],
+      'custom': <Object?>[],
+    };
     final client = SxClient(
       Uri.parse('http://engine'),
       token: 't',
       client: MockClient((req) async {
-        if (req.url.path == '/api/looks') return http.Response(jsonEncode(_rig().toJson()), 200);
-        if (req.url.path == '/api/looks/make') {
-          sent.add(jsonDecode(req.body));
-          return http.Response(jsonEncode({'ok': true, 'out': '', 'error': ''}), 200);
-        }
-        return http.Response(jsonEncode({'open': false}), 200);
+        final body = req.body.isEmpty ? null : jsonDecode(req.body);
+        if (req.url.path != '/api/sx') calls.add((req.url.path, body));
+        if (req.url.path == '/api/settings/set') layout = ((body! as Map)['playerLayout'] as Map).cast();
+        return http.Response(
+          jsonEncode(switch (req.url.path) {
+            '/api/looks' => _rig().toJson(),
+            '/api/looks/make' => () {
+              sent.add(body);
+              return ok;
+            }(),
+            '/api/settings' || '/api/settings/set' => {
+              'ok': true,
+              'settings': {'playerLayout': layout},
+            },
+            '/api/live/start' => {'ok': true, 'iface': 'FAKE', 'test': true, 'info': <String, Object?>{}},
+            '/api/live/out' || '/api/live/stop' => ok,
+            _ => {'open': false},
+          }),
+          200,
+        );
       }),
     );
     app = AppState(client, tab: 'look');
@@ -110,6 +134,78 @@ void main() {
     await tester.pumpAndSettle();
     expect((sent.single! as Map)['name'], 'Wedding contrast.scex');
     await tester.pump(const Duration(seconds: 5));
+    app.dispose();
+  });
+
+  testWidgets('puts the look made on a new SX Player page, and opens it in the Scene Editor', (tester) async {
+    await open(tester);
+    await tester.enterText(find.byKey(const Key('look-name')), 'Wedding contrast');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Make the scene'));
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    expect(find.text('+ a new page: LOOKS'), findsOneWidget);
+
+    await tester.tap(find.text('Put it on this SX Player page'));
+    await tester.pumpAndSettle();
+    final saved = (calls.lastWhere((c) => c.$1 == '/api/settings/set').$2! as Map)['playerLayout'] as Map;
+    expect(saved['pages'], ['1', 'x1']);
+    expect(saved['custom'], [
+      {
+        'id': 'x1',
+        'name': 'LOOKS',
+        'swap': false,
+        'buttons': [
+          {'id': 'x1_b1', 'title': 'Wedding contrast', 'file': 'Wedding contrast.scex', 'fader': 0, 'bpm': false, 'flash': false, 'beats': 1, 'color': -1},
+        ],
+      },
+    ]);
+    expect(find.text('LOOKS'), findsWidgets);
+    expect(find.text('Open the SX Player'), findsOneWidget);
+
+    await tester.tap(find.text('Change it in the Scene Editor'));
+    await tester.pumpAndSettle();
+    expect(app.tab, 'scene');
+    app.dispose();
+  });
+
+  testWidgets('keeps its settings for next time', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      lookPrefsKey: jsonEncode({
+        'contrast': {
+          'pairs': [
+            ['Red', 'Green'],
+          ],
+        },
+      }),
+    });
+    await open(tester);
+    expect(find.text('CONTRAST RED GREEN'), findsOneWidget);
+
+    await tester.tap(find.text('Fade between steps (LED lights)'));
+    await tester.pumpAndSettle();
+    final kept = jsonDecode((await SharedPreferences.getInstance()).getString(lookPrefsKey)!) as Map;
+    expect((kept['contrast'] as Map)['fade'], true);
+    expect((kept['contrast'] as Map)['pairs'], [
+      ['Red', 'Green'],
+    ]);
+    app.dispose();
+  });
+
+  testWidgets('plays the look on the lights through the raw output, and stops', (tester) async {
+    await open(tester);
+    await tester.tap(find.text('Show on the lights'));
+    await tester.pumpAndSettle();
+    expect(calls.firstWhere((c) => c.$1 == '/api/live/start').$2, {'mode': 'floor', 'raw': true});
+    expect(find.text('TEST - no real output'), findsOneWidget);
+    final first = (calls.firstWhere((c) => c.$1 == '/api/live/out').$2! as Map)['l'] as String;
+    // both pars lit: red, green, blue and dimmer at addresses 1 and 5
+    expect(first.split(' '), containsAll(['z', 'b:1:255', 'b:4:255', 'b:5:0', 'b:8:255']));
+
+    await tester.tap(find.text('Stop'));
+    await tester.pumpAndSettle();
+    expect(calls.last.$1, '/api/live/stop');
+    expect(find.text('Show on the lights'), findsOneWidget);
     app.dispose();
   });
 }

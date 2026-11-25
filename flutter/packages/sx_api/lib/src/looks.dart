@@ -408,6 +408,72 @@ class PrismSetting {
 /// Every template's settings, as the user left them. A null time means the
 /// box was left empty, which counts as 1 second.
 class LookOptions {
+  LookOptions();
+
+  /// Settings kept from last time, in the old page's `sxh_looks` shape: per
+  /// template only the keys saved replace the defaults (the old `Object.assign`),
+  /// and a value of the wrong kind is ignored.
+  factory LookOptions.fromJson(Json j) {
+    final o = LookOptions();
+    Json part(String k) => j[k] is Map ? (j[k]! as Map).cast<String, Object?>() : const {};
+    num? time(Object? v, num? d) => v is num ? v : (v == '' ? null : d);
+    bool flag(Object? v, bool d) => v is bool ? v : d;
+    List<String>? names(Object? v) => v is List ? [for (final x in v) '$x'] : null;
+
+    final c = part('contrast');
+    if (c['pairs'] case final List ps) {
+      o.pairs
+        ..clear()
+        ..addAll([
+          for (final p in ps)
+            if (p is List && p.length == 2) ('${p[0]}', '${p[1]}'),
+        ]);
+    }
+    o.split = ContrastSplit.values.asNameMap()[c['split']] ?? o.split;
+    o.swap = flag(c['swap'], o.swap);
+    o.hold = time(c['hold'], o.hold);
+    o.fade = flag(c['fade'], o.fade);
+
+    final ch = part('chase');
+    if (names(ch['cols']) case final cols?) {
+      o.cols
+        ..clear()
+        ..addAll(cols);
+    }
+    o.pingPong = flag(ch['pp'], o.pingPong);
+    o.spread = flag(ch['spread'], o.spread);
+    o.chaseHold = time(ch['hold'], o.chaseHold);
+    o.chaseFade = flag(ch['fade'], o.chaseFade);
+
+    final st = part('strobe');
+    if (st['col'] is String) o.strobeColor = st['col']! as String;
+    if (st['mode'] case 'beat' || 'steady') o.beat = st['mode'] == 'beat';
+    o.strobeOn = time(st['on'], o.strobeOn);
+    o.strobeOff = time(st['off'], o.strobeOff);
+
+    final pr = part('prism');
+    if (pr['p'] case final List ps) {
+      o.prisms
+        ..clear()
+        ..addAll([
+          for (final p in ps.whereType<Map>()) PrismSetting(PrismMode.values.asNameMap()[p['m']] ?? PrismMode.off, p['s'] is num ? p['s']! as num : 50),
+        ]);
+    }
+    if (pr['zoom'] is num) o.zoom = pr['zoom']! as num;
+    if (pr['focus'] is num) o.focus = pr['focus']! as num;
+
+    final on = part('on');
+    for (final t in LookTemplate.values) {
+      if (on[t.name] case final Map m) {
+        o.on[t]!.addAll({
+          for (final e in m.entries)
+            if (e.value is bool) '${e.key}': e.value as bool,
+        });
+      }
+    }
+    return o;
+  }
+
   // contrast
   final pairs = [('Red', 'Blue'), ('Green', 'Magenta'), ('Yellow', 'Purple'), ('Cyan', 'Pink')];
   var split = ContrastSplit.alt;
@@ -437,6 +503,32 @@ class LookOptions {
   final on = {for (final t in LookTemplate.values) t: <String, bool>{}};
 
   static const rainbow = ['Red', 'Orange', 'Yellow', 'Green', 'Cyan', 'Blue', 'Purple', 'Magenta'];
+
+  /// The old page's `sxh_looks`: an empty time box is `''`.
+  Json toJson() => {
+    'on': {
+      for (final MapEntry(:key, :value) in on.entries)
+        if (value.isNotEmpty) key.name: value,
+    },
+    'contrast': {
+      'pairs': [
+        for (final p in pairs) [p.$1, p.$2],
+      ],
+      'split': split.name,
+      'swap': swap,
+      'hold': hold ?? '',
+      'fade': fade,
+    },
+    'chase': {'cols': cols, 'pp': pingPong, 'spread': spread, 'hold': chaseHold ?? '', 'fade': chaseFade},
+    'strobe': {'col': strobeColor, 'mode': beat ? 'beat' : 'steady', 'on': strobeOn ?? '', 'off': strobeOff ?? ''},
+    'prism': {
+      'p': [
+        for (final p in prisms) {'m': p.m.name, 's': p.s},
+      ],
+      'zoom': zoom,
+      'focus': focus,
+    },
+  };
 }
 
 /// The heads of one model, as the screen groups them.

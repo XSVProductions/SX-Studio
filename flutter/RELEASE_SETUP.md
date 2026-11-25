@@ -4,6 +4,8 @@ For the maintainer who publishes SX Studio releases, and for the coding agent he
 
 Releases are signed on the maintainer's own Windows computer with a key that never leaves it. GitHub builds and tests. It never signs.
 
+The Flutter app lives in the `flutter` folder of the repository. Every command below runs from that folder unless it says otherwise.
+
 ## 1. Tools (once)
 
 Install these, then open a new terminal:
@@ -20,7 +22,7 @@ GitHub: `gh auth login`. **Ask** the maintainer to sign in with an account that 
 
 ```
 gh repo clone XSVProductions/SX-Studio
-cd SX-Studio
+cd SX-Studio\flutter
 cd packages\sx_release; dart pub get; dart test; cd ..\..
 ```
 
@@ -67,11 +69,25 @@ If `setup` already exists, use `gh release upload setup SX-Studio-Setup.exe --cl
 
 New laptops get SX Studio from https://github.com/XSVProductions/SX-Studio/releases/download/setup/SX-Studio-Setup.exe. The stub is rebuilt only when the key changes or `release.json` gets a new `format`. Normal releases never touch it.
 
-## 4. Every release
+## 4. Switch the release tags over (once)
+
+Two workflows sit in `.github/workflows` at the top of the repository:
+
+- `build.yml` builds the PowerShell app and publishes a release on every `v*` tag.
+- `flutter.yml` tests and builds this app. It runs on `flutter-v*` tags and by hand (`gh workflow run flutter.yml`), and it never publishes.
+
+A release tagged `v...` is what every installed SX Studio updates to, so the two must never answer the same tag. When the Flutter app is ready to replace the PowerShell one, in one commit:
+
+1. In `build.yml`, change `tags: ['v*']` to `tags: ['legacy-v*']`.
+2. In `flutter.yml`, change `tags: ['flutter-v*']` to `tags: ['v*']`.
+
+Until then, try the whole release path without touching anyone's install: push a `flutter-v2.0.0` tag, let `flutter.yml` build, and stop before step 4 of the next section. `HANDOVER.md` has the checks to do before the switch.
+
+## 5. Every release
 
 Replace `2.0.1` below with the new version.
 
-1. Tag the commit and push the tag. GitHub then runs the tests and builds both installers (`.github/workflows/build.yml`):
+1. Tag the commit and push the tag. GitHub then runs the tests and builds both installers (`flutter.yml`):
 
    ```
    git tag v2.0.1
@@ -102,3 +118,5 @@ Replace `2.0.1` below with the new version.
 A release without a `.pkg` gives Macs no update. One without `release.json.sig` installs nowhere: the app and the setup program refuse anything not signed with the key from step 2.
 
 More detail is in `ui/windows/installer/README.md`: what the app checks, the silent install, and the switch from the PowerShell app.
+
+The first Flutter release is how every PowerShell install moves over. Its Update button installs the first `.exe` (Windows) or `.pkg` (Mac) of the newest release, without checking a signature. So that release needs both installers, and only those two as `.exe` and `.pkg`.

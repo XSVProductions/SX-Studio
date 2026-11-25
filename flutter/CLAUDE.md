@@ -4,6 +4,10 @@ A like-for-like port of SX Studio from PowerShell to Dart and Flutter. Same feat
 
 The old app is the answer key. A piece is done when the old tool and the new one give the same answer and leave the same bytes on disk.
 
+New here? Read `HANDOVER.md` first. It says what state the port is in, what was checked and what wasn't, and how the switch from the PowerShell app works.
+
+All paths below are relative to this `flutter` folder.
+
 ## Layout
 
 ```
@@ -14,14 +18,21 @@ ui                   The Flutter app. Talks to the engine only through SxClient.
 
 On the laptop the app starts the engine on its own isolate and connects to it on the loopback address. A phone loads the web build from the same engine. Both use the same `/api/...` routes, so a screen is written once.
 
-Around this folder (found by walking up from wherever you work):
+Around this folder:
 
 ```
-repo/                 The old app, pristine. Read only. Never edit.
-real-show/            The owner's real show folder. Read only. Never copy it into git.
-tools/pwsh/pwsh       PowerShell 7 for running the old tools.
-scratch/              Throwaway space.
+../src                The PowerShell app. Still the released version, and the answer key for this one.
+../tools              Its own tests.
+../windows, ../mac    Its installers.
 ```
+
+Until the Flutter app replaces it, a change to `../src` needs the same change here. `HANDOVER.md` says how.
+
+Three things the old-versus-new tests need, none of them in git:
+
+- **PowerShell.** `pwsh` or `powershell` on PATH, or `SX_PWSH` set to one.
+- **The old source.** Found by walking up to `../src`. `SX_OLD_SRC` points somewhere else.
+- **A real show folder.** Set `SX_SHOW` to one. The tests copy it and work on the copy. Never commit a show folder.
 
 ## Porting an area
 
@@ -29,7 +40,7 @@ scratch/              Throwaway space.
 
 1. `packages/sx_api/lib/src/speed.dart`. Wire types with `fromJson` and `toJson`, and the area's calls as an extension on `SxClient`. `toJson` must produce the old tool's JSON, key for key.
 2. `packages/sx_engine/lib/src/tools/speed.dart`. The tool. Plain functions that take a `ShowEnv`. A read returns a wire type. A write returns the text report. Refusals throw `ToolError` with the old message, word for word.
-3. `packages/sx_engine/lib/src/server/routes/speed.dart`. Routes. Same paths and same request bodies as the old server (`repo/src/df_aim_gui.ps1`), including its input checks.
+3. `packages/sx_engine/lib/src/server/routes/speed.dart`. Routes. Same paths and same request bodies as the old server (`../src/df_aim_gui.ps1`), including its input checks.
 4. `packages/sx_engine/test/parity/speed_parity_test.dart`. Old versus new on the real show.
 5. `ui/lib/screens/speed/speed_screen.dart`. The screen.
 
@@ -84,7 +95,7 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 
 - Screens talk to the engine through `SxClient` only. Never import `sx_engine` or `dart:io` under `ui/lib`, except `boot/boot_io.dart`.
 - Use the pieces in `ui/lib/widgets/sx_widgets.dart` (`ScreenBody`, `SxCard`, `SxHeader`, `SaveBar`, `GroupLabel`, `ErrorBox`, `MiniButton`, `Seg`, `runSave`, `showReport`, `sxGutter`) and the colors and text styles in `ui/lib/theme.dart`. If you need a new shared widget, put it in your own screen folder and say so in your report.
-- Keep the old app's look. Read your screen's CSS in `repo/src/df_aim_gui.ps1` and copy its sizes, radii, spacing and which color goes where. `FilledButton` is the old `.primary`, `OutlinedButton` the plain `button`, `MiniButton` the `.mini`, `Seg` the `.seg`, `Sx.tint(color)` the tinted boxes and pills.
+- Keep the old app's look. Read your screen's CSS in `../src/df_aim_gui.ps1` and copy its sizes, radii, spacing and which color goes where. `FilledButton` is the old `.primary`, `OutlinedButton` the plain `button`, `MiniButton` the `.mini`, `Seg` the `.seg`, `Sx.tint(color)` the tinted boxes and pills.
 - The app has the old dark theme and the old light theme, and Settings switches between them. So every color comes from `Sx`, and the `Sx` colors are getters. Never write `const` around one, never keep one in a field or a `static final`, never write a literal `Color(...)` or `Colors.x` (transparent is fine). Read them in `build` or `paint` each time. Screenshot your screen in both themes (`&theme=light`).
 - No symbol characters or emoji in text: no check marks, arrows, triangles, warning signs or gears. The fonts don't have them, and a phone on a venue network can't download a fallback font, so they show as empty boxes. Use an `Icon` from Material Icons, which ships with the app.
 - Nothing that repaints continuously. No `CircularProgressIndicator`, no pulsing, no shimmer. While loading, show a line of text.
@@ -97,14 +108,16 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 
 ## Looking at your work
 
+These are the Linux commands the port was built with. On Windows the same programs take the same arguments.
+
 ```
 # engine against your own copy of the show (never the original)
-cp -r "<workspace>/real-show/Awaaz Lightshow" /tmp/<you>/show
+cp -r "<show folder>" /tmp/<you>/show
 cd packages/sx_engine
 dart run bin/sx_engine.dart --show /tmp/<you>/show --port <your port> --token dev --web ../../ui/build/web --dmx-log /tmp/<you>/frame.txt
 
-# web build. One at a time on this machine, so take the lock.
-cd ui && flock /tmp/sx-flutter-build.lock flutter build web --release --no-web-resources-cdn
+# web build. One at a time when several agents share a machine.
+cd ui && flutter build web --release --no-web-resources-cdn
 
 # screenshot a tab
 chromium-browser --headless --no-sandbox --hide-scrollbars --window-size=1300,900 --virtual-time-budget=15000 \
@@ -116,17 +129,17 @@ Add `&theme=light` for the light theme, and `--window-size=390,844` for a phone.
 The old app runs here too, for comparing screens and API answers:
 
 ```
-<workspace>/tools/pwsh/pwsh -NoProfile -File <workspace>/repo/src/df_aim_gui.ps1 -TestRoot /tmp/<you>/oldshow -Port <port> -PhonePort <port> -NoBrowser
+pwsh -NoProfile -File ../src/df_aim_gui.ps1 -TestRoot /tmp/<you>/oldshow -Port <port> -PhonePort <port> -NoBrowser
 ```
 
 It prints nothing useful. The page is at `http://localhost:<port>/?t=<token>`, and the token is in the server's own variables (read the top of `df_aim_gui.ps1` to see where it is kept). In test mode it fakes ShowXpress with a marker file `_sx_open` in the show folder and writes DMX frames to `_dmx_frame.txt`.
 
 ## Working alongside other agents
 
-Several agents work at once, each in its own git worktree and branch.
+When several agents work at once, each takes its own git worktree and branch.
 
 - Edit only the files your brief gives you. The four barrel files listed in `.gitattributes` are the exception: add your lines there.
 - Need a change in a file you don't own? Don't make it. Describe it in your report.
-- Commit to your branch as you go, with `git add <your paths>`. Never `git add -A`. Never push. Never touch `repo/` or `real-show/`.
+- Commit to your branch as you go, with `git add <your paths>`. Never `git add -A`. Never push. Leave `../src` alone unless the change is meant for the PowerShell app too.
 - Format with `dart format .` (page width is set to 160 in `analysis_options.yaml`). `dart analyze` and `flutter analyze` must be clean.
-- The machine has 4 cores and 15 GB. Don't run builds in parallel, and don't start a build when a test run will answer the question.
+- Don't run builds in parallel, and don't start a build when a test run will answer the question.

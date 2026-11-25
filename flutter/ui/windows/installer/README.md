@@ -2,7 +2,7 @@
 
 ## A release
 
-On Windows with Flutter and Inno Setup 6 (jrsoftware.org), from the top of the repository:
+On Windows with Flutter and Inno Setup 6 (jrsoftware.org), from the `flutter` folder:
 
 ```
 powershell -ExecutionPolicy Bypass -File ui\tool\release.ps1 -Version 2.0.1 [-MacPkg <SX-Studio-mac-2.0.1.pkg>]
@@ -17,7 +17,7 @@ It builds the phone page (web), the Windows app (which takes the web build into 
 
 Upload them all (and the Mac `.pkg`) to a GitHub release of `XSVProductions/SX-Studio` tagged `v<version>`. The script prints the files and a `gh release create` line. A release holds exactly one `.exe`, the installer: the PowerShell SX Studio installs the first `.exe` of the newest release. A release without a `.pkg` gives Macs no update.
 
-Signing happens only here, on the maintainer's computer. Pushing a `v*` tag runs `.github/workflows/build.yml`: it tests and builds both installers and never signs or publishes. Take the Mac `.pkg` from its `mac` artifact (`gh run download --name mac`). First time: `RELEASE_SETUP.md` at the top of the repository.
+Signing happens only here, on the maintainer's computer. Pushing a release tag runs `.github/workflows/flutter.yml` at the top of the repository: it tests and builds both installers and never signs or publishes. Take the Mac `.pkg` from its `mac` artifact (`gh run download --name mac`). First time: `RELEASE_SETUP.md` in the `flutter` folder, which also says which tags the workflow answers.
 
 ## The release key
 

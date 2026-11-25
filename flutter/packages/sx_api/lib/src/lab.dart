@@ -2,7 +2,7 @@ import 'client.dart';
 import 'json.dart';
 import 'speed.dart';
 
-// SX Player (tab id `lab`). Shapes come from the old server, `repo/src/df_aim_gui.ps1`:
+// SX Player (tab id `lab`). Shapes come from the old server, `src/df_aim_gui.ps1`:
 // the `/api/lab...` routes, the SX PLAYER block (Invoke-Handoff, Step-PlayerWatch,
 // Set-PlayEvent), `player.ps1 -List` for the board and `[SxPlayer]::Status()` in
 // `player.ps1` for the status file the server passes on.

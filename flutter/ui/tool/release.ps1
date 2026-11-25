@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File ui\tool\release.ps1 -Stub        (the setup program, SX-Studio-Setup.exe)
 # Needs Flutter on PATH and Inno Setup 6 (jrsoftware.org). Signs with the release key in SX_RELEASE_KEY, otherwise
 # %USERPROFILE%\.sx-release\release_key. Never needs the code-signing certificate. -NoSign builds only (the build workflow).
-# Writes, in build\windows at the top of the repository:
+# Writes, in build\windows in the flutter folder:
 #   SX-Studio-windows-setup-<version>.exe   the installer
 #   release.json, release.json.sig          what the app's Update and the setup program trust
 #   SHA256SUMS.txt                          checksums, for people

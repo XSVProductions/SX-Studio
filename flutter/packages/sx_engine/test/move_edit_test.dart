@@ -1,4 +1,4 @@
-// The old tool's own test suite (`repo/tools/test_move_edit.ps1`), check for
+// The old tool's own test suite (`tools/test_move_edit.ps1` in the old app), check for
 // check, on the same small synthetic show. Runs anywhere, no PowerShell needed.
 import 'dart:convert';
 import 'dart:io';

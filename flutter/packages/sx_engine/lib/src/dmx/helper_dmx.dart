@@ -9,7 +9,7 @@ import 'dmx_output.dart';
 import 'efk_dmx.dart';
 
 /// DMX on the Mac, through the `sxh_dmx` helper the old app ships
-/// (`repo/mac/dmx/main.swift`). Chauvet's Mac driver has to be loaded on a
+/// (the old app's `mac/dmx/main.swift`). Chauvet's Mac driver has to be loaded on a
 /// program's main thread, which neither PowerShell nor a Dart isolate can
 /// promise, hence a separate small program.
 ///

@@ -17,6 +17,7 @@ import '../sx/live_hold.dart';
 import '../sx/sx_app.dart';
 import '../ps_compat.dart';
 import 'api.dart';
+import 'lifetime.dart';
 import 'phone.dart';
 import 'ps_body.dart';
 import 'queue.dart';
@@ -24,7 +25,7 @@ import 'routes/routes.dart';
 
 /// The version this build of SX Studio reports, and compares with GitHub's
 /// newest release.
-const sxStudioVersion = '2.0.0';
+const sxStudioVersion = String.fromEnvironment('SX_VERSION', defaultValue: '2.0.0');
 
 /// How to start the engine.
 class EngineConfig {
@@ -37,6 +38,7 @@ class EngineConfig {
     this.phonePort = 47322,
     this.settingsDir,
     this.appVersion = sxStudioVersion,
+    this.appExe,
   });
 
   /// Port for the laptop's own UI, on the loopback address. 0 picks a free one.
@@ -67,6 +69,11 @@ class EngineConfig {
 
   /// SX Studio's version, for the update check.
   final String appVersion;
+
+  /// The installed app's program, which an update opens again when it is
+  /// done. Null (the engine on its own, tests) means there is nothing to
+  /// update, and "update" only opens the release page.
+  final String? appExe;
 }
 
 /// The laptop side of SX Studio: the tools, the save queue and the HTTP API.
@@ -113,6 +120,9 @@ class Engine {
   /// Live output and the player. Only one thing sends DMX at a time.
   final DmxHub dmx;
 
+  /// When the app quits by itself: the old five-minute idle rule.
+  late final lifetime = Lifetime.of(this);
+
   HttpServer? _server;
   HttpServer? _phoneServer;
   Timer? _tick;
@@ -132,7 +142,10 @@ class Engine {
   Future<void> start() async {
     _server = await shelf_io.serve(_withWeb((req) => _handle(req, fromPhone: false)), InternetAddress.loopbackIPv4, config.port);
     if (phones.on) await setPhoneListener(true);
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) => queue.step());
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      queue.step();
+      lifetime.step();
+    });
   }
 
   /// Starts or stops the network listener for phones. A failure to start is
@@ -144,6 +157,11 @@ class Engine {
       return;
     }
     if (_phoneServer != null) return;
+    // the app always names its web build: a phone must not be told to open a page that isn't there
+    if (config.webDir case final web? when !File('$web/index.html').existsSync()) {
+      phoneError = 'The phone page of SX Studio is missing - install SX Studio again.';
+      return;
+    }
     final handler = _withWeb((req) => _handle(req, fromPhone: true));
     try {
       // IPv6 and IPv4 together where the computer has both
@@ -211,6 +229,7 @@ class Engine {
     } else if (!sameSecret(key, config.token)) {
       return _json({'ok': false, 'error': 'Open SX Studio from its icon.', 'out': ''}, 401);
     }
+    lifetime.touch();
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
     if (fromPhone && (req.contentLength ?? 0) > 4000000) return _json({'ok': false, 'error': 'Too big.', 'out': ''}, 413);
 

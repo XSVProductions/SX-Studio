@@ -46,6 +46,8 @@ class _Engine {
         settings = {...settings, ...body};
         return {'ok': true, 'settings': settings};
       }(),
+      '/api/update' => const UpdateInfo(ok: true, current: '2.0.0', latest: '2.1.0', newer: true, asset: 'https://github.com/x/setup.exe').toJson(),
+      '/api/update/install' => {'ok': false, 'error': 'Download failed: no network', 'out': ''},
       '/api/gdrive' => const DriveInfo(show: '/shows/Awaaz Lightshow', here: true, found: false, target: '').toJson(),
       '/api/phone' => phoneInfo(),
       '/api/phone/pin' => () {
@@ -102,6 +104,22 @@ void main() {
     expect(find.text('Phone & iPad'), findsNothing);
     expect(find.text('Updates'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  _test('an update asks first, then says why it failed', (tester) async {
+    final engine = _Engine();
+    await _pump(tester, engine);
+    await tester.tap(find.text('Check now'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update to 2.1.0'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('SX Studio closes and opens again by itself'), findsOneWidget);
+    expect(engine.posts['/api/update/install'], isNull);
+    await tester.tap(find.text('Update'));
+    await tester.pumpAndSettle();
+    expect(engine.posts['/api/update/install'], hasLength(1));
+    expect(find.text('Download failed: no network'), findsOneWidget);
+    expect(find.text('Downloading the update...'), findsNothing);
   });
 
   _test('unticking a tab hides it everywhere', (tester) async {

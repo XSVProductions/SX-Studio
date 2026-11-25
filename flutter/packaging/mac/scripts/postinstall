@@ -1,0 +1,35 @@
+#!/bin/bash
+# Runs as root after SX Studio.app is installed in /Applications.
+# Puts SX Studio on the logged-in user's Desktop. Never fails the install.
+# (Removes the old AIM MOVERS app + launchers - same program, renamed.)
+rm -rf "/Applications/AIM MOVERS.app" 2>/dev/null
+# renamed ShowXpress Helper -> SX Helper (2026-11-22): the old app goes; an update started from the old app expects to
+# open it afterwards, so open the new one instead (below)
+# renamed SX Helper -> SX Studio (2026-11-23): same again
+WASOLD=0
+for OLD in "/Applications/ShowXpress Helper.app" "/Applications/SX Helper.app"; do
+  [ -d "$OLD" ] && { rm -rf "$OLD" 2>/dev/null; WASOLD=1; }
+done
+U="$(stat -f%Su /dev/console 2>/dev/null)"
+[ -z "$U" ] || [ "$U" = "root" ] && exit 0
+H="$(dscl . -read "/Users/$U" NFSHomeDirectory 2>/dev/null | awk '{print $2}')"
+[ -d "$H" ] || exit 0
+D="$H/Desktop"
+APP="/Applications/SX Studio.app"
+
+mkdir -p "$H/AwaazTools" && chown "$U" "$H/AwaazTools"
+
+# remove launchers from older setups (hand-made + AIM MOVERS)
+rm -f "$D/AIM MOVERS TO DANCEFLOOR.command" 2>/dev/null
+[ -L "$D/AIM MOVERS" ] && rm -f "$D/AIM MOVERS"
+[ -d "$D/AIM MOVERS.app" ] && [ ! -L "$D/AIM MOVERS.app" ] && rm -rf "$D/AIM MOVERS.app"
+for f in df_aim.ps1 df_aim_gui.ps1 aim_movers_1024.png sync_from_windows.sh; do rm -f "$H/AwaazTools/$f"; done
+
+[ -L "$D/ShowXpress Helper" ] && rm -f "$D/ShowXpress Helper"
+[ -L "$D/SX Helper" ] && rm -f "$D/SX Helper"
+ln -sfn "$APP" "$D/SX Studio" 2>/dev/null && chown -h "$U" "$D/SX Studio" 2>/dev/null
+
+# SYNC FROM WINDOWS is gone (the show now syncs through Google Drive) - remove its old launcher
+rm -f "$D/SYNC FROM WINDOWS.command" 2>/dev/null
+if [ "$WASOLD" = 1 ]; then UID_="$(id -u "$U" 2>/dev/null)"; [ -n "$UID_" ] && launchctl asuser "$UID_" sudo -u "$U" open "$APP" >/dev/null 2>&1 & fi
+exit 0

@@ -134,7 +134,7 @@ void main() {
       expect(u.page, endsWith('/tag/v2.1.0'));
     });
 
-    test('install opens the release page and runs nothing', () async {
+    test('without an installed app, install opens the release page and runs nothing', () async {
       github(() => _release('v2.1.0'));
       final r = await laptop.updateInstall();
       expect(r.ok, isTrue, reason: r.error);

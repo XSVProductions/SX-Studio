@@ -1,5 +1,6 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <shobjidl.h>
 #include <windows.h>
 
 #include "flutter_window.h"
@@ -7,16 +8,12 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
-  // One copy only, as the old app: a second start brings up the first one's
-  // window. Two copies would fight over the DMX interface.
-  ::CreateMutexW(nullptr, TRUE, L"SXStudio.OneCopy");
-  if (::GetLastError() == ERROR_ALREADY_EXISTS) {
-    if (HWND other = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"SX Studio")) {
-      if (::IsIconic(other)) ::ShowWindow(other, SW_RESTORE);
-      ::SetForegroundWindow(other);
-    }
-    return EXIT_SUCCESS;
-  }
+  // One copy only, as the old app. Dart decides at start (boot_io.dart): a
+  // copy of the same version shows its window and this one quits, an older
+  // version is stopped and replaced.
+
+  // The old app's taskbar identity, so a pinned SX Studio stays one icon.
+  ::SetCurrentProcessExplicitAppUserModelID(L"XSVProductions.SXStudio");
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

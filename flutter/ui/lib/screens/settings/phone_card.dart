@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
@@ -9,7 +10,8 @@ import '../../widgets/sx_widgets.dart';
 import 'settings_bits.dart';
 
 /// The Phone & iPad card (`#phcard`): phone access on or off, the addresses
-/// a phone opens, the pairing code, and the paired phones. Laptop only.
+/// a phone opens, the pairing code, and "Unpair all phones". Laptop only.
+/// Port of `renderPhone`.
 class PhoneCard extends StatefulWidget {
   const PhoneCard({super.key});
 
@@ -139,11 +141,23 @@ class _PhoneCardState extends State<PhoneCard> {
                 text:
                     ". Venue Wi-Fi often keeps devices apart. The surest way is your own small travel router, or the laptop on your iPhone's Personal Hotspot. ",
               ),
-              TextSpan(
-                text: p.mac
-                    ? 'If macOS asks whether SX Studio may accept incoming connections, press Allow.'
-                    : 'The first time, Windows may ask whether SX Studio may use the network. Tick Private networks and press Allow.',
-              ),
+              // the old page named pwsh and PowerShell, the program that
+              // listened then; now it is SX Studio
+              if (p.mac) ...[
+                const TextSpan(text: 'If macOS asks whether '),
+                TextSpan(text: 'SX Studio', style: b),
+                const TextSpan(text: ' may accept incoming connections, press '),
+                TextSpan(text: 'Allow', style: b),
+                const TextSpan(text: '.'),
+              ] else ...[
+                const TextSpan(text: 'The first time, Windows may ask whether '),
+                TextSpan(text: 'SX Studio', style: b),
+                const TextSpan(text: ' may use the network. Tick '),
+                TextSpan(text: 'Private networks', style: b),
+                const TextSpan(text: ' and press '),
+                TextSpan(text: 'Allow', style: b),
+                const TextSpan(text: '.'),
+              ],
             ],
           ),
         ),
@@ -176,11 +190,7 @@ class _PhoneCardState extends State<PhoneCard> {
             const SizedBox(height: 6),
             CopyButton(p.pin, label: 'Copy code'),
             const SizedBox(height: 6),
-            Text(
-              'Type this on the phone. Good for ${(p.pinLeft / 60).ceil().clamp(1, 10)} more min. One phone per code.',
-              style: sub,
-              textAlign: TextAlign.center,
-            ),
+            Text('Type this on the phone. Good for ${max(1, (p.pinLeft / 60).ceil())} more min.', style: sub, textAlign: TextAlign.center),
           ] else ...[
             Text('Each phone or iPad is paired once, with a 6-digit code.', style: sub, textAlign: TextAlign.center),
             const SizedBox(height: 10),
@@ -190,39 +200,15 @@ class _PhoneCardState extends State<PhoneCard> {
               child: const Text('Pair a phone'),
             ),
           ],
-          const SizedBox(height: 14),
-          for (final ph in p.phones)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      [
-                        ph.name,
-                        if (ph.paired.isNotEmpty) 'paired ${whenText(ph.paired)}',
-                        if (ph.lastSeen.isNotEmpty) 'seen ${whenText(ph.lastSeen)}',
-                      ].join(', '),
-                      style: TextStyle(fontSize: 12.5, color: Sx.text2),
-                    ),
-                  ),
-                  MiniButton('Unpair', onPressed: () => _do((c) => c.phoneUnpair(ph.id))),
-                ],
-              ),
-            ),
-          if (p.phones.isEmpty) Text('No phone paired yet.', style: sub),
-          if (p.phones.length > 1)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: MiniButton(
-                'Unpair all phones',
-                onPressed: () async {
-                  if (await confirm(context, 'Unpair all phones?', 'Every paired phone and iPad has to be paired again with a new code.', 'Unpair')) {
-                    await _do((c) => c.phoneUnpair('*'));
-                  }
-                },
-              ),
-            ),
+          const SizedBox(height: 12),
+          MiniButton(
+            'Unpair all phones',
+            onPressed: () async {
+              if (await confirm(context, 'Unpair all phones?', 'Every paired phone and iPad has to be paired again with a new code.', 'Unpair')) {
+                await _do((c) => c.phoneUnpair());
+              }
+            },
+          ),
         ],
       ),
     );

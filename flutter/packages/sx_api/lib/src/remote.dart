@@ -25,10 +25,10 @@ class RemoteSetup {
 }
 
 /// A button that is playing in ShowXpress.
-class PressedButton {
-  const PressedButton({required this.title, required this.page});
+class PressedOnAir {
+  const PressedOnAir({required this.title, required this.page});
 
-  factory PressedButton.fromJson(Json j) => PressedButton(title: j.str('title'), page: j.str('page'));
+  factory PressedOnAir.fromJson(Json j) => PressedOnAir(title: j.str('title'), page: j.str('page'));
 
   final String title;
   final String page;
@@ -77,7 +77,7 @@ class RemoteState {
     ready: j.boolean('ready'),
     open: j.boolean('open'),
     connected: j.boolean('connected'),
-    pressed: j.list('pressed', PressedButton.fromJson),
+    pressed: j.list('pressed', PressedOnAir.fromJson),
     titles: j.strList('titles'),
     error: j.str('error'),
     setup: switch (j.objOrNull('setup')) {
@@ -103,7 +103,7 @@ class RemoteState {
   final bool connected;
 
   /// Buttons playing after the action.
-  final List<PressedButton> pressed;
+  final List<PressedOnAir> pressed;
 
   /// Every button title ShowXpress has, once each.
   final List<String> titles;

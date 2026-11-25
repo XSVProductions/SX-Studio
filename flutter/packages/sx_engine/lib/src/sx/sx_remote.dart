@@ -325,7 +325,7 @@ Future<RemoteState> remoteAction(
       connected: true,
       pressed: [
         for (final b in cn.list)
-          if (b.pressed) PressedButton(title: b.title, page: b.page),
+          if (b.pressed) PressedOnAir(title: b.title, page: b.page),
       ],
       titles: _unique(cn.list.map((b) => b.title)),
       setup: setup.toWire(),

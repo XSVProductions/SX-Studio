@@ -1,5 +1,6 @@
 import 'package:sx_api/sx_api.dart';
 
+import '../../player/player_links.dart';
 import '../../ps_compat.dart';
 import '../../show/show_env.dart';
 import '../../sx/auto_player.dart';
@@ -7,13 +8,13 @@ import '../../tools/auto_show.dart';
 import '../engine.dart';
 
 /// The Auto Show: its settings, and start, stop and commands while it plays.
-/// Shares [AutoShowControl] for the Lab.
+/// Shares it as a [PlayerAutoShowLink] for the Lab.
 ///
 /// Port of `/api/auto*` and the AUTO SHOW block in `df_aim_gui.ps1`.
 void registerAutoRoutes(Engine e) {
-  final auto = AutoShow(show: e.show, sxOpen: () => e.sx.running, player: () => e.find<AutoPlayerLink>());
+  final auto = AutoShow(show: e.show, sxOpen: () => e.sx.running, player: () => e.find<PlayerControl>());
   e.provide<AutoShow>(auto);
-  e.provide<AutoShowControl>(auto);
+  e.provide<PlayerAutoShowLink>(auto);
 
   e.api.get('/api/auto', (req) {
     final i = autoGet(e.show());
@@ -24,7 +25,7 @@ void registerAutoRoutes(Engine e) {
       ready: i.ready,
       open: i.open,
       setup: i.setup,
-      player: e.find<AutoPlayerLink>()?.playing ?? false,
+      player: e.find<PlayerControl>()?.running ?? false,
       status: auto.status(),
     );
   });

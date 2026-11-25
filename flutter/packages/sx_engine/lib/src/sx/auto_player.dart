@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:sx_api/sx_api.dart';
 
+import '../player/player_links.dart';
 import '../ps_compat.dart';
 import '../show/show_env.dart';
 import '../tools/auto_show.dart';
@@ -17,58 +18,6 @@ import 'sx_remote.dart';
 //
 // Port of `sx_remote.ps1 -Action Auto` and the AUTO SHOW block of `df_aim_gui.ps1`.
 
-/// What the SX Player tells the Auto Show while it plays.
-class PlayerBeat {
-  const PlayerBeat({required this.bpm, required this.src, required this.onSlots});
-
-  /// The player's beat clock.
-  final double bpm;
-
-  /// Where the tempo comes from: `tap`, `VirtualDJ` or ''.
-  final String src;
-
-  /// live.ini sections (`page3_button1`) of the buttons that are on.
-  final Set<String> onSlots;
-}
-
-/// What the Auto Show needs from the SX Player. The player's area provides
-/// it with `e.provide<AutoPlayerLink>(...)`.
-///
-/// Port of the old named-pipe protocol (`ton`, `toff`, `sync`, `bpm`) and the
-/// player's status file. The send methods throw when the player isn't answering.
-abstract interface class AutoPlayerLink {
-  /// The player is playing (old `Test-Player`).
-  bool get playing;
-
-  /// The player's tempo and what is on, or null when it stopped.
-  PlayerBeat? beat();
-
-  /// Turns on the show's first button with this title (`ton <title>`).
-  void titleOn(String title);
-
-  /// Turns it off (`toff <title>`).
-  void titleOff(String title);
-
-  /// Bar 1 now (`sync`).
-  void sync();
-
-  /// `bpm <n>`.
-  void setBpm(double bpm);
-}
-
-/// What other areas may do with the Auto Show (`e.find<AutoShowControl>()`).
-abstract interface class AutoShowControl {
-  bool get running;
-
-  /// The looks play on the SX Player, not ShowXpress.
-  bool get onPlayer;
-
-  /// Starts again with the look that plays now, on ShowXpress or the player
-  /// (whichever plays now). The Lab calls this when the player starts or
-  /// stops, as the old Lab did with `Start-Auto`.
-  Future<void> restart();
-}
-
 /// `[math]::Round(x, 1)`.
 double _round1(double x) => psRound(x * 10) / 10;
 
@@ -76,7 +25,7 @@ double _round1(double x) => psRound(x * 10) / 10;
 class _PlayerSession implements ButtonSession {
   _PlayerSession(this._link, this.list);
 
-  final AutoPlayerLink _link;
+  final PlayerControl _link;
 
   @override
   final List<ButtonOnAir> list;
@@ -96,9 +45,10 @@ class _PlayerSession implements ButtonSession {
   Future<void> close() async {}
 }
 
-/// The Auto Show. One per engine.
-class AutoShow implements AutoShowControl {
-  AutoShow({required this.show, required this.sxOpen, AutoPlayerLink? Function()? player, double Function()? clock, Random? random, this.timer = true})
+/// The Auto Show. One per engine. The Lab sees it as a [PlayerAutoShowLink]
+/// and it plays on the Lab's [PlayerControl] when the SX Player runs.
+class AutoShow implements PlayerAutoShowLink {
+  AutoShow({required this.show, required this.sxOpen, PlayerControl? Function()? player, double Function()? clock, Random? random, this.timer = true})
     : player = player ?? (() => null),
       clock = clock ?? _stopwatch(),
       random = random ?? Random();
@@ -110,7 +60,7 @@ class AutoShow implements AutoShowControl {
 
   final ShowEnv Function() show;
   final bool Function() sxOpen;
-  final AutoPlayerLink? Function() player;
+  final PlayerControl? Function() player;
 
   /// Milliseconds, only ever going up.
   final double Function() clock;
@@ -267,7 +217,7 @@ class AutoShow implements AutoShowControl {
     await stop();
     _last = null;
     final link = player();
-    _usePl = link?.playing ?? false;
+    _usePl = link?.running ?? false;
     try {
       _env = show();
       _cfg = readAutoConfig(_env, random: random);
@@ -299,7 +249,7 @@ class AutoShow implements AutoShowControl {
 
     if (!_usePl && !_setup.ready) return _refused('The ShowXpress remote is off - turn it on first.');
     if (_usePl) {
-      final b = link?.beat();
+      final b = link?.status;
       if (b != null && b.bpm >= 40) _cfg.bpm = _round1(b.bpm); // the player's tempo wins
     }
     final a0 = _active;
@@ -433,7 +383,7 @@ class AutoShow implements AutoShowControl {
       // ---- ShowXpress opened again (a fresh start has nothing pressed): play the current look again
       if (now - _lastOpen > 2000) {
         _lastOpen = now;
-        final on = _usePl ? (player()?.playing ?? false) : sxOpen();
+        final on = _usePl ? (player()?.running ?? false) : sxOpen();
         if (on != _sxOn) {
           if (on) {
             _wantAgain();
@@ -450,7 +400,7 @@ class AutoShow implements AutoShowControl {
       // ---- on the player: follow its tempo (tap, VirtualDJ, the Lab)
       if (_usePl && now - _lastPl >= 500) {
         _lastPl = now;
-        final ps = player()?.beat();
+        final ps = player()?.status;
         if (ps != null && ps.bpm >= 40) {
           _src = ps.src;
           final b = _round1(ps.bpm);
@@ -471,9 +421,9 @@ class AutoShow implements AutoShowControl {
 
   Future<Connection> _connect() async {
     if (!_usePl) return connectShowXpress(_setup, open: sxOpen());
-    final link = player(), st = link?.beat();
+    final link = player(), st = link?.status;
     if (link == null || st == null) return (session: null, error: 'The SX Player stopped - start it again on the Lab tab.');
-    final on = {for (final s in st.onSlots) s.toLowerCase()};
+    final on = {for (final s in st.on) s.toLowerCase()};
     final seen = <String>{};
     return (
       session: _PlayerSession(link, [

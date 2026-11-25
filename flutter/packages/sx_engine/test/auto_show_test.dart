@@ -8,35 +8,56 @@ import 'package:test/test.dart';
 import 'sx_test_show.dart';
 
 /// A player stand-in that records what the Auto Show sent.
-class _FakePlayer implements AutoPlayerLink {
-  @override
+class _FakePlayer implements PlayerControl {
   var playing = true;
   var bpm = 128.0;
-  final on = <String>{};
+  final on = <String>[];
   final sent = <String>[];
 
   static const _slots = {'CIRCLE': 'page1_button1', 'FIGURE 8': 'page1_button2', 'RED': 'page2_button1', 'BLUE': 'page2_button2'};
 
   @override
-  PlayerBeat? beat() => playing ? PlayerBeat(bpm: bpm, src: 'tap', onSlots: on) : null;
+  bool get running => playing;
 
   @override
-  void titleOn(String title) {
+  PlayerStatus? get status => playing
+      ? PlayerStatus({
+          'bpm': bpm,
+          'src': 'tap',
+          'on': [
+            for (final s in on) {'slot': s},
+          ],
+        })
+      : null;
+
+  @override
+  bool titleOn(String title) {
     sent.add('ton $title');
-    on.add(_slots[title]!);
+    if (!on.contains(_slots[title])) on.add(_slots[title]!);
+    return playing;
   }
 
   @override
-  void titleOff(String title) {
+  bool titleOff(String title) {
     sent.add('toff $title');
     on.remove(_slots[title]);
+    return playing;
   }
 
   @override
-  void sync() => sent.add('sync');
+  bool sync() {
+    sent.add('sync');
+    return playing;
+  }
 
   @override
-  void setBpm(double bpm) => sent.add('bpm $bpm');
+  bool setBpm(double bpm) {
+    sent.add('bpm $bpm');
+    return playing;
+  }
+
+  @override
+  bool tap() => playing;
 }
 
 String _looks(List<Map<String, Object>> looks, {int bpm = 120, String order = 'order', String stop = 'keep', bool clean = false}) =>

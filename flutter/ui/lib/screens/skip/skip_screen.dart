@@ -113,18 +113,19 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SxHeader(
+              RigHeader(
                 'Skip Flash heads',
                 sub: 'Tap the movers that are set up tonight. SKIP FLASH will only flash those, so the chase has no dark gaps.',
-                actions: [OutlinedButton(onPressed: load, child: const Text('Refresh'))],
+                dirty: d == null ? null : dirty,
+                onRefresh: load,
               ),
               ErrorBox(_error),
               if (d == null && _error.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 14),
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
                   child: Text('Reading the show.', style: Sx.sub),
                 ),
-              if (d != null) ...[StateTag(dirty), _group(d, true), _group(d, false)],
+              if (d != null) ...[_group(d, true), _group(d, false)],
             ],
           ),
         ),
@@ -164,6 +165,7 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
   Widget _order(SkipPreview d) {
     final o = d.flashOrder(_picked);
     final each = d.stepCs / 100;
+    final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -171,16 +173,22 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
           alignment: WrapAlignment.spaceBetween,
           runSpacing: 4,
           children: [
-            const Text('Flash order', style: Sx.title),
-            Text(
-              '${o.length} heads · ${_trim(each)} s each · one loop ${(o.length * each).toStringAsFixed(2)} s',
-              style: const TextStyle(color: Sx.text2, fontSize: 12.5),
+            Text('Flash order', style: Sx.title),
+            Text.rich(
+              TextSpan(
+                style: TextStyle(color: Sx.dim, fontSize: 13),
+                children: [
+                  TextSpan(text: '${o.length}', style: b),
+                  TextSpan(text: ' heads · ${_trim(each)} s each · one loop '),
+                  TextSpan(text: '${(o.length * each).toStringAsFixed(2)} s', style: b),
+                ],
+              ),
             ),
           ],
         ),
         const SizedBox(height: 10),
         if (o.isEmpty)
-          const Text('no heads picked', style: Sx.sub)
+          Text('no heads picked', style: Sx.sub)
         else
           Wrap(
             spacing: 4,
@@ -188,7 +196,7 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               for (final (i, h) in o.indexed) ...[
-                if (i > 0) const Text('›', style: TextStyle(color: Sx.mute, fontSize: 11)),
+                if (i > 0) Icon(Icons.chevron_right, size: 13, color: Sx.mute),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
@@ -196,13 +204,13 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
                     border: Border.all(color: Sx.line),
                     borderRadius: BorderRadius.circular(6),
                   ),
-                  child: Text(h.label, style: const TextStyle(fontSize: 12)),
+                  child: Text(h.label, style: TextStyle(fontSize: 12, color: Sx.text)),
                 ),
               ],
             ],
           ),
         const SizedBox(height: 10),
-        const Text('The order and the step time come from your scene. Only the list of heads changes.', style: Sx.sub),
+        Text('The order and the step time come from your scene. Only the list of heads changes.', style: Sx.sub),
       ],
     );
   }

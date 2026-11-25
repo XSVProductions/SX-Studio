@@ -96,9 +96,17 @@ class _Header extends StatelessWidget {
           ),
           const Spacer(),
           if (app.status != null) ...[
-            Text(
-              open ? 'ShowXpress open' : 'ShowXpress closed',
-              style: TextStyle(color: open ? Sx.amber : Sx.green, fontSize: 13, fontWeight: FontWeight.w600),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: (open ? Sx.amber : Sx.green).withValues(alpha: .09),
+                border: Border.all(color: (open ? Sx.amber : Sx.green).withValues(alpha: .38)),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Text(
+                open ? 'ShowXpress open' : 'ShowXpress closed ✓',
+                style: TextStyle(color: open ? Sx.amber : Sx.green, fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
             ),
             const SizedBox(width: 12),
             OutlinedButton(

@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
-/// SX Studio's colors. Dark only, on true black.
+/// SX Studio's colors, the same values as the old app's dark theme.
+///
+/// Always use these, never a literal color, so the light theme can swap them.
 abstract final class Sx {
-  static const bg = Color(0xFF000000);
-  static const card = Color(0xFF14171D);
+  static const bg = Color(0xFF0E1014);
+  static const card = Color(0xFF171A21);
   static const panel = Color(0xFF12151B);
-  static const well = Color(0xFF0C0E12);
+  static const well = Color(0xFF0F1217);
   static const hover = Color(0xFF1D212A);
   static const line = Color(0xFF262B36);
   static const line2 = Color(0xFF3A4150);
-  static const text = Color(0xFFFFFFFF);
+  static const text = Color(0xFFE9ECF1);
   static const text2 = Color(0xFFC7CDD8);
   static const dim = Color(0xFF8B93A3);
   static const mute = Color(0xFF5D6574);

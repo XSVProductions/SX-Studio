@@ -83,7 +83,7 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 
 - Screens talk to the engine through `SxClient` only. Never import `sx_engine` or `dart:io` under `ui/lib`, except `boot/boot_io.dart`.
 - Use the pieces in `ui/lib/widgets/sx_widgets.dart` (`ScreenBody`, `SxCard`, `SxHeader`, `SaveBar`, `GroupLabel`, `ErrorBox`, `runSave`) and the colors and text styles in `ui/lib/theme.dart`. If you need a new shared widget, put it in your own screen folder and say so in your report.
-- Dark, true black, white text, dense. No shadows, glows, gradients or blur.
+- Keep the old app's look: its colors, fonts, cards and spacing. Take every color from `Sx` in `theme.dart`, never a literal, because the light theme swaps them.
 - Nothing that repaints continuously. No `CircularProgressIndicator`, no pulsing, no shimmer. While loading, show a line of text.
 - Keep the old screen's wording, trimmed. No em dashes anywhere, in copy or comments.
 - A screen that holds unsaved edits calls `AppScope.read(context).setDirty(tabId, true)` and clears it after saving or undoing.

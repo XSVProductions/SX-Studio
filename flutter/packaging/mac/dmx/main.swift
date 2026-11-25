@@ -4,7 +4,8 @@
 //   No command for 30 s or stdin closed -> all channels 0, interface closed, exit.
 // It uses ShowXpress's own Mac driver (efk_hardware.dylib next to TheLightingController.app). That driver has to be
 // loaded and used on a program's main thread, which PowerShell can't do - hence this small tool. The driver is Intel
-// only, so this tool is built for Intel (it runs through Rosetta on Apple Silicon, like ShowXpress itself).
+// or Apple Silicon depending on the ShowXpress download, so this tool is built for both and SX Studio runs the kind
+// that matches (helper_dmx.dart).
 //   sxh_dmx --dir <ShowXpress folder> [--probe]     --probe = report what it finds and exit
 import AppKit
 import Foundation
@@ -36,6 +37,9 @@ if !FileManager.default.fileExists(atPath: hwPath) {
     say("ERR ShowXpress's interface driver (efk_hardware.dylib) was not found next to ShowXpress (\(dir)).")
     exit(0)
 }
+// No Dock icon or menu bar for this helper. This has to come before the driver loads: the driver starts an
+// NSApplication as it loads, and from inside SX Studio.app that never returned (macOS 26, seen with both drivers' chips).
+NSApplication.shared.setActivationPolicy(.prohibited)
 _ = FileManager.default.changeCurrentDirectoryPath(dir)   // the driver opens efk_usb.dylib by its bare name
 _ = dlopen((dir as NSString).appendingPathComponent("efk_usb.dylib"), RTLD_NOW | RTLD_GLOBAL)
 guard let lib = dlopen(hwPath, RTLD_NOW | RTLD_GLOBAL) else {
@@ -43,7 +47,6 @@ guard let lib = dlopen(hwPath, RTLD_NOW | RTLD_GLOBAL) else {
     say("ERR ShowXpress's interface driver didn't load: \(e)")
     exit(0)
 }
-NSApplication.shared.setActivationPolicy(.prohibited)   // no Dock icon for this helper
 
 func sym<T>(_ n: String, _ t: T.Type) -> T {
     guard let p = dlsym(lib, n) else { say("ERR ShowXpress's interface driver has no \(n)."); exit(0) }

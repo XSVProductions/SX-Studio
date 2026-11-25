@@ -129,9 +129,10 @@ class PlayerCore {
     if (b.title.isNotEmpty && identical(_byTitle[b.title], b)) _byTitle.remove(b.title);
   }
 
-  /// Port of `SetFader`.
+  /// Port of `SetFader`. NaN is ignored: the old player took it and that
+  /// button's clock went wrong. Here it would stop the player.
   void setFader(int k, double v) {
-    if (k >= 0 && k < fv.length) fv[k] = v.clamp(0.0, 1.0);
+    if (k >= 0 && k < fv.length && !v.isNaN) fv[k] = v.clamp(0.0, 1.0);
   }
 
   /// A speed fader's clock factor. GUESS: middle 1x, top 4x, bottom 1/4x.
@@ -199,9 +200,9 @@ class PlayerCore {
     _lastTick = now;
   }
 
-  /// Port of `SetBpm`.
+  /// Port of `SetBpm`. Written so NaN is refused too (the old check let it through).
   void setBpm(double v, double now, String src) {
-    if (v < 40 || v > 250) return;
+    if (!(v >= 40 && v <= 250)) return;
     final b = _beatAt(now);
     _bpm = csRound(v, 2);
     _beatN = csFloor(b);

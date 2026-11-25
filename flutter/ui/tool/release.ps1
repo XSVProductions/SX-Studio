@@ -41,6 +41,9 @@ if ($MacPkg -and -not (Test-Path -LiteralPath $MacPkg)) { throw "No file $MacPkg
 
 Push-Location $ui
 try {
+  # a checkout that gained a package since its last build needs this first
+  flutter pub get
+  if ($LASTEXITCODE) { throw 'flutter pub get failed.' }
   # no CDN: a phone on a venue network must get every file from the laptop
   flutter build web --release --no-web-resources-cdn
   if ($LASTEXITCODE) { throw 'The web build failed.' }

@@ -2122,8 +2122,9 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
  $('qreo').onchange=async e=>{const r=await api('/api/queue/reopen',{on:e.target.checked});Q=r.q;};
  const qc=$('qclose');if(qc)qc.onclick=sxClose;}
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
-function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
- LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE)seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
+function reloadAll(){// the queue just changed the show: read everything again (queued edits are now saved)
+ // the Scene Editor is reopened only if it has no edits, or only the edits that were queued (SEQ); newer edits stay
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE&&(!seDirty()||JSON.stringify(seBody())===SEQ))seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
 async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
@@ -2199,7 +2200,7 @@ function stateTag(id,d){const st=$(id);st.style.display='inline-block';st.classN
 const QH='<span style="color:var(--amber)">ShowXpress is open &mdash; this is <b>queued</b> and done as soon as you save and close ShowXpress.</span>';
 function sxHint(what){return sxOpen?QH:null;}
 async function getJ(p){try{return await api(p);}catch(e){return {ok:false,error:'Could not read the show.'};}}
-async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':label);let r;try{r=await api(p,wq(body));}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok&&!r.queued)await after();showResult(r,what);}
+async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':label);let r;try{r=await api(p,wq(body));}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok&&!r.queued)await after();showResult(r,what);return r;}
 function showErr(id,obj){const er=$(id);if(obj&&!obj.ok){er.style.display='block';er.innerHTML=esc(obj.error);return true;}er.style.display='none';return false;}
 
 // ---------------- Tonight's rig (same step rule as rig.ps1)
@@ -3281,7 +3282,7 @@ applyTheme();
 
 // ---------------- Scene Editor (scene_edit.ps1, user 2026-11-24): change a scene's steps and values, see it on the lights.
 // The page keeps a working copy of the steps; Save sends only what differs from the file (scene_edit.ps1 changes just that).
-let SL=null,SE=null,SW=null,seI=0,seSel=new Set(),seMo='',SEP=null,seVer=0,seTab=null;
+let SL=null,SE=null,SW=null,SEQ='',seI=0,seSel=new Set(),seMo='',SEP=null,seVer=0,seTab=null;
 const seKey=(f,i)=>f+'|'+i,seCs=w=>w.len==null?100:w.len,seSec=cs=>(cs/100).toFixed(2).replace(/0$/,'');
 async function loadScenes(){$('secount').textContent='Loading…';SL=await getJ('/api/scenes');renderScenes();}
 function renderScenes(){const pick=!SE;$('sepickw').style.display=pick?'':'none';$('sew').style.display=pick?'none':'';$('seback').style.display=pick?'none':'';
@@ -3416,8 +3417,8 @@ $('seq').oninput=renderScenes;
 $('seback').onclick=async()=>{if(SE&&seDirty()&&!await ask('Leave this scene?','Your changes to <b>'+esc(SE.name)+'</b> are not saved yet. They will be lost.','Leave it'))return;await sePvStop(SEP?SEP.reo:false);SE=null;SW=null;if(!SL)loadScenes();else renderScenes();};
 $('serefresh').onclick=async()=>{if(SE){if(seDirty()&&!await ask('Reload the scene?','Your changes that are not saved yet will be lost.','Reload'))return;seOpen(SE.file,true);}else loadScenes();};
 $('seundo').onclick=()=>{if(!SE)return;seReset();seI=Math.min(seI,SW.steps.length-1);renderScene();sePush();};
-$('sesave').onclick=()=>{if(!SE||!seDirty())return;const f=SE.file;
- saveTo('/api/scene/save',seBody(),'Saving the scene…',async()=>{SL=null;await seOpen(f,true);},'scene');};
+$('sesave').onclick=()=>{if(!SE||!seDirty())return;const f=SE.file,b=seBody();
+ saveTo('/api/scene/save',b,'Saving the scene…',async()=>{SL=null;await seOpen(f,true);},'scene').then(r=>{SEQ=r.queued?JSON.stringify(b):'';});};
 // ---- earlier versions (backups kept by scene_edit.ps1, outside the show folder)
 async function seBackups(){if(!SE){$('sebk').style.display='none';return;}const f=SE.file,r=await getJ('/api/scene/backups?f='+encodeURIComponent(f));if(!SE||SE.file!==f)return;
  const b=(r.ok&&r.backups)||[];$('sebk').style.display=b.length?'':'none';

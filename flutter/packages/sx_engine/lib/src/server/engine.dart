@@ -7,6 +7,7 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_static/shelf_static.dart';
 import 'package:sx_api/sx_api.dart';
 
+import '../apc40/runner.dart';
 import '../dmx/dmx_hub.dart';
 import '../dmx/dmx_output.dart';
 import '../show/find_show.dart';
@@ -143,6 +144,7 @@ class Engine {
     if (phones.on) await setPhoneListener(true);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) {
       queue.step();
+      find<Apc40Runner>()?.step();
       lifetime.step();
     });
   }

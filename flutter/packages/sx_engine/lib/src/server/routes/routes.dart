@@ -9,6 +9,7 @@ import 'lab.dart';
 import 'color.dart';
 import 'looks.dart';
 import 'apc.dart';
+import 'apc40.dart';
 import 'health.dart';
 import 'preshow.dart';
 import 'aim.dart';
@@ -35,6 +36,7 @@ void registerRoutes(Engine e) {
   registerColorRoutes(e);
   registerLooksRoutes(e);
   registerApcRoutes(e);
+  registerApc40Routes(e);
   registerHealthRoutes(e);
   registerPreshowRoutes(e);
   registerAimRoutes(e);

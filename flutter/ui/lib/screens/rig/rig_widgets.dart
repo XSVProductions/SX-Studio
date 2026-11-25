@@ -4,7 +4,7 @@ import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 
-// Pieces shared by Tonight's Rig, Skip Flash and Rig Test.
+// Pieces shared by Tonight's Rig, Strobe and Rig Test.
 
 /// True below the old page's 760 px break, where head tiles go 4 across.
 bool rigNarrow(BuildContext context) => MediaQuery.sizeOf(context).width <= 760;

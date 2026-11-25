@@ -1,7 +1,7 @@
 import 'client.dart';
 import 'json.dart';
 
-/// One moving head on the Skip Flash screen.
+/// One moving head on the Strobe screen.
 class SkipHead {
   const SkipHead({required this.id, required this.label, required this.num, required this.is140, required this.on});
 
@@ -18,7 +18,7 @@ class SkipHead {
   Json toJson() => {'id': id, 'label': label, 'num': num, 'is140': is140, 'on': on};
 }
 
-/// What the Skip Flash screen shows.
+/// What the Strobe screen shows.
 class SkipPreview {
   const SkipPreview({
     required this.show,

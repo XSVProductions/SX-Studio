@@ -12,7 +12,7 @@ import '../ps_body.dart';
 
 final _digits = RegExp(r'^\d+$');
 
-/// Tonight's Rig (with Reverse Heads), Skip Flash and Rig Test.
+/// Tonight's Rig (with Reverse Heads), Strobe and Rig Test.
 ///
 /// Port of their cases in `Invoke-Action` and the request loop of `df_aim_gui.ps1`.
 void registerRigRoutes(Engine e) {
@@ -20,7 +20,7 @@ void registerRigRoutes(Engine e) {
   e.api.get('/api/skip', (req) => skipPreview(e.show()));
   e.api.get('/api/rt', (req) => rtPreview(e.show()));
 
-  e.api.post('/api/skip/apply', queue: const Queueable('Skip Flash'), (req) {
+  e.api.post('/api/skip/apply', queue: const Queueable('Strobe'), (req) {
     final ids = bodyTexts(req.body['heads']);
     if (ids.any((i) => !_digits.hasMatch(i)) || ids.length < 2) throw ToolError('Pick at least 2 heads.');
     return skipApply(e.show(), ids);

@@ -3,7 +3,7 @@ import 'json.dart';
 import 'lab.dart';
 
 /// The tab ids the settings know, in the old app's default order.
-const settingsTabIds = ['rt', 'aim', 'color', 'pre', 'lab', 'auto', 'rig', 'skip', 'apc', 'speed', 'scene', 'move', 'look', 'health'];
+const settingsTabIds = ['rt', 'aim', 'color', 'pre', 'lab', 'auto', 'rig', 'skip', 'apc', 'apc40', 'speed', 'scene', 'move', 'look', 'health'];
 
 /// SX Studio's own settings (`settings.json` in the settings folder). The
 /// laptop, phones and tablets share the tab layout.

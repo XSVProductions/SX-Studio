@@ -6,4 +6,4 @@
 /// A new key: `dart run sx_release:release_tool keygen`, then paste what it
 /// prints here. Apps built with the old key then refuse every update signed
 /// with the new one, so keep the key.
-const releasePublicKey = 'uDVSzTFy/iy6voIBqgSYSSgk137cqt83kmWzl53x5+M=';
+const releasePublicKey = 'G9s8MkgSUHa0GYWytM7Bdv5YzxZxHymq8FYSmSsNZOI=';

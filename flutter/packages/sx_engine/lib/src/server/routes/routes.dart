@@ -5,6 +5,9 @@ import 'settings.dart';
 import 'lab.dart';
 import 'color.dart';
 import 'looks.dart';
+import 'apc.dart';
+import 'health.dart';
+import 'preshow.dart';
 import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
@@ -20,4 +23,7 @@ void registerRoutes(Engine e) {
   registerLabRoutes(e);
   registerColorRoutes(e);
   registerLooksRoutes(e);
+  registerApcRoutes(e);
+  registerHealthRoutes(e);
+  registerPreshowRoutes(e);
 }

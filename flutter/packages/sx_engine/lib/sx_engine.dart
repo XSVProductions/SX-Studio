@@ -28,4 +28,8 @@ export 'src/sx/sx_app.dart';
 export 'src/tools/color.dart';
 export 'src/tools/looks.dart';
 export 'src/tools/gdrive.dart';
+export 'src/system/laptop.dart';
+export 'src/tools/apc.dart';
+export 'src/tools/health.dart';
+export 'src/tools/preshow.dart';
 export 'src/tools/speed.dart';

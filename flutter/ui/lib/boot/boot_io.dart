@@ -43,7 +43,13 @@ Future<SxClient> boot() async {
   final info = infoFile(port);
   var started = await _startEngine(config);
   if (started == null) {
-    final other = readInfo(info);
+    var other = readInfo(info);
+    // A copy started a moment ago (the installer and the old app's updater
+    // both open the app) has the port but may not have written the file yet.
+    for (var n = 0; n < 20 && (other == null || processName(other.pid) == null); n++) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+      other = readInfo(info);
+    }
     if (other != null && other.ver != sxStudioVersion && isAppProcess(processName(other.pid))) {
       Process.killPid(other.pid, ProcessSignal.sigkill);
       for (var n = 0; n < 20 && started == null; n++) {

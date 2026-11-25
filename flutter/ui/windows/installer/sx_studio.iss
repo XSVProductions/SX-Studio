@@ -1,7 +1,8 @@
 ; SX Studio, Windows installer (Inno Setup 6). Per-user install, no admin needed.
 ;   build:  ui\tool\release.ps1 -Version 2.0.0   ->  build\windows\SX-Studio-windows-setup-<version>.exe
-; The app's Update button runs it with /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS /RELAUNCH=1:
-; /RELAUNCH=1 opens the new version when it is done. The PowerShell app's updater opens showxpress_helper.vbs instead.
+; The app's Update button runs it silently, with the arguments in the signed release.json. After any silent install
+; it opens the new version itself, also for the PowerShell app's Update, which then opens showxpress_helper.vbs too
+; (that one starts nothing when the app has just started).
 #define AppVer GetEnv("SX_VERSION")
 #if AppVer == ""
   #define AppVer "2.0.0"
@@ -72,19 +73,13 @@ Name: "{autodesktop}\SX Studio"; Filename: "{app}\sx_studio.exe"; WorkingDir: "{
 
 [Run]
 Filename: "{app}\sx_studio.exe"; Description: "Open SX Studio now"; Flags: postinstall nowait skipifsilent
-; an update from the app itself: silent, then opens the new version
-Filename: "{app}\sx_studio.exe"; Flags: nowait; Check: Relaunch
+; a silent install (an update, from this app or the PowerShell one) opens the new version too
+Filename: "{app}\sx_studio.exe"; Flags: nowait; Check: WizardSilent
 
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM sx_studio.exe"; Flags: runhidden; RunOnceId: "StopApp"
 
 [Code]
-// True when the app started this installer for an update (/RELAUNCH=1)
-function Relaunch: Boolean;
-begin
-  Result := ExpandConstant('{param:relaunch|0}') = '1';
-end;
-
 // close a running SX Studio, this one or the PowerShell one, so an update takes effect straight away.
 // The app quits by itself before its update installs: give it up to 10 s, then end it.
 function PrepareToInstall(var NeedsRestart: Boolean): String;

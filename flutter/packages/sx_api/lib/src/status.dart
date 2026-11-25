@@ -85,8 +85,10 @@ extension StatusApi on SxClient {
 
   Future<ToolResult> sxLaunch() => run('/api/sx/launch');
 
-  /// [force] kills ShowXpress without saving. Laptop only.
-  Future<ToolResult> sxClose({bool force = false}) => run('/api/sx/close', {'force': force});
+  /// [force] kills ShowXpress without saving. Laptop only. [live] says live
+  /// aim or the SX Player wants the DMX interface next, so the save queue
+  /// holds off reopening ShowXpress (for up to 180 seconds).
+  Future<ToolResult> sxClose({bool force = false, bool live = false}) => run('/api/sx/close', {'force': force, 'live': live});
 
   /// Drops one queued save, or all of them with key `*`.
   Future<ToolResult> queueCancel(String key) => run('/api/queue/cancel', {'key': key});

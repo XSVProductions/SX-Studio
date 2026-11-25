@@ -98,4 +98,25 @@ void main() {
     expect(st.rem!.label, 'FIGURE 8');
     expect(t.sx.pressed, ['FIGURE 8']);
   });
+
+  test('closing ShowXpress for live aim holds the save queue', () async {
+    final hold = engine.find<LiveHold>()!;
+    await client.sxClose();
+    expect(hold.on, isFalse);
+    await client.sxClose(live: true);
+    expect(hold.on, isTrue);
+  });
+
+  test('the hold wears off after 180 seconds and ends when cleared', () {
+    var now = DateTime(2026);
+    final hold = LiveHold(now: () => now)..start();
+    now = now.add(const Duration(seconds: 179));
+    expect(hold.on, isTrue);
+    now = now.add(const Duration(seconds: 1));
+    expect(hold.on, isFalse);
+    hold
+      ..start()
+      ..clear();
+    expect(hold.on, isFalse);
+  });
 }

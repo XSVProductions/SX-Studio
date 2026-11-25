@@ -12,10 +12,10 @@ import 'package:sx_studio/theme.dart';
 
 /// A stand-in engine: answers by path and records every POST body.
 class _Engine {
-  _Engine({this.ready = true, this.status = const AutoStatus(running: false), this.remote = const RemoteState()});
+  _Engine({this.ready = true, this.remote = const RemoteState()});
 
   bool ready;
-  AutoStatus status;
+  AutoStatus status = const AutoStatus(running: false);
   RemoteState remote;
   final posts = <String, Json>{};
 

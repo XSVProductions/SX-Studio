@@ -2,11 +2,16 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../show/show_env.dart';
 import '../../sx/auto_player.dart';
+import '../../sx/live_hold.dart';
 import '../../sx/pending_presses.dart';
 import '../engine.dart';
 
-/// ShowXpress open/close, the status poll and the save queue.
+/// ShowXpress open/close, the status poll and the save queue. Shares the
+/// [LiveHold] that `/api/sx/close` with `live: true` starts.
 void registerSxRoutes(Engine e) {
+  final hold = LiveHold();
+  e.provide<LiveHold>(hold);
+
   e.api.get('/api/sx', (req) {
     final pending = e.find<PendingPresses>();
     return SxStatus(
@@ -26,10 +31,9 @@ void registerSxRoutes(Engine e) {
     return e.sx.launch();
   });
 
-  // The old route also took `live: true` from live aim, which held the save
-  // queue for 180 seconds so it would not reopen ShowXpress under live aim.
-  // That hold belongs to the queue (see the report); the flag is ignored here.
   e.api.post('/api/sx/close', (req) {
+    // live aim or the player asked: the queue must not reopen ShowXpress now
+    if (req.body.boolean('live')) hold.start();
     // Force closing loses whatever ShowXpress hasn't saved. Never from a phone.
     final force = req.body.boolean('force');
     if (force && req.fromPhone) throw ToolError('Only on the laptop.');

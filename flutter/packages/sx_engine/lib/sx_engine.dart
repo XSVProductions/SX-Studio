@@ -24,6 +24,7 @@ export 'src/sx/auto_player.dart';
 export 'src/sx/pending_presses.dart';
 export 'src/sx/remote_setup.dart';
 export 'src/sx/desktop_sx_app.dart';
+export 'src/sx/live_hold.dart';
 export 'src/sx/sx_app.dart';
 export 'src/sx/sx_process.dart';
 export 'src/sx/sx_remote.dart';

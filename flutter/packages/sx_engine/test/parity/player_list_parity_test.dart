@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:sx_engine/src/player/player_show.dart';
-import 'package:test/test.dart';
 
 import 'parity.dart';
 

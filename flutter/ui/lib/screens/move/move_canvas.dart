@@ -290,7 +290,7 @@ class _Painter extends CustomPainter {
       for (final (i, p) in w.pts.indexed) {
         final q = shapePx(v, (p.$1.toDouble(), p.$2.toDouble()), size);
         c.drawCircle(q, i == m.point ? 8 : 6, Paint()..color = i == m.point ? Sx.blue : Sx.accent);
-        _text(c, '${i + 1}', q, color: Sx.onPrimary, size: 10, weight: FontWeight.w700, align: TextAlign.center);
+        _text(c, '${i + 1}', q, color: Sx.isLight ? Sx.bg : Sx.onPrimary, size: 10, weight: FontWeight.w700, align: TextAlign.center);
       }
       // Where each head is at [m.at].
       if (w.pts.isNotEmpty) {

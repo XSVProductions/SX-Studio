@@ -12,7 +12,7 @@ import 'auto_logic.dart';
 /// Redraws four times a second from the last status, the way the old page
 /// did, and only while [visible]. No animation runs between redraws.
 class NowPlaying extends StatefulWidget {
-  const NowPlaying({super.key, required this.status, required this.received, required this.visible});
+  const NowPlaying({super.key, required this.status, required this.received, required this.visible, required this.big});
 
   final AutoStatus status;
 
@@ -21,6 +21,9 @@ class NowPlaying extends StatefulWidget {
 
   /// The Auto Show tab is on show. Off tab, nothing redraws.
   final bool visible;
+
+  /// The style of the look's name (the old `.aubig`).
+  final TextStyle big;
 
   @override
   State<NowPlaying> createState() => _NowPlayingState();
@@ -64,60 +67,73 @@ class _NowPlayingState extends State<NowPlaying> {
     final next = s.held ? 'held, stays on this look until you resume' : 'next: ${s.next.isEmpty ? s.name : s.next} in ${fmtSeconds((p.leftMs ?? 0) / 1000)}';
     final warn = s.error.isNotEmpty ? s.error : (s.missing.isNotEmpty ? 'Not in the show: ${s.missing.join(', ')}' : '');
     final target = s.target == 'player'
-        ? 'Playing on the SX Player (Lab)${s.src == 'VirtualDJ' ? ' · tempo from VirtualDJ' : s.src == 'tap' ? ' · tapped tempo' : ''}'
+        ? 'Playing on the SX Player (Lab)${s.src == 'VirtualDJ'
+              ? ' · tempo from VirtualDJ'
+              : s.src == 'tap'
+              ? ' · tapped tempo'
+              : ''}'
         : '';
+    final big = widget.big;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('NOW PLAYING', style: Sx.label),
-                  const SizedBox(height: 2),
+                  Text('NOW PLAYING', style: Sx.sub.copyWith(fontSize: 11.5, letterSpacing: 1)),
                   Text.rich(
                     TextSpan(
                       text: s.name,
                       children: [
                         if (s.held)
-                          const TextSpan(
+                          TextSpan(
                             text: '  HELD',
-                            style: TextStyle(fontSize: 12, color: Sx.amber, letterSpacing: 1),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Sx.accent),
                           ),
                       ],
                     ),
-                    style: const TextStyle(fontFamily: Sx.display, fontSize: 20, fontWeight: FontWeight.w600),
+                    style: big,
                   ),
-                  Text('bar ${p.bar} of ${s.bars} · $next', style: Sx.sub),
-                  if (warn.isNotEmpty) Text(warn, style: const TextStyle(color: Sx.amber, fontSize: 13)),
-                  if (target.isNotEmpty) Text(target, style: Sx.sub),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text('bar ${p.bar} of ${s.bars} · $next', style: Sx.sub),
+                  ),
+                  if (warn.isNotEmpty) Text(warn, style: TextStyle(color: Sx.amber, fontSize: 13)),
+                  if (target.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(target, style: Sx.sub),
+                    ),
                 ],
               ),
             ),
-            Row(
-              children: [
-                for (var k = 0; k < 4; k++)
-                  Container(
-                    width: 12,
-                    height: 12,
-                    margin: const EdgeInsets.only(left: 6, top: 6),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: k < p.beat ? (k == 0 ? Sx.accent : Sx.green) : Sx.well,
-                      border: Border.all(color: Sx.line2),
-                    ),
-                  ),
-              ],
-            ),
+            const SizedBox(width: 8),
+            for (var k = 0; k < 4; k++)
+              Container(
+                width: 18,
+                height: 18,
+                margin: EdgeInsets.only(left: k == 0 ? 0 : 8),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: k < p.beat ? (k == 0 ? Sx.green : Sx.accent) : Sx.tabOn),
+              ),
           ],
         ),
-        const SizedBox(height: 10),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(3),
-          child: LinearProgressIndicator(value: p.fraction, minHeight: 6, backgroundColor: Sx.well, color: Sx.green),
+        // the old `.auprog`
+        Container(
+          height: 8,
+          margin: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(color: Sx.hover, borderRadius: BorderRadius.circular(99)),
+          clipBehavior: Clip.antiAlias,
+          alignment: Alignment.centerLeft,
+          child: FractionallySizedBox(
+            widthFactor: p.fraction.clamp(0, 1).toDouble(),
+            child: DecoratedBox(
+              decoration: BoxDecoration(gradient: LinearGradient(colors: [Sx.green, Sx.accent])),
+            ),
+          ),
         ),
       ],
     );

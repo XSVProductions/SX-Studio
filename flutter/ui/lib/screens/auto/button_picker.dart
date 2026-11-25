@@ -63,8 +63,8 @@ class _PickerState extends State<_Picker> {
           const SizedBox(height: 6),
           Flexible(
             child: pages.isEmpty
-                ? const Padding(
-                    padding: EdgeInsets.only(top: 12),
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 12),
                     child: Text('No button matches.', style: Sx.sub),
                   )
                 : ListView(
@@ -76,8 +76,8 @@ class _PickerState extends State<_Picker> {
                           child: Text('${e.key}${e.value.first.swap ? ' · one at a time' : ''}'.toUpperCase(), style: Sx.label),
                         ),
                         Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
+                          spacing: 5,
+                          runSpacing: 5,
                           children: [
                             for (final b in e.value)
                               _Chip(
@@ -119,22 +119,25 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // the old `.pkb`
     final chip = InkWell(
       onTap: no == null ? onTap : null,
       borderRadius: BorderRadius.circular(8),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
         decoration: BoxDecoration(
-          color: on ? const Color(0x1AA3E635) : null,
+          color: on ? Sx.accent.withValues(alpha: .12) : Sx.panel,
           border: Border.all(color: on ? Sx.accent : Sx.line),
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Text(
-          text,
-          style: TextStyle(fontSize: 13, color: no != null ? Sx.mute : (on ? Sx.accent : Sx.text2)),
-        ),
+        child: Text(text, style: TextStyle(fontSize: 12.5, color: Sx.text)),
       ),
     );
-    return no == null ? chip : Tooltip(message: no!, child: chip);
+    return no == null
+        ? chip
+        : Tooltip(
+            message: no!,
+            child: Opacity(opacity: .4, child: chip),
+          );
   }
 }

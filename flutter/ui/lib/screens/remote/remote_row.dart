@@ -12,7 +12,7 @@ Future<bool> askSx(BuildContext context, String title, String body, String ok) a
       context: context,
       builder: (c) => AlertDialog(
         title: Text(title, style: Sx.title),
-        content: Text(body, style: const TextStyle(color: Sx.text2, height: 1.4)),
+        content: Text(body, style: TextStyle(color: Sx.text2, height: 1.4)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(ok)),
@@ -116,7 +116,7 @@ class _RemoteRowState extends State<RemoteRow> {
     if (rem != null) {
       if (_remSeen != null && rem.at != _remSeen && onTab) {
         final msg = rem.ok
-            ? '✓ SX Studio turned on ${rem.label}. Check the beams.'
+            ? 'SX Studio turned on ${rem.label}. Check the beams.'
             : rem.skipped
             ? "Your show was playing, so ${rem.label} wasn't turned on."
             : '';
@@ -158,7 +158,7 @@ class _RemoteRowState extends State<RemoteRow> {
       setState(() {
         _r = r;
         _auto = doAuto;
-        _note = note.isNotEmpty ? note : (doAuto && r.connected && !r.skipped && r.pressedNow.isNotEmpty ? '✓ Turned on by SX Studio.' : '');
+        _note = note.isNotEmpty ? note : (doAuto && r.connected && !r.skipped && r.pressedNow.isNotEmpty ? 'Turned on by SX Studio.' : '');
       });
       return r;
     } finally {
@@ -168,7 +168,7 @@ class _RemoteRowState extends State<RemoteRow> {
 
   Future<void> _set(RemoteSet s) async {
     final playing = [
-      for (final p in _r?.pressed ?? const <PressedButton>[])
+      for (final p in _r?.pressed ?? const <PressedOnAir>[])
         if (!_isSetup(p.page) && !s.titles.contains(p.title)) p.title,
     ];
     if (playing.isNotEmpty) {
@@ -182,7 +182,13 @@ class _RemoteRowState extends State<RemoteRow> {
       if (!ok) return;
     }
     final r = await _app.client.remotePress(s.titles, solo: true);
-    if (mounted) setState(() => (_r, _note, _auto) = (r, '', false));
+    if (mounted) {
+      setState(() {
+        _r = r;
+        _note = '';
+        _auto = false;
+      });
+    }
   }
 
   Future<void> _off() async {
@@ -195,69 +201,75 @@ class _RemoteRowState extends State<RemoteRow> {
     );
     if (!ok) return;
     final r = await _app.client.remoteOff();
-    if (mounted) setState(() => (_r, _note, _auto) = (r, '', false));
+    if (mounted) {
+      setState(() {
+        _r = r;
+        _note = '';
+        _auto = false;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final r = _r, sets = widget.sets;
-    Widget mini(String label, VoidCallback? onTap, {bool on = false, bool primary = false, String? tip}) {
-      final b = primary
-          ? FilledButton(onPressed: onTap, child: Text(label))
-          : OutlinedButton(
-              onPressed: onTap,
-              style: on ? OutlinedButton.styleFrom(side: const BorderSide(color: Sx.green), foregroundColor: Sx.green) : null,
-              child: Text(label),
-            );
-      return tip == null ? b : Tooltip(message: tip, child: b);
-    }
 
-    final String text;
+    var text = '';
     final actions = <Widget>[];
     var lead = '';
-    var leadColor = Sx.text;
+    IconData? leadIcon;
+    var leadAmber = false;
+    var isOn = false;
     if (r == null) {
       text = 'Checking ShowXpress.';
     } else if (!r.ok && r.setup == null) {
       text = r.error;
-      actions.add(mini('Try again', () => _refresh(auto: false)));
+      actions.add(MiniButton('Try again', onPressed: () => _refresh(auto: false)));
     } else if (!r.ready) {
       lead = 'Let SX Studio press ${sets.map((s) => s.label).join(' / ')} for you. ';
       text = "Turn on ShowXpress remote control once. It's saved in the show${app.sxOpen ? ' (done when ShowXpress next closes).' : '.'}";
-      actions.add(mini('Turn on remote control', () => enableRemote(context, after: () async => _refresh(auto: false)), primary: true));
+      actions.add(MiniButton('Turn on remote control', primary: true, onPressed: () => enableRemote(context, after: () async => _refresh(auto: false))));
     } else if (!r.open) {
       text = 'ShowXpress is closed. Open it and SX Studio turns on ${sets.first.label} by itself.';
-      actions.add(mini('Launch ShowXpress', () => runSave(context, app.client.sxLaunch)));
+      actions.add(MiniButton('Launch ShowXpress', onPressed: () => runSave(context, app.client.sxLaunch, quiet: true)));
     } else if (!r.connected) {
       text = r.error;
-      actions.add(mini('Try again', () => _refresh(auto: false)));
+      actions.add(MiniButton('Try again', onPressed: () => _refresh(auto: false)));
     } else {
       final on = {for (final p in r.pressed) p.title}, have = r.titles.toSet();
       final cur = sets.where((s) => s.titles.every(on.contains)).firstOrNull;
-      if (_note.isNotEmpty) lead = '$_note ';
-      if (r.skipped) {
-        lead += 'Your show is playing (${r.playing.take(4).join(', ')}${r.playing.length > 4 ? '...' : ''}). SX Studio didn\'t press anything, so it isn\'t cut. ';
-        leadColor = Sx.amber;
+      if (_note.isNotEmpty) {
+        lead = '$_note ';
+        if (_note.startsWith('SX Studio turned on') || _note.startsWith('Turned on')) leadIcon = Icons.check;
       }
+      if (r.skipped) {
+        lead +=
+            'Your show is playing (${r.playing.take(4).join(', ')}${r.playing.length > 4 ? '...' : ''}). SX Studio didn\'t press anything, so it isn\'t cut. ';
+        leadAmber = true;
+      }
+      isOn = cur != null;
       text = cur != null
-          ? '● ${cur.label} is on in ShowXpress.'
+          ? '${cur.label} is on in ShowXpress.'
           : on.isNotEmpty
           ? 'Playing: ${on.take(5).join(', ')}${on.length > 5 ? '...' : ''}'
           : 'Nothing is playing in ShowXpress.';
       for (final s in sets) {
         final miss = s.titles.any((x) => !have.contains(x));
-        actions.add(mini(s.label, miss ? null : () => _set(s), on: identical(cur, s), tip: miss ? 'Not in the show yet' : null));
+        final b = MiniButton(s.label, on: identical(cur, s), onPressed: miss ? null : () => _set(s));
+        actions.add(miss ? Tooltip(message: 'Not in the show yet', child: b) : b);
       }
-      if (on.isNotEmpty) actions.add(mini('All off', _off));
+      if (on.isNotEmpty) actions.add(MiniButton('All off', onPressed: _off));
     }
 
+    // the old `.remrow`
     return Container(
       width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0x0D3DDC84),
-        border: Border.all(color: const Color(0x4D3DDC84)),
+        color: Sx.green.withValues(alpha: .05),
+        border: Border.all(color: Sx.green.withValues(alpha: .3)),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Wrap(
@@ -267,19 +279,35 @@ class _RemoteRowState extends State<RemoteRow> {
         children: [
           Text.rich(
             TextSpan(
-              style: const TextStyle(fontSize: 13, color: Sx.text2, height: 1.4),
               children: [
+                if (leadIcon != null)
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(leadIcon, size: 15, color: Sx.green),
+                    ),
+                  ),
                 if (lead.isNotEmpty)
                   TextSpan(
                     text: lead,
-                    style: TextStyle(color: leadColor, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: leadAmber ? Sx.amber : Sx.text, fontWeight: FontWeight.w600),
+                  ),
+                if (isOn)
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 5),
+                      child: Icon(Icons.circle, size: 9, color: Sx.green),
+                    ),
                   ),
                 TextSpan(
                   text: text,
-                  style: TextStyle(color: text.startsWith('●') ? Sx.green : Sx.text2),
+                  style: TextStyle(color: isOn ? Sx.green : Sx.text2),
                 ),
               ],
             ),
+            style: TextStyle(fontSize: 13, color: Sx.text2, height: 1.4),
           ),
           ...actions,
         ],

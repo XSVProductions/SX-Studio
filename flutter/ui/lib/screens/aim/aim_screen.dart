@@ -6,6 +6,7 @@ import 'package:sx_api/sx_api.dart';
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../remote/remote_row.dart';
 import 'aim_widgets.dart';
 import 'live_aim_screen.dart';
 
@@ -44,6 +45,19 @@ const _words = {
     size: '100% = AROUND ROOM reaches the edge you aimed. Width = across the room, Height = up and down the walls.',
     svg: 'dashed = what you aimed · amber = AROUND ROOM',
   ),
+};
+
+/// The buttons the remote row turns on, per mode (the old `remSets`). The
+/// first one goes on by itself when the tab opens.
+const _remoteSets = {
+  AimMode.floor: [
+    RemoteSet('DF AIM (ADJUST)', ['DF AIM (ADJUST)']),
+    RemoteSet('DF CHECK 140 + 251', ['DF CHECK 140', 'DF CHECK 251']),
+  ],
+  AimMode.room: [
+    RemoteSet('ROOM AIM (ADJUST)', ['ROOM AIM (ADJUST)']),
+    RemoteSet('ROOM CHECK', ['ROOM CHECK']),
+  ],
 };
 
 enum _Tone { ok, warn, err, queued }
@@ -502,6 +516,8 @@ class _AimScreenState extends State<AimScreen> {
               ),
             ),
           if (!phone) const SizedBox(height: 14),
+          // the old `#aimrem`: SX Studio presses the ADJUST scene or the CHECK buttons
+          RemoteRow(tab: 'aim', sets: _remoteSets[_mode]!),
           _liveCall(phone),
           const SizedBox(height: 14),
           Row(

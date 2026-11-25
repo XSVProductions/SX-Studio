@@ -42,7 +42,16 @@ const _applyOut = '  CHANGED  STAR.gpj  12 values changed\n  -> 9 movement scene
 
 /// The screen on a laptop-sized window, against a fake engine. Returns the
 /// POSTs it makes, by path, and the app state to dispose at the end.
-Future<(Map<String, Map<String, Object?>>, AppState)> _mount(WidgetTester tester, {String warn = '', Map<String, bool>? install}) async {
+///
+/// With [sxOpen] the fake ShowXpress is open with its remote on, and every
+/// press is added to [presses].
+Future<(Map<String, Map<String, Object?>>, AppState)> _mount(
+  WidgetTester tester, {
+  String warn = '',
+  Map<String, bool>? install,
+  bool sxOpen = false,
+  List<List<Object?>>? presses,
+}) async {
   SharedPreferences.setMockInitialValues({});
   tester.view
     ..physicalSize = const Size(1300, 1000)
@@ -56,9 +65,27 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(WidgetTester tester
       final path = req.url.path;
       Object answer = {
         'ok': true,
-        'open': false,
+        'open': sxOpen,
         'q': {'items': <Object>[], 'reopen': true},
       };
+      const titles = ['DF AIM (ADJUST)', 'DF CHECK 140', 'DF CHECK 251', 'ROOM AIM (ADJUST)', 'ROOM CHECK'];
+      Map<String, Object?> remote(List<Object?> on) => {
+        'ok': true,
+        'ready': true,
+        'open': true,
+        'connected': true,
+        'titles': titles,
+        'pressed': [
+          for (final t in on) {'title': t, 'page': 'SETUP'},
+        ],
+        'pressedNow': on,
+      };
+      if (path == '/api/remote') return http.Response(jsonEncode(remote(const [])), 200);
+      if (path == '/api/remote/press') {
+        final on = ((jsonDecode(req.body) as Map)['titles'] as List).cast<Object?>();
+        presses?.add(on);
+        return http.Response(jsonEncode(remote(on)), 200);
+      }
       if (path == '/api/preview') answer = _preview(mode: req.url.queryParameters['mode'] == 'room' ? 'Room' : 'Floor', warn: warn, install: install);
       if (req.method == 'POST') {
         posts[path] = (jsonDecode(req.body) as Map).cast();
@@ -67,7 +94,9 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(WidgetTester tester
       return http.Response(jsonEncode(answer), 200);
     }),
   );
-  final app = AppState(client);
+  final app = AppState(client, tab: 'aim');
+  // the first status poll lands before the tab shows, as in the app
+  await tester.pump();
   await tester.pumpWidget(
     AppScope(
       state: app,
@@ -121,6 +150,24 @@ void main() {
     await tester.tap(find.text('Add them to the SETUP page'));
     await tester.pumpAndSettle();
     expect(posts.keys, contains('/api/aim/install'));
+    app.dispose();
+  });
+
+  testWidgets('with ShowXpress open, the remote row turns on the ADJUST scene of the mode on show', (tester) async {
+    final presses = <List<Object?>>[];
+    final (_, app) = await _mount(tester, sxOpen: true, presses: presses);
+    expect(presses, [
+      ['DF AIM (ADJUST)'],
+    ]);
+    expect(find.textContaining('DF AIM (ADJUST) is on in ShowXpress.', findRichText: true), findsOneWidget);
+    expect(find.text('DF CHECK 140 + 251'), findsOneWidget);
+
+    await tester.tap(find.text('Room'));
+    await tester.pumpAndSettle();
+    expect(presses.last, ['ROOM AIM (ADJUST)']);
+    await tester.tap(find.text('ROOM CHECK').first);
+    await tester.pumpAndSettle();
+    expect(presses.last, ['ROOM CHECK']);
     app.dispose();
   });
 }

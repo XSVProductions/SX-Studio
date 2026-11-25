@@ -16,3 +16,7 @@ export 'src/show/show_env.dart';
 export 'src/show/text_files.dart';
 export 'src/sx/sx_app.dart';
 export 'src/tools/speed.dart';
+export 'src/tools/flip.dart';
+export 'src/tools/rig.dart';
+export 'src/tools/rig_test.dart';
+export 'src/tools/skip_flash.dart';

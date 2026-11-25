@@ -5,3 +5,6 @@ export 'src/client.dart';
 export 'src/json.dart';
 export 'src/speed.dart';
 export 'src/status.dart';
+export 'src/rig.dart';
+export 'src/rig_test.dart';
+export 'src/skip_flash.dart';

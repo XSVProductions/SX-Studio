@@ -1133,6 +1133,7 @@ header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .a4conn{margin-top:12px;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
 .a4conn .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;background:var(--amber);vertical-align:0}.a4conn .dot.green{background:var(--green)}.a4conn .dot.red{background:var(--red)}
 .a4pages{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.a4pages .mini.on{border-color:var(--acc);color:var(--acc)}
+.a4grid .pad>*,#apgrid .pad>*{pointer-events:none}.a4drop{outline:2px dashed var(--acc)!important;outline-offset:1px}
 .a4list{max-height:360px;overflow:auto;margin:8px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 4px}
 .a4g{font-size:11px;color:var(--dim);margin:8px 4px 2px;text-transform:uppercase;letter-spacing:.04em}
 .a4b{padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12.5px}.a4b:hover{background:var(--hover)}.a4b.cur{color:var(--acc);font-weight:650}
@@ -1245,7 +1246,7 @@ input[type=color]{width:46px;height:34px;border:1px solid var(--line);border-rad
 .ph body{-webkit-tap-highlight-color:transparent;-webkit-text-size-adjust:100%}
 .ph button,.ph .chip,.ph .hd,.ph .slot,.ph .cp,.ph .pkb,.ph .pad,.ph .lvh,.ph .lg,.ph .pick div{touch-action:manipulation}
 .ph .lvkeys{display:none}.ph .lvtop{padding-top:calc(10px + env(safe-area-inset-top))}
-.ph .ht[data-go=rt]{order:1}.ph .ht[data-go=rig]{order:2}.ph .ht[data-go=skip]{order:3}.ph .ht[data-go=aim]{order:4}.ph .ht[data-go=color]{order:5}.ph .ht[data-go=pre]{order:6}.ph .ht[data-go=auto]{order:7}.ph .ht[data-go=apc]{order:8}.ph .ht[data-go=speed]{order:9}.ph .ht[data-go=health]{order:10}
+.ph .ht[data-go=rt]{order:1}.ph .ht[data-go=rig]{order:2}.ph .ht[data-go=skip]{order:3}.ph .ht[data-go=aim]{order:4}.ph .ht[data-go=color]{order:5}.ph .ht[data-go=pre]{order:6}.ph .ht[data-go=auto]{order:7}.ph .ht[data-go=apc]{order:8}.ph .ht[data-go=apc40]{order:8}.ph .ht[data-go=speed]{order:9}.ph .ht[data-go=health]{order:10}
 @media (max-width:860px){.clwrap{grid-template-columns:1fr}.htiles{grid-template-columns:1fr 1fr}}
 @media (max-width:860px){.apcwrap{grid-template-columns:1fr}.sc{grid-template-columns:1fr}.sc .st{text-align:left}.sp{grid-template-columns:1fr 1fr}}
 @media (max-width:760px){.how{grid-template-columns:1fr}.sizegrid{grid-template-columns:1fr}.heads{grid-template-columns:repeat(4,1fr)}.phgrid{grid-template-columns:1fr}}
@@ -1458,6 +1459,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
    <button class="ht" data-go="rig"><i>RIG</i><b>Tonight&rsquo;s Rig</b><span>Which heads are hung tonight</span></button>
    <button class="ht" data-go="skip"><i>RIG</i><b>Strobe</b><span>The heads the SKIP FLASH button uses</span></button>
    <button class="ht" data-go="apc"><i>CONTROL</i><b>APC mini</b><span>Move pads and pick their colours</span></button>
+   <button class="ht" data-go="apc40"><i>CONTROL</i><b>APC40</b><span>Your own pages of pads for the APC40</span></button>
    <button class="ht" data-go="speed"><i>CONTROL</i><b>Speed Faders</b><span>Which fader drives which button</span></button>
    <button class="ht" data-go="health"><i>SHOW</i><b>Health Check</b><span>Find and fix problems in the show</span></button>
    <button class="ht" data-go="scene"><i>SHOW</i><b>Scene Editor</b><span>Change a scene and see it on the lights</span></button>
@@ -2088,15 +2090,31 @@ function padClick(n){const here=padsAt(n);
   if(here.length===1){if(!onGrid(sp)){apMsg='That pad is taken &mdash; pick an empty pad.';renderApc();return;}apN[here[0].sec]=from;}
   apN[apSel]=n;apSel=null;apMsg='';renderApc();return;}
  if(here.length){apSel=here[0].sec;apMsg='';renderApc();}}
+// drag a pad to move it (same rules as tap-then-tap: onto a used pad = swap); right-click = menu; click elsewhere = deselect
+let apDrag=null;
+function apDnd(){const off=()=>document.querySelectorAll('.a4drop').forEach(x=>x.classList.remove('a4drop'));
+ document.querySelectorAll('#apgrid .pad').forEach(e=>{const n=+e.dataset.n;
+  e.ondragstart=ev=>{const ps=padsAt(n);if(!ps.length){ev.preventDefault();return;}apDrag=(ps.find(x=>x.sec===apSel)||ps[0]).sec;ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',apDrag);ctxClose();};
+  e.ondragend=()=>{apDrag=null;off();};
+  e.ondragover=ev=>{if(apDrag===null)return;ev.preventDefault();ev.dataTransfer.dropEffect='move';e.classList.add('a4drop');};
+  e.ondragleave=()=>e.classList.remove('a4drop');
+  e.ondrop=ev=>{ev.preventDefault();off();if(apDrag===null)return;const s=apDrag;apDrag=null;if(apN[s]===n)return;apSel=s;padClick(n);};
+  e.oncontextmenu=ev=>{ev.preventDefault();const ps=padsAt(n);
+   if(!ps.length){ctxOpen(ev.clientX,ev.clientY,'Free pad - '+rc(n),[{h:'Nothing on this pad',off:true,go:()=>{}}]);return;}
+   const it=[];ps.forEach(p=>{it.push({h:(ps.length>1?esc(p.title)+': ':'')+'Colours / details&hellip;',go:()=>{apSel=p.sec;apMsg='';renderApc();}});
+    it.push({h:(ps.length>1?'Take '+esc(p.title)+' off the pads':'Take off the pads'),go:()=>{apN[p.sec]=-1;if(apSel===p.sec)apSel=null;apMsg='';renderApc();}});});
+   ctxOpen(ev.clientX,ev.clientY,ps.map(p=>p.title).join(' + ')+' - '+rc(n),it);};});}
+document.addEventListener('pointerdown',e=>{if(!apSel||curTab()!=='apc'||!e.target.closest)return;if(e.target.closest('#apgrid,#apside,#apissues,#ctxm,.bar'))return;apSel=null;apMsg='';renderApc();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&apSel&&curTab()==='apc'){apSel=null;apMsg='';renderApc();}});
 function renderApc(){if(!A)return;
  if(showErr('aperr',A)){['apgrid','apside','apfaders','apissues'].forEach(i=>$(i).innerHTML='');$('apstate').style.display='none';updApc();return;}
  let h='',used=0;const free=[];
  for(let r=1;r<=8;r++)for(let c=1;c<=8;c++){const n=(8-r)*8+(c-1),ps=padsAt(n),p=ps.find(x=>x.sec===apSel)||ps[0];
   if(!p){free.push('row '+r+' col '+c);h+=`<div class="pad empty${apSel?' tgt':''}" data-n="${n}" title="${rc(n)} - free"><div class="t">free</div></div>`;continue;}
   used++;const mv=ps.some(x=>apN[x.sec]!==x.note||colChg(x)),bg=PAL[apOff(p)]||'151820',on=PAL[apOn(p)]||'444444';
-  h+=`<div class="pad${ps.some(x=>x.sec===apSel)?' sel':''}${apSel?' tgt':''}${mv?' mv':''}${ps.length>1?' dup':''}${p.sceneOk?'':' miss'}" data-n="${n}" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${bg}" title="${esc(ps.map(x=>x.title+' ('+x.pageName+')').join(' + '))} - ${rc(n)}">`+
+  h+=`<div class="pad${ps.some(x=>x.sec===apSel)?' sel':''}${apSel?' tgt':''}${mv?' mv':''}${ps.length>1?' dup':''}${p.sceneOk?'':' miss'}" data-n="${n}" draggable="true" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${bg}" title="${esc(ps.map(x=>x.title+' ('+x.pageName+')').join(' + '))} - ${rc(n)}">`+
    `<div class="on" style="background:#${on}"></div>${ps.length>1?`<span class="badge">${ps.length}</span>`:''}<div class="t">${esc(p.title)}</div><div class="p">${esc(p.pageName)}</div></div>`;}
- $('apgrid').innerHTML=h;document.querySelectorAll('.pad').forEach(e=>e.onclick=()=>padClick(+e.dataset.n));
+ $('apgrid').innerHTML=h;document.querySelectorAll('#apgrid .pad').forEach(e=>e.onclick=()=>padClick(+e.dataset.n));apDnd();
  const sp=apSel&&A.pads.find(p=>p.sec===apSel);
  if(sp){const n=apN[sp.sec],where=n<0?'none &mdash; will be taken off':onGrid(sp)?rc(n):'note '+n+' (not a pad)';
   $('apside').innerHTML=`<h3>${esc(sp.title)}</h3><div class="kv"><span>Page</span><b>${esc(sp.pageName)}</b><span>Scene</span><b>${sp.sceneOk?esc(sp.scene):'<span style="color:var(--red)">'+esc(sp.scene)+' &mdash; missing!</span>'}</b>`+
@@ -2105,7 +2123,7 @@ function renderApc(){if(!A)return;
    `<p class="sub" style="margin:0 0 10px">${apMsg||'Tap a colour to change it, or tap the pad it should go to. Tapping a used pad swaps the two.'}</p><div class="row"><button id="apdel">Take off the pads</button><button id="apcancel">Done</button></div>`;
   $('apdel').onclick=()=>{apN[sp.sec]=-1;apSel=null;apMsg='';renderApc();};
   document.querySelectorAll('[data-sw]').forEach(e=>e.onclick=()=>{const c=apC[sp.sec]||{on:sp.on??21,off:sp.off??0};c[e.dataset.sw]=+e.dataset.v;apC[sp.sec]=c;renderApc();});$('apcancel').onclick=()=>{apSel=null;apMsg='';renderApc();};}
- else $('apside').innerHTML=`<h3>Move a pad</h3><p class="sub" style="margin:0 0 8px">Tap a pad to see what it plays, then tap where it should go. A blue dot = moved, not saved yet.</p>${apMsg?'<p class="sub" style="color:var(--amber)">'+apMsg+'</p>':''}<div class="kv"><span>Pads used</span><b>${used} of 64</b><span>Free</span><b>${free.join(', ')||'none'}</b></div>`;
+ else $('apside').innerHTML=`<h3>Move a pad</h3><p class="sub" style="margin:0 0 8px">Tap a pad to see what it plays, then tap where it should go &mdash; or drag it there. Right-click a pad to take it off. A blue dot = moved, not saved yet.</p>${apMsg?'<p class="sub" style="color:var(--amber)">'+apMsg+'</p>':''}<div class="kv"><span>Pads used</span><b>${used} of 64</b><span>Free</span><b>${free.join(', ')||'none'}</b></div>`;
  $('apfaders').innerHTML=(A.faders||[]).map(f=>`<div class="fd"><b>Fader ${f.n}</b><span>CC ${f.cc} &rarr; </span>${esc(f.caption||'?')} speed</div>`).join('');
  const iss=[];
  for(let n=0;n<64;n++){const ps=padsAt(n);if(ps.length>1)iss.push(['error',rc(n)+' plays '+ps.length+' buttons',ps.map(p=>p.title+' ('+p.pageName+')').join(', ')+' &mdash; one press fires all of them. Tap the pad (again to pick the next one) and move one away.','']);}
@@ -2154,8 +2172,8 @@ function renderA40(){if(!Q4)return;
  for(let r=0;r<5;r++)for(let c=0;c<8;c++){const n=(4-r)*8+c,t=pg.pads[n];
   if(!t){h+=`<div class="pad empty${a4Sel===n?' sel':''}" data-a4="${n}" title="${a4rc(n)} - empty"><div class="t">empty</div></div>`;continue;}
   const b=B[t];
-  h+=`<div class="pad${a4Sel===n?' sel':''}${b?'':' miss'}" data-a4="${n}" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${b?PAL[b.off]:'151820'}" title="${esc(t)} - ${a4rc(n)}${b?'':' - not in ShowXpress!'}"><div class="on" style="background:#${b?PAL[b.on]:'444444'}"></div><div class="t">${esc(t)}</div><div class="p">${b?esc(b.pageName):'not in ShowXpress!'}</div></div>`;}
- $('a4grid').innerHTML=h;document.querySelectorAll('[data-a4]').forEach(e=>e.onclick=()=>{const n=+e.dataset.a4;a4Sel=a4Sel===n?-1:n;renderA40();if(a4Sel>=0){const q=$('a4q');if(q)q.focus();}});
+  h+=`<div class="pad${a4Sel===n?' sel':''}${b?'':' miss'}" data-a4="${n}" draggable="true" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${b?PAL[b.off]:'151820'}" title="${esc(t)} - ${a4rc(n)}${b?'':' - not in ShowXpress!'}"><div class="on" style="background:#${b?PAL[b.on]:'444444'}"></div><div class="t">${esc(t)}</div><div class="p">${b?esc(b.pageName):'not in ShowXpress!'}</div></div>`;}
+ $('a4grid').innerHTML=h;document.querySelectorAll('[data-a4]').forEach(e=>e.onclick=()=>{const n=+e.dataset.a4;a4Sel=a4Sel===n?-1:n;renderA40();if(a4Sel>=0){const q=$('a4q');if(q)q.focus();}});a4Dnd();
  if(a4Sel>=0){const cur=pg.pads[a4Sel];
   $('a4side').innerHTML=`<h3>Pad: ${a4rc(a4Sel)}</h3><div class="kv"><span>Plays</span><b>${cur?esc(cur)+(B[cur]?' <span class="tag">'+esc(B[cur].pageName)+'</span>':' <span style="color:var(--red)">&mdash; not in ShowXpress!</span>'):'nothing yet'}</b></div>`+
    `<input type="text" id="a4q" placeholder="Search ShowXpress buttons&hellip;" value="${esc(a4Q)}"><div class="a4list" id="a4list"></div>`+
@@ -2164,7 +2182,7 @@ function renderA40(){if(!Q4)return;
   $('a4clr').onclick=()=>{delete pg.pads[a4Sel];renderA40();};$('a4done').onclick=()=>{a4Sel=-1;renderA40();};}
  else{const used=Object.keys(pg.pads).length,pn=[...new Set((Q4.buttons||[]).map(b=>b.pageName))];
   $('a4side').innerHTML=`<h3>Page ${a4Pg+1}</h3><div class="kv"><span>Name</span><b><input type="text" id="a4name" maxlength="30" value="${esc(pg.name)}"></b><span>Pads</span><b>${used} of 40 used</b><span>On the APC40</span><b>Track Select ${a4Pg+1}</b></div>`+
-   `<p class="sub" style="margin:0 0 6px">Tap a pad to choose what it plays.</p>`+
+   `<p class="sub" style="margin:0 0 6px">Tap a pad to choose what it plays. Drag a pad to move it (onto another pad to swap, onto a page tab to send it to that page). Right-click a pad to clear it.</p>`+
    `<div style="margin:10px 0"><select id="a4fill"><option value="">Fill the empty pads from a ShowXpress page&hellip;</option>${pn.map(n=>`<option>${esc(n)}</option>`).join('')}</select></div>`+
    `<div class="row">${a4Pg>0?'<button class="mini" id="a4left">&larr; Move page left</button>':''}${a4Pg<L4.pages.length-1?'<button class="mini" id="a4right">Move page right &rarr;</button>':''}${L4.pages.length>1?'<button class="mini" id="a4del">Delete this page</button>':''}${used?'<button class="mini" id="a4clear">Clear all pads</button>':''}</div>`;
   $('a4name').oninput=e=>{pg.name=e.target.value;const b=document.querySelector('[data-a4p="'+a4Pg+'"]');if(b)b.innerHTML=(a4Pg+1)+' &middot; '+esc(pg.name);updA40();};
@@ -2180,6 +2198,29 @@ function renderA40(){if(!Q4)return;
  $('a4faders').innerHTML=FD.map(f=>`<div class="fd"><b>${f==='9'?'Master fader':'Fader '+f}</b><select data-a4f="${f}"><option value="">nothing</option>${(Q4.faders||[]).map(x=>`<option value="${x.k}"${L4.faders[f]!==undefined&&+L4.faders[f]===x.k?' selected':''}>${esc(x.caption||'Fader '+(x.k+1))} ${x.type}</option>`).join('')}</select></div>`).join('');
  document.querySelectorAll('[data-a4f]').forEach(s=>s.onchange=()=>{if(s.value==='')delete L4.faders[s.dataset.a4f];else L4.faders[s.dataset.a4f]=+s.value;updA40();});
  a4Conn();updA40();}
+// drag a pad onto another pad (swap) or onto a page tab (same spot on that page); right-click = menu
+let a4Drag=null;
+function a4Move(fp,f,tp,to){if(fp===tp&&f===to)return;const a=L4.pages[fp].pads,b=L4.pages[tp].pads,x=a[f],y=b[to];if(!x)return;
+ if(y)a[f]=y;else delete a[f];b[to]=x;if(fp===a4Pg&&a4Sel===f)a4Sel=tp===a4Pg?to:-1;else if(tp===a4Pg&&a4Sel===to)a4Sel=f;}
+function a4Dnd(){const off=()=>document.querySelectorAll('.a4drop').forEach(x=>x.classList.remove('a4drop'));
+ document.querySelectorAll('#a4grid [data-a4]').forEach(e=>{const n=+e.dataset.a4;
+  e.ondragstart=ev=>{a4Drag=n;ev.dataTransfer.effectAllowed='move';ev.dataTransfer.setData('text/plain',String(n));ctxClose();};
+  e.ondragend=()=>{a4Drag=null;off();};
+  e.ondragover=ev=>{if(a4Drag===null)return;ev.preventDefault();ev.dataTransfer.dropEffect='move';e.classList.add('a4drop');};
+  e.ondragleave=()=>e.classList.remove('a4drop');
+  e.ondrop=ev=>{ev.preventDefault();off();if(a4Drag===null)return;const f=a4Drag;a4Drag=null;a4Move(a4Pg,f,a4Pg,n);renderA40();};
+  e.oncontextmenu=ev=>{ev.preventDefault();const t=L4.pages[a4Pg].pads[n];
+   ctxOpen(ev.clientX,ev.clientY,(t||'Empty pad')+' - '+a4rc(n),[
+    {h:t?'Change the button&hellip;':'Choose a button&hellip;',go:()=>{a4Sel=n;renderA40();const q=$('a4q');if(q)q.focus();}},
+    {h:'Clear this pad',off:!t,go:()=>{delete L4.pages[a4Pg].pads[n];if(a4Sel===n)a4Sel=-1;renderA40();}}]);};});
+ document.querySelectorAll('#a4pages [data-a4p]').forEach(b=>{const i=+b.dataset.a4p;if(i===a4Pg)return;
+  b.ondragover=ev=>{if(a4Drag===null)return;ev.preventDefault();ev.dataTransfer.dropEffect='move';b.classList.add('a4drop');};
+  b.ondragleave=()=>b.classList.remove('a4drop');
+  b.ondrop=ev=>{ev.preventDefault();off();if(a4Drag===null)return;const f=a4Drag,t=L4.pages[a4Pg].pads[f],had=L4.pages[i].pads[f];a4Drag=null;a4Move(a4Pg,f,i,f);renderA40();
+   a4Say(esc(t)+' moved to '+esc(L4.pages[i].name)+' (same spot)'+(had?' &mdash; '+esc(had)+' came back here in its place':'')+'.');};});}
+// the button list closes when you click anywhere else (or press Esc)
+document.addEventListener('pointerdown',e=>{if(a4Sel<0||curTab()!=='apc40'||!e.target.closest)return;if(e.target.closest('#a4grid,#a4side,#a4pages,#ctxm,.bar'))return;a4Sel=-1;renderA40();});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&a4Sel>=0&&curTab()==='apc40'){a4Sel=-1;renderA40();}});
 function a4List(){const e=$('a4list');if(!e)return;const pg=L4.pages[a4Pg],cur=pg.pads[a4Sel],q=a4Q.trim().toLowerCase();let h='',g=null;
  (Q4.buttons||[]).filter(b=>!b.dup&&(!q||b.title.toLowerCase().includes(q)||b.pageName.toLowerCase().includes(q))).forEach(b=>{if(b.pageName!==g){g=b.pageName;h+=`<div class="a4g">${esc(g)}</div>`;}
   h+=`<div class="a4b${b.title===cur?' cur':''}" data-a4t="${esc(b.title)}"><span class="sw" style="background:#${PAL[b.on]}"></span>${esc(b.title)}</div>`;});

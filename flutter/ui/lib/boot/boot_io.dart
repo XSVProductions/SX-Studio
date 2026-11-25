@@ -9,6 +9,7 @@ import 'package:sx_api/sx_api.dart';
 import 'package:sx_engine/sx_engine.dart';
 
 import 'desktop_window.dart';
+import 'old_windows.dart';
 
 /// The laptop UI's port, the old window server's (`-Port 47321`).
 const appPort = 47321;
@@ -24,6 +25,8 @@ File? _info;
 /// address, process id and version. When the port is taken, a copy of the
 /// same version brings up its window and this one quits; an older or newer
 /// version still running (right after an update) is stopped and replaced.
+/// On Windows the old PowerShell app's window, left open by an update, is
+/// closed then (see [closeOldWindows]).
 ///
 /// `SX_SHOW` points the engine at a show folder (development). `SX_PORT`
 /// picks another port, with its own info file, as the old `-Port`. `SX_WEB`
@@ -68,6 +71,9 @@ Future<SxClient> boot() async {
   _engine = started.stop;
   _info = info;
   writeInfo(info, url: 'http://localhost:$port/?t=$token', pid: pid, ver: sxStudioVersion);
+  // The old app's window left open by an update has nothing behind it any more.
+  // This copy now holds the port, so any such window is closed (Windows only).
+  if (port == appPort) await closeOldWindows();
   unawaited(started.quit.then(_quit));
   return SxClient(Uri.parse('http://127.0.0.1:${started.port}'), token: token, client: LiveWatch(http.Client()));
 }

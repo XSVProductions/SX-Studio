@@ -84,6 +84,7 @@ void sceneParity(
   required Object? Function(ShowEnv env, String backups) dart,
   void Function(ShowEnv env, String backups)? setup,
   Pattern? expectOut,
+  void Function(OldRun old, Object? answer, String? error, ShowEnv env)? onPs7,
 }) {
   test(name, skip: paritySkip, () async {
     final tmp = Directory.systemTemp.createTempSync('sx_scene_parity_');
@@ -116,6 +117,8 @@ void sceneParity(
       error = e.message;
     }
     final newFiles = _snapshot(work);
+    // a case where the old tool is right only on Windows PowerShell 5.1: PowerShell 7 checks both sides apart
+    if (onPs7 != null && !oldIsWinPs) return onPs7(old, answer, error, env);
     if (old.error != null || error != null) {
       expect(error, old.error, reason: 'error message (old stderr: ${old.stderr.trim()})');
     } else {
@@ -258,6 +261,7 @@ void main() {
       SceneOpen? scene,
       void Function(ShowEnv env, String backups)? setup,
       String expect = 'CHANGED',
+      void Function(OldRun old, Object? answer, String? error, ShowEnv env)? onPs7,
     }) {
       for (final o in scene == null ? pick : [scene]) {
         sceneParity(
@@ -265,6 +269,7 @@ void main() {
           args: {'Action': 'Save'},
           setup: setup,
           expectOut: expect,
+          onPs7: onPs7,
           changes: (env) => make(setup == null ? o : _open(env, o.file)),
           dart: (env, b) => sceneSave(env, make(setup == null ? o : _open(env, o.file)), backupBase: b),
         );
@@ -365,7 +370,8 @@ void main() {
       }, scene: big);
     }
 
-    // old-app bug, kept: two channels added into the same gap are refused by the self-check
+    // Two channels added into the same gap. The old tool saves them in channel order on Windows PowerShell
+    // 5.1 and refuses on PowerShell 7 (its edits at one place follow Sort-Object's ties); the port always saves.
     final gapPair = () {
       final miss = [
         for (final c in model.chans)
@@ -378,7 +384,7 @@ void main() {
     }();
     if (gapPair != null) {
       save(
-        'two channels added into the same gap (old bug: refused)',
+        'two channels added into the same gap, in channel order',
         (o) => SceneChanges(
           scene: o.file,
           sha: o.sha,
@@ -389,7 +395,24 @@ void main() {
           ],
         ),
         scene: big,
-        expect: 'two ways',
+        onPs7: (old, answer, error, env) {
+          expect(old.error, contains('two ways'), reason: 'the old tool refuses on PowerShell 7');
+          expect(error, isNull);
+          expect('$answer', contains('CHANGED'));
+          // the scene is its old text plus the two new tags, in channel order, and nothing else
+          final (a, b) = gapPair;
+          String text(String path) => utf8.decode(File(path).readAsBytesSync());
+          final now = text(p.join(env.root, 'scenes', big.file));
+          String tag(int ix) => '<Channel index="$ix" name="[^"]*" value="0"/>';
+          // this head's blocks in the steps (not its self-closing line in <Fixtures>), which had neither channel
+          final block = RegExp('<Fixture id="${RegExp.escape(head.id)}"(?:\\s[^>]*[^/])?>.*?</Fixture>', dotAll: true);
+          int count(String rx) => block.allMatches(now).fold(0, (n, m) => n + RegExp(rx).allMatches(m[0]!).length);
+          final n = count(tag(a));
+          expect(n, greaterThan(0));
+          expect(count('${tag(a)}\\s*${tag(b)}'), n, reason: 'each $a followed by $b');
+          final added = RegExp('(\\r?\\n[ \\t]*)?(${tag(a)}|${tag(b)})');
+          expect(now.replaceAllMapped(block, (m) => m[0]!.replaceAll(added, '')), text(p.join(realShowPath!, 'scenes', big.file)));
+        },
       );
     }
     save('nothing to change', same, expect: 'nothing to change');

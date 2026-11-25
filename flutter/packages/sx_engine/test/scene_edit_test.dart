@@ -523,28 +523,75 @@ void main() {
       expect(File(p.join(dir, '20260102-030405-006.scex')).existsSync(), isFalse);
     });
 
-    // An old-app bug kept on purpose (CLAUDE.md: keep old behavior, report it).
-    // Two channels added into the same gap come out in reverse order in the
-    // text, the XML way disagrees, and the save is refused.
-    test('Two channels added into the same gap are refused, as in the old tool', () {
-      // names for channels 6 and 7 of the model, from another scene
+    // The old tool left the order of tags added at one place to Sort-Object's
+    // ties: right on Windows PowerShell 5.1 for two tags, refused by its
+    // self-check on PowerShell 7. The port always puts them in channel order.
+    test('Channels added into the same gap come out in channel order, however many and in any order', () {
+      const names = {1: 'one', 2: 'two', 3: 'three', 6: 'six', 7: 'seven', 8: 'eight'};
       s.write(
         'NAMES.scex',
-        '<Scene><Fixtures><Fixture id="11" name="a" model="$_m"/></Fixtures><Steps><Step><Fixture id="11"><Channel index="6" name="six" value="0"/><Channel index="7" name="seven" value="0"/></Fixture></Step></Steps></Scene>',
+        '<Scene><Fixtures><Fixture id="11" name="a" model="$_m"/></Fixtures><Steps><Step><Fixture id="11">'
+            '${[for (final e in names.entries) '<Channel index="${e.key}" name="${e.value}" value="0"/>'].join()}</Fixture></Step></Steps></Scene>',
       );
-      final o = s.open('CHASE.scex');
+      String line(int ix) => '        <Channel index="$ix" name="${names[ix]}" value="0"/>';
+      // CHASE with the new lines around channel 5 of head 11, in every step
+      String expected(List<int> before, List<int> after) {
+        final lines = _chase.split(_crlf);
+        return [
+          for (final (i, l) in lines.indexed)
+            if (i > 0 && lines[i - 1] == '      <Fixture id="11">') ...[...before.map(line), l, ...after.map(line)] else l,
+        ].join(_crlf);
+      }
+
+      for (final (add, before, after) in [
+        ([6, 7], <int>[], [6, 7]),
+        ([7, 6], <int>[], [6, 7]),
+        ([8, 6, 7], <int>[], [6, 7, 8]),
+        ([7, 8, 6], <int>[], [6, 7, 8]),
+        ([3, 1, 2], [1, 2, 3], <int>[]),
+        ([8, 2, 6, 1, 7], [1, 2], [6, 7, 8]),
+      ]) {
+        s.write('CHASE.scex', _chase, bom: true);
+        final o = s.open('CHASE.scex');
+        final r = s.save(
+          'CHASE.scex',
+          o.sha,
+          _steps(3),
+          addch: [for (final ix in add) SceneChannelRef(fx: '11', ix: ix)],
+        );
+        expect(r, contains('CHANGED'), reason: '$add');
+        expect(s.txt('CHASE.scex'), expected(before, after), reason: '$add');
+      }
+    });
+
+    test('Channels added into the same gap of a one-line scene come out in channel order', () {
+      s.write(
+        'NAMES.scex',
+        '<Scene><Fixtures><Fixture id="11" name="a" model="$_m"/></Fixtures><Steps><Step><Fixture id="11">'
+            '<Channel index="6" name="six" value="0"/><Channel index="7" name="seven" value="0"/><Channel index="8" name="eight" value="0"/></Fixture></Step></Steps></Scene>',
+      );
+      s.write(
+        'LINE.scex',
+        '<Scene><Fixtures><Fixture id="11" name="140 #1" model="$_m"/></Fixtures><Steps><Step length="5"><Fixture id="11"><Channel index="5" name="color" value="1"/><Channel index="15" name="dimmer" value="2"/></Fixture></Step></Steps></Scene>',
+      );
+      final o = s.open('LINE.scex');
       final r = s.save(
-        'CHASE.scex',
+        'LINE.scex',
         o.sha,
-        _steps(3),
+        _steps(1),
         addch: const [
+          SceneChannelRef(fx: '11', ix: 8),
           SceneChannelRef(fx: '11', ix: 6),
           SceneChannelRef(fx: '11', ix: 7),
         ],
       );
-      expect(r, "ERR:Self-check failed (the two ways of making the change don't agree). NOTHING was changed.");
-      // one at a time works
-      expect(s.save('CHASE.scex', o.sha, _steps(3), addch: const [SceneChannelRef(fx: '11', ix: 6)]), contains('CHANGED'));
+      expect(r, contains('CHANGED'));
+      expect(
+        s.txt('LINE.scex'),
+        '<Scene><Fixtures><Fixture id="11" name="140 #1" model="$_m"/></Fixtures><Steps><Step length="5"><Fixture id="11"><Channel index="5" name="color" value="1"/>'
+        '<Channel index="6" name="six" value="0"/><Channel index="7" name="seven" value="0"/><Channel index="8" name="eight" value="0"/>'
+        '<Channel index="15" name="dimmer" value="2"/></Fixture></Step></Steps></Scene>',
+      );
     });
 
     test('Text that is not valid XML is left alone', () {

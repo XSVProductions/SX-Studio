@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 
@@ -94,7 +95,7 @@ class OnTheLights extends ChangeNotifier {
     _busy('');
     if (!r.ok) {
       await _liveStop();
-      if (context.mounted) await showReport(context, 'Not on the lights', '', error: '${r.error}${c.reo ? reopenNote : ''}');
+      _app.showResult(failedResult('clprev', '${r.error}${c.reo ? reopenNote : ''}'));
       return;
     }
     iface = r.iface;
@@ -159,7 +160,7 @@ class OnTheLights extends ChangeNotifier {
       r = ToolResult.failed(e.message);
     }
     if (!r.ok) {
-      if (context.mounted) await showReport(context, 'ShowXpress', r.out, error: r.error);
+      _app.showResult(failedResult('clprev', r.error, out: r.out));
       return (go: false, reo: false);
     }
     _busy('Waiting for ShowXpress to close. Save it if it asks.');
@@ -177,9 +178,7 @@ class OnTheLights extends ChangeNotifier {
     if (open) {
       _busy('');
       await _liveStop();
-      if (context.mounted) {
-        await showReport(context, 'ShowXpress', '', error: 'ShowXpress is still open. Close it (save if it asks), then press $again again.');
-      }
+      _app.showResult(failedResult('clprev', 'ShowXpress is still open. Close it (save if it asks), then press $again again.'));
       return (go: false, reo: false);
     }
     _busy('ShowXpress closed. Waiting for it to let go of the interface.');
@@ -253,14 +252,17 @@ class OnTheLights extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stops sending and frees the interface, then opens ShowXpress again when [reopen].
-  Future<void> stop({required bool reopen}) async {
+  /// Stops sending and frees the interface, then opens ShowXpress again when
+  /// [reopen], through the header's Launch (with its stuck-ShowXpress offer)
+  /// when [context] is given, as the old `cpStop` called `sxLaunch`.
+  Future<void> stop({required bool reopen, BuildContext? context}) async {
     if (!_on) return;
     _halt();
     _busy('Stopping the DMX output.');
     await _liveStop();
     _busy('');
     if (!reopen) return;
+    if (context != null && context.mounted) return launchSx(context);
     _busy('Starting ShowXpress.');
     try {
       await _app.client.sxLaunch();

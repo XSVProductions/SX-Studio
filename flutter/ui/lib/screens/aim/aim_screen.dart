@@ -5,6 +5,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
+import '../../sx_control.dart';
 import '../../widgets/sx_widgets.dart';
 import '../remote/remote_row.dart';
 import 'aim_widgets.dart';
@@ -60,24 +61,6 @@ const _remoteSets = {
   ],
 };
 
-enum _Tone { ok, warn, err, queued }
-
-/// The result card under the tabs, the old page's `#result`.
-class _Result {
-  const _Result(this.tone, this.title, {this.text = const [], this.items = const [], this.warnings = const [], this.log = ''});
-
-  final _Tone tone;
-  final String title;
-
-  /// Paragraphs. `*` marks bold, as in [boldText].
-  final List<String> text;
-  final List<String> items;
-  final List<String> warnings;
-
-  /// The tool's full report.
-  final String log;
-}
-
 int _clamp(num v) => v.round().clamp(20, 300);
 
 String _sign(int v) => '${v > 0 ? '+' : ''}$v';
@@ -107,7 +90,6 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
 
   /// What the screen is waiting for, shown over everything. '' when idle.
   var _busy = '';
-  _Result? _result;
 
   SxClient get _client => AppScope.read(context).client;
 
@@ -159,7 +141,7 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
       _mode = m;
       _p = _cache[m];
       _error = '';
-      _result = null;
+      AppScope.read(context).hideResult();
       _sized.remove(m);
     });
     _load();
@@ -194,16 +176,11 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
 
   // ---- results, the old `showResult` for 'apply', 'home' and 'roominstall'
 
-  _Result _queued(ToolResult r) => _Result(
-    _Tone.queued,
-    'Queued: ${r.extra['label'] ?? ''}',
-    text: [
-      "${r.extra['replaced'] == true ? 'Replaces what was queued for it before. ' : ''}Nothing is changed yet. Keep setting up. When you're done, *save and close ShowXpress*: SX Studio does everything in the list at the top"
-          "${AppScope.read(context).status?.queue.reopen ?? true ? ' and opens ShowXpress again' : ''}.",
-    ],
-  );
+  SaveResult _queued(ToolResult r) => queuedResult(r, reopen: AppScope.read(context).status?.queue.reopen ?? true);
 
-  _Result _applied(ToolResult r, {required bool home}) {
+  void _show(SaveResult r) => AppScope.read(context).showResult(r);
+
+  SaveResult _applied(ToolResult r, {required bool home}) {
     final lines = r.out.split(RegExp(r'\r?\n'));
     final total = lines.firstWhere((l) => l.contains('movement scenes checked'), orElse: () => '').trim().replaceFirst(RegExp(r'^->\s*'), '');
     final changed = [
@@ -219,8 +196,8 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
         : _mode == AimMode.room
         ? 'When ShowXpress opens, *ROOM CHECK* comes on by itself (with the remote on). The beams should trace the edge you aimed.'
         : 'When ShowXpress opens, *DF CHECK 140* + *DF CHECK 251* come on by themselves (with the remote on). The beams should trace the floor corners.';
-    return _Result(
-      _Tone.ok,
+    return SaveResult(
+      ResultTone.ok,
       home ? 'Everything is back to normal' : 'Applied to the show',
       text: ['$total. $check'],
       items: changed,
@@ -229,7 +206,7 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     );
   }
 
-  _Result _installed(ToolResult r) {
+  SaveResult _installed(ToolResult r) {
     final lines = r.out.split(RegExp(r'\r?\n'));
     final same = lines.any((l) => l.contains('nothing to change'));
     final items = [
@@ -237,8 +214,8 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
         if (RegExp(r'^ {2}\S').hasMatch(l) && !RegExp(r'^(same\s|live\.ini saved|nothing to change)').hasMatch(l.trim()))
           l.trim().replaceFirst(RegExp(r'^CHANGED\s+'), ''),
     ];
-    return _Result(
-      _Tone.ok,
+    return SaveResult(
+      ResultTone.ok,
       same ? 'Nothing needed changing' : 'ROOM buttons added to the SETUP page',
       items: items,
       text: const ['Open ShowXpress to use it.'],
@@ -246,13 +223,13 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     );
   }
 
-  _Result _failed(ToolResult r, String title) => _Result(_Tone.err, title, text: [r.error, 'Nothing was changed.'], log: r.out);
+  SaveResult _failed(ToolResult r, String title) => SaveResult(ResultTone.err, title, lead: r.error, text: const ['Nothing was changed.'], log: r.out);
 
   /// Runs a save, shows its result, and reads the show again.
-  Future<void> _save(String busy, Future<ToolResult> Function() call, _Result Function(ToolResult) shown, {String failed = 'Not applied'}) async {
+  Future<void> _save(String busy, Future<ToolResult> Function() call, SaveResult Function(ToolResult) shown, {String failed = 'Not applied'}) async {
     final r = await _during(busy, () => _call(call));
     if (!mounted) return;
-    setState(() => _result = !r.ok ? _failed(r, failed) : (r.extra['queued'] == true ? _queued(r) : shown(r)));
+    _show(!r.ok ? _failed(r, failed) : (r.extra['queued'] == true ? _queued(r) : shown(r)));
     await AppScope.read(context).refresh();
     await _load();
   }
@@ -313,7 +290,7 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     // `live` tells the engine not to run the save queue (and reopen ShowXpress) now
     final r = await _call(() => _client.run('/api/sx/close', {'live': true}));
     if (!r.ok) {
-      if (mounted) setState(() => _result = _failed(r, "Live aim didn't start"));
+      if (mounted) _show(_failed(r, "Live aim didn't start"));
       return null;
     }
     final closed = await _during('Waiting for ShowXpress to close... (save it if it asks)', () async {
@@ -331,8 +308,8 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     if (!mounted) return null;
     if (!closed) {
       await _call(_client.liveStop);
-      setState(
-        () => _result = _failed(
+      _show(
+        _failed(
           const ToolResult(ok: false, error: 'ShowXpress is still open. Close it (save if it asks), then press Aim live again.'),
           "Live aim didn't start",
         ),
@@ -363,7 +340,7 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     if (!r.ok) {
       await _call(_client.liveStop);
       final err = '${r.error}${reopen ? ' ShowXpress is closed now. Press Launch ShowXpress at the top to open it again.' : ''}';
-      setState(() => _result = _failed(ToolResult(ok: false, error: err), "Live aim didn't start"));
+      _show(_failed(ToolResult(ok: false, error: err), "Live aim didn't start"));
       return;
     }
     final exit = await openLiveAim(context, mode: mode, start: r, reopen: reopen);
@@ -372,7 +349,7 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
     final aims = exit?.aims;
     if (aims == null) {
       await _during('Stopping the DMX output...', () => _call(_client.liveStop));
-      if (exit?.reopen ?? false) await _call(_client.sxLaunch);
+      if ((exit?.reopen ?? false) && mounted) await launchSx(context);
       await app.refresh();
       return;
     }
@@ -392,37 +369,32 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
         : s.reopenError.isNotEmpty
         ? "ShowXpress didn't open: ${s.reopenError}"
         : '';
-    setState(() {
-      if (s.ok && s.applied) {
-        final a = _applied(ToolResult(ok: true, out: s.out), home: false);
-        _result = _Result(
-          _Tone.ok,
-          'Live aims saved and applied',
-          text: [...a.text, if (reo.isNotEmpty) reo],
-          items: a.items,
-          warnings: a.warnings,
-          log: s.out,
-        );
-      } else if (s.ok) {
-        _result = _Result(
-          _Tone.warn,
+    if (s.ok && s.applied) {
+      final a = _applied(ToolResult(ok: true, out: s.out), home: false);
+      _show(
+        SaveResult(ResultTone.ok, 'Live aims saved and applied', text: [...a.text, if (reo.isNotEmpty) reo], items: a.items, warnings: a.warnings, log: s.out),
+      );
+    } else if (s.ok) {
+      _show(
+        SaveResult(
+          ResultTone.warn,
           'Aims saved, not applied yet',
-          text: [
-            "The aims are saved in *${mode.aimTitle}*, but applying them to the show didn't work: ${s.applyError.isEmpty ? 'unknown error' : s.applyError}",
-            'Check the heads above, then press *Apply to show*.',
-            if (reo.isNotEmpty) reo,
-          ],
+          lead: "The aims are saved in *${mode.aimTitle}*, but applying them to the show didn't work: ${s.applyError.isEmpty ? 'unknown error' : s.applyError}",
+          text: ['Check the heads above, then press *Apply to show*.', if (reo.isNotEmpty) reo],
           log: s.out,
-        );
-      } else {
-        _result = _Result(
-          _Tone.err,
+        ),
+      );
+    } else {
+      _show(
+        SaveResult(
+          ResultTone.err,
           'Live aims not saved',
-          text: [s.error.isEmpty ? 'Unknown error.' : s.error, 'Nothing was changed.', if (reo.isNotEmpty) reo],
+          lead: s.error.isEmpty ? 'Unknown error.' : s.error,
+          text: ['Nothing was changed.', if (reo.isNotEmpty) reo],
           log: s.out,
-        );
-      }
-    });
+        ),
+      );
+    }
     await app.refresh();
     await _load();
   }
@@ -454,7 +426,6 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
           alignment: Alignment.centerLeft,
           child: Seg<AimMode>(value: _mode, options: const {AimMode.floor: 'Dance Floor', AimMode.room: 'Room'}, onChanged: _switch),
         ),
-        if (_result != null) _resultCard(_result!),
         _aimsCard(words, p),
         _sizeCard(words),
       ],
@@ -774,53 +745,6 @@ class _AimScreenState extends State<AimScreen> with ShowWatcher {
                 SizedBox(width: 300, child: picture),
               ],
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _resultCard(_Result r) {
-    final (color, icon) = switch (r.tone) {
-      _Tone.ok => (Sx.green, Icons.check),
-      _Tone.warn => (Sx.amber, Icons.warning_amber_rounded),
-      _Tone.err => (Sx.red, Icons.close),
-      _Tone.queued => (Sx.amber, Icons.hourglass_empty),
-    };
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
-      decoration: BoxDecoration(
-        color: Sx.card,
-        border: Border.all(color: color.withValues(alpha: r.tone == _Tone.err ? .5 : .4)),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 8),
-              Expanded(child: Text(r.title, style: Sx.title)),
-              if (r.log.trim().isNotEmpty) MiniButton('Full details', onPressed: () => showReport(context, r.title, r.log)),
-              const SizedBox(width: 6),
-              MiniButton('Close', onPressed: () => setState(() => _result = null)),
-            ],
-          ),
-          for (final (i, t) in r.text.indexed)
-            if (t.trim().isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: boldText(t, style: i == 0 && r.tone == _Tone.err ? TextStyle(color: Sx.text, fontSize: 14) : Sx.sub),
-              ),
-          if (r.items.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 8, left: 4),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [for (final l in r.items) Text('·  $l', style: TextStyle(color: Sx.text2, fontSize: 13))],
-              ),
-            ),
-          if (r.warnings.isNotEmpty) ErrorBox(r.warnings.join('\n')),
         ],
       ),
     );

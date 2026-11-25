@@ -67,7 +67,7 @@ class _HealthScreenState extends State<HealthScreen> with ShowWatcher {
     );
     if (!ok || !mounted) return;
     // the other tabs' copies are stale too; this screen reloads with them (onSxClosed)
-    await runSave(context, () => client.healthFix(i.fix!.key), after: () async => app.showEdited());
+    await runSave(context, () => client.healthFix(i.fix!.key), what: 'fix', busy: 'Applying the fix.', after: () async => app.showEdited());
   }
 
   Future<void> _revert(AppliedFix a, {bool force = false}) async {
@@ -106,10 +106,10 @@ class _HealthScreenState extends State<HealthScreen> with ShowWatcher {
       if (again && mounted) await _revert(a, force: true);
       return;
     }
-    if (r.result.ok) AppScope.read(context).showEdited();
-    await AppScope.read(context).refresh();
-    if (!mounted) return;
-    await showReport(context, r.result.ok ? 'Reverted' : 'Not reverted', r.result.out, error: r.result.error);
+    final app = AppScope.read(context);
+    if (r.result.ok) app.showEdited();
+    await app.refresh();
+    app.showResult(resultOf(r.result, 'revert'));
   }
 
   Future<void> _keep(AppliedFix a) async {
@@ -121,7 +121,7 @@ class _HealthScreenState extends State<HealthScreen> with ShowWatcher {
       'Keep it',
     );
     if (!ok || !mounted) return;
-    await runSave(context, () => client.healthKeep(a.id), after: _load);
+    await runSave(context, () => client.healthKeep(a.id), what: 'keep', busy: 'Saving.', after: _load);
   }
 
   @override

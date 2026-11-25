@@ -56,6 +56,8 @@ void main() {
       'extra': false,
       'rig': true,
     });
+    // the tabs that show the rig read the show again (old `R=null;S=null;H=null`)
+    expect(app.sxCloses, 1);
     await finish(tester, app);
   });
 

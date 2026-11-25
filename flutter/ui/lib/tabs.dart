@@ -16,8 +16,6 @@ import 'screens/rig/rig_screen.dart';
 import 'screens/rt/rt_screen.dart';
 import 'screens/skip/skip_screen.dart';
 import 'screens/speed/speed_screen.dart';
-import 'widgets/sx_widgets.dart';
-import 'theme.dart';
 
 /// The groups the tab bar and the Home screen sort tabs into.
 enum TabGroup {
@@ -42,11 +40,7 @@ class TabDef {
   final WidgetBuilder build;
 }
 
-Widget _todo(BuildContext context) => ScreenBody(
-  children: [SxCard(child: Text('Not ported yet.', style: Sx.sub))],
-);
-
-/// Every tab, in the old app's order. A screen replaces its `_todo` here.
+/// Every tab, in the old app's order.
 const tabs = [
   TabDef('rt', 'Rig Test', TabGroup.gig, RtScreen.new),
   TabDef('aim', 'Aim Movers', TabGroup.gig, AimScreen.new),
@@ -64,12 +58,15 @@ const tabs = [
   TabDef('health', 'Health Check', TabGroup.edit, HealthScreen.new),
 ];
 
+/// True for a tab the app has: one of [tabs], `home` or `settings`.
+bool knownTab(String id) => id == 'home' || id == 'settings' || tabs.any((t) => t.id == id);
+
 /// Builds the screen for a tab id. `home` and `settings` are not in [tabs].
+/// An unknown id gets Home, as the old `setTab` did.
 Widget buildTab(BuildContext context, String id) {
-  if (id == 'home') return const HomeScreen();
   if (id == 'settings') return const SettingsScreen();
   for (final t in tabs) {
     if (t.id == id) return t.build(context);
   }
-  return _todo(context);
+  return const HomeScreen();
 }

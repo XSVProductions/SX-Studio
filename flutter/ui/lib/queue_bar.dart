@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import 'app_state.dart';
+import 'sx_control.dart';
 import 'theme.dart';
 import 'widgets/sx_widgets.dart';
 
@@ -72,7 +73,7 @@ class QueueBar extends StatelessWidget {
             ),
             if (app.sxOpen) ...[
               Text('Save your show, then close ShowXpress.', style: Sx.sub),
-              MiniButton('Close ShowXpress now', primary: true, onPressed: () => runSave(context, () => app.client.sxClose(), quiet: true)),
+              MiniButton('Close ShowXpress now', primary: true, onPressed: () => closeSx(context)),
             ] else
               Text('ShowXpress is closed. Doing it now.', style: Sx.sub),
           ],
@@ -83,13 +84,22 @@ class QueueBar extends StatelessWidget {
 }
 
 /// How the queued saves went.
-class _Done extends StatelessWidget {
+class _Done extends StatefulWidget {
   const _Done(this.done);
 
   final Json done;
 
   @override
+  State<_Done> createState() => _DoneState();
+}
+
+class _DoneState extends State<_Done> {
+  /// The old `<details>`: Full details open under the list.
+  var _open = false;
+
+  @override
   Widget build(BuildContext context) {
+    final done = widget.done;
     final results = done.list('results', (j) => j);
     final bad = results.where((r) => !r.boolean('ok')).length;
     final reopenError = done.str('reopenError');
@@ -107,19 +117,40 @@ class _Done extends StatelessWidget {
           spacing: 10,
           runSpacing: 6,
           children: [
-            if (done.boolean('reopened')) Text('ShowXpress is opening again.', style: Sx.sub),
-            if (reopenError.isNotEmpty) Text("ShowXpress didn't open: $reopenError", style: TextStyle(fontSize: 13, color: Sx.red)),
-            MiniButton(
-              'Full details',
-              onPressed: () => showReport(
-                context,
-                'Full details',
-                [for (final r in results) '== ${r.str('label')}\n${r.str('out').isEmpty ? r.str('error') : r.str('out')}'].join('\n'),
+            if (done.boolean('reopened'))
+              Text('ShowXpress is opening again.', style: Sx.sub)
+            else if (reopenError.isNotEmpty)
+              Text("ShowXpress didn't open: $reopenError", style: TextStyle(fontSize: 13, color: Sx.red)),
+            InkWell(
+              onTap: () => setState(() => _open = !_open),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_open ? Icons.arrow_drop_down : Icons.arrow_right, size: 18, color: Sx.dim),
+                  Text('Full details', style: Sx.sub),
+                ],
               ),
             ),
             MiniButton('OK', onPressed: () => runSave(context, AppScope.read(context).client.queueSeen, quiet: true)),
           ],
         ),
+        if (_open)
+          Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 300),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Sx.well,
+              border: Border.all(color: Sx.line),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                [for (final r in results) '== ${r.str('label')}\n${r.str('out').isEmpty ? r.str('error') : r.str('out')}'].join('\n'),
+                style: TextStyle(fontFamily: 'monospace', fontSize: 12, height: 1.4, color: Sx.text2),
+              ),
+            ),
+          ),
       ],
     );
   }

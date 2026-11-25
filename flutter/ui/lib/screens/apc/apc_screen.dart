@@ -99,7 +99,18 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
         actions: [
           OutlinedButton(onPressed: changed == 0 ? null : () => _edit((e) => e.undo()), child: const Text('Undo changes')),
           FilledButton(
-            onPressed: changed == 0 ? null : () => runSave(context, () => app.client.apcApply(e!.changes), after: _load),
+            onPressed: changed == 0
+                ? null
+                : () => runSave(
+                    context,
+                    () => app.client.apcApply(e!.changes),
+                    what: 'apc',
+                    busy: 'Saving pads.',
+                    after: () async {
+                      await _load();
+                      app.showEdited();
+                    },
+                  ),
             child: const Text('Save pads'),
           ),
         ],

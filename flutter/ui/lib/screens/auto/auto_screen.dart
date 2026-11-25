@@ -174,7 +174,7 @@ class _AutoScreenState extends State<AutoScreen> {
   /// on failure. Port of `auSave`.
   Future<bool> _save({bool quiet = false}) async {
     var ok = false;
-    await runSave(context, quiet: quiet, () async {
+    await runSave(context, what: 'auto', quiet: quiet, () async {
       final r = await _app.client.autoSave(_c!);
       ok = r.ok;
       _saved(r);
@@ -195,7 +195,7 @@ class _AutoScreenState extends State<AutoScreen> {
       _tried = [];
     });
     await _app.refresh();
-    if (!r.ok && mounted) await showReport(context, "The Auto Show didn't start", '', error: r.error);
+    if (!r.ok) _app.showResult(failedResult('sx', r.error).copyWith(title: "The Auto Show didn't start"));
   }
 
   Future<void> _cmd(AutoCmd cmd, [String v = '']) async {

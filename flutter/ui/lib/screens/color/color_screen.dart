@@ -5,6 +5,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
+import '../../sx_control.dart';
 import '../../widgets/sx_widgets.dart';
 import 'color_wheel.dart';
 import 'on_the_lights.dart';
@@ -184,18 +185,12 @@ class _ColorScreenState extends State<ColorScreen> with ShowWatcher {
   void _lightsLost(String error) {
     final reo = _lights.reopen;
     final why = error.startsWith('The DMX output stopped') ? 'the DMX interface was unplugged, or SX Studio lost it.' : error;
-    showReport(context, 'Not on the lights', '', error: 'The preview on the lights stopped: $why${reo ? ' ShowXpress is opening again.' : ''}');
+    AppScope.read(context).showResult(failedResult('clprev', 'The preview on the lights stopped: $why${reo ? ' ShowXpress is opening again.' : ''}'));
     if (reo) _launchSx();
   }
 
   Future<void> _launchSx() async {
-    final app = AppScope.read(context);
-    try {
-      await app.client.sxLaunch();
-    } on ApiException {
-      // the top bar still offers Launch ShowXpress
-    }
-    await app.refresh();
+    if (mounted) await launchSx(context);
   }
 
   /// Saving needs ShowXpress closed and the interface free: the preview ends
@@ -205,7 +200,16 @@ class _ColorScreenState extends State<ColorScreen> with ShowWatcher {
     final reo = _lights.on && _lights.reopen;
     await _lights.stop(reopen: false);
     if (!mounted) return;
-    await runSave(context, () => app.client.colorApply(_hex, _name.text.trim()), after: _load);
+    await runSave(
+      context,
+      () => app.client.colorApply(_hex, _name.text.trim()),
+      what: 'color',
+      busy: "Saving tonight's color.",
+      after: () async {
+        await _load();
+        app.showEdited();
+      },
+    );
     if (reo) await _launchSx();
   }
 
@@ -565,7 +569,10 @@ class _LiveBox extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w700, color: Sx.text),
                 ),
               ),
-              MiniButton('Stop', onPressed: lights.busy.isEmpty ? () => lights.stop(reopen: lights.reopen) : null),
+              MiniButton(
+                'Stop',
+                onPressed: lights.busy.isEmpty ? () => lights.stop(reopen: lights.reopen, context: context) : null,
+              ),
             ],
           ),
           ReopenBox(lights),

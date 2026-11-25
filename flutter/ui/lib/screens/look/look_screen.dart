@@ -135,7 +135,7 @@ class _LookScreenState extends State<LookScreen> {
   /// "Show on the lights". Port of `lkPvGo`.
   void _lightsOn() => _lights.go(context, title: 'Close ShowXpress to see the look on the lights?', again: 'Show on the lights', onLost: _lightsLost);
 
-  void _lightsLost(String error) => showReport(context, 'Not on the lights', '', error: '$error${_lights.reopen ? OnTheLights.reopenNote : ''}');
+  void _lightsLost(String error) => AppScope.read(context).showResult(failedResult('clprev', '$error${_lights.reopen ? OnTheLights.reopenNote : ''}'));
 
   /// Shows the step on screen until the next one is due. Only while the tab is
   /// on show; at most every 50 ms, so a fast strobe skips steps on screen.
@@ -247,7 +247,9 @@ class _LookScreenState extends State<LookScreen> {
                 ? () => runSave(
                     context,
                     () => app.client.looksMake(look.draft('$n.scex')),
+                    what: 'look',
                     after: () async {
+                      app.sceneMade('$n.scex');
                       setState(() {
                         rig.scenes.add('$n.scex');
                         _made = (name: n, file: '$n.scex', beat: look.beat);
@@ -715,7 +717,7 @@ class _LookScreenState extends State<LookScreen> {
             MiniButton(
               'Stop',
               icon: Icons.stop,
-              onPressed: l.busy.isEmpty ? () => l.stop(reopen: l.reopen) : null,
+              onPressed: l.busy.isEmpty ? () => l.stop(reopen: l.reopen, context: context) : null,
             )
           else
             MiniButton('Show on the lights', onPressed: l.busy.isEmpty ? _lightsOn : null),

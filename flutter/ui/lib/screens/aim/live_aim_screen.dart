@@ -12,6 +12,7 @@ import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'aim_widgets.dart';
 import 'live_aim_model.dart';
+import 'pointer_lock.dart';
 
 /// How the live aim screen was left. [aims] is null for Cancel.
 typedef LiveAimExit = ({Map<String, LiveAim>? aims, bool reopen});
@@ -57,6 +58,16 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
   late bool _reopen = widget.reopen;
   var _dragging = false;
   String? _gone;
+
+  /// Holds the mouse in place while dragging in the pad (old `requestPointerLock`).
+  late final _lock = PointerLock(
+    onMove: (dx, dy, {required shift, required ctrl}) {
+      if (_dragging) _move(dx, dy, fine: shift, fast: ctrl);
+    },
+    onLost: () {
+      if (mounted) setState(() => _dragging = false);
+    },
+  );
   final _focus = FocusNode();
 
   SxClient get _client => AppScope.read(context).client;
@@ -78,6 +89,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
 
   @override
   void dispose() {
+    _lock.stop();
     _pump.close();
     _focus.dispose();
     super.dispose();
@@ -109,6 +121,11 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
     _pump.kick();
     AppScope.read(context).setDirty('aim', _m.edited);
     setState(() {});
+  }
+
+  void _endDrag() {
+    _lock.stop();
+    setState(() => _dragging = false);
   }
 
   void _move(double dx, double dy, {bool fine = false, bool fast = false}) {
@@ -444,15 +461,17 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
       onPointerDown: (e) {
         if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryMouseButton) return;
         _focus.requestFocus();
+        if (e.kind == PointerDeviceKind.mouse) _lock.start(e);
         setState(() => _dragging = true);
       },
       onPointerMove: (e) {
         if (!_dragging) return;
         final mouse = e.kind == PointerDeviceKind.mouse, k = HardwareKeyboard.instance;
-        _move(e.delta.dx, e.delta.dy, fine: mouse && k.isShiftPressed, fast: mouse && k.isControlPressed);
+        final d = mouse ? _lock.delta(e) : e.delta;
+        if (d != Offset.zero) _move(d.dx, d.dy, fine: mouse && k.isShiftPressed, fast: mouse && k.isControlPressed);
       },
-      onPointerUp: (_) => setState(() => _dragging = false),
-      onPointerCancel: (_) => setState(() => _dragging = false),
+      onPointerUp: (_) => _endDrag(),
+      onPointerCancel: (_) => _endDrag(),
       // claims the drag, so the page doesn't scroll on a phone
       child: GestureDetector(
         onPanStart: (_) {},

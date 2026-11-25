@@ -19,3 +19,6 @@ export 'src/speed.dart';
 export 'src/status.dart';
 export 'src/update.dart';
 export 'src/scene_edit.dart';
+export 'src/rig.dart';
+export 'src/rig_test.dart';
+export 'src/skip_flash.dart';

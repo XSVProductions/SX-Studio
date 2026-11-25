@@ -74,14 +74,14 @@ class LabButton {
 /// and friends). The keep-alive (`Step-PlayerKeep`) is gone: the player
 /// lives on the engine's own process and needs none.
 class LabPlayer implements PlayerControl, LabPlayerHooks {
-  LabPlayer(this.e, {this.onMac = false}) {
+  LabPlayer(this.e, {bool? onMac}) : onMac = onMac ?? Platform.isMacOS {
     e.dmx.playerOn = () => running;
     e.dmx.stopPlayer = stop;
   }
 
   final Engine e;
 
-  /// The old app ran the player on Windows only, for now. Tests set this.
+  /// The old app ran the player on Windows only, for now. Defaults to this computer.
   final bool onMac;
 
   SxPlayer? _player;

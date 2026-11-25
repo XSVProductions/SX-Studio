@@ -235,19 +235,5 @@ String psFormat0(double v) {
   return '${r.round()}';
 }
 
-/// PowerShell's `-like` with `*` and `?`, ignoring case.
-bool psLike(String s, String pattern) {
-  final rx = StringBuffer('^');
-  for (final ch in pattern.split('')) {
-    rx.write(switch (ch) {
-      '*' => '.*',
-      '?' => '.',
-      _ => RegExp.escape(ch),
-    });
-  }
-  rx.write(r'$');
-  return RegExp(rx.toString(), caseSensitive: false, dotAll: true).hasMatch(s);
-}
-
 /// True when [name] matches any of [patterns]. Port of `Test-Like`.
 bool likeAny(String name, Iterable<String> patterns) => patterns.any((p) => psLike(name, p));

@@ -111,10 +111,7 @@ class SceneModel {
 
   factory SceneModel.fromJson(Json j) {
     final r = j.obj('ranges');
-    return SceneModel(
-      chans: j.list('chans', SceneChannelName.fromJson),
-      ranges: {for (final k in r.keys) k: r.list(k, SceneRange.fromJson)},
-    );
+    return SceneModel(chans: j.list('chans', SceneChannelName.fromJson), ranges: {for (final k in r.keys) k: r.list(k, SceneRange.fromJson)});
   }
 
   /// Every channel of the model any scene in the show names, by index.
@@ -158,10 +155,7 @@ class SceneStepFixture {
 
   factory SceneStepFixture.fromJson(Json j) {
     final raw = j['ch'];
-    return SceneStepFixture(
-      id: j.str('id'),
-      ch: [for (final c in raw is List ? raw : const []) SceneChannel.fromJson(c)],
-    );
+    return SceneStepFixture(id: j.str('id'), ch: [for (final c in raw is List ? raw : const []) SceneChannel.fromJson(c)]);
   }
 
   final String id;

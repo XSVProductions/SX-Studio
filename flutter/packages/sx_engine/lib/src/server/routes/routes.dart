@@ -1,4 +1,6 @@
 import '../engine.dart';
+import 'auto.dart';
+import 'remote.dart';
 import 'gdrive.dart';
 import 'phone.dart';
 import 'settings.dart';
@@ -21,6 +23,8 @@ import 'update.dart';
 void registerRoutes(Engine e) {
   registerSxRoutes(e);
   registerSpeedRoutes(e);
+  registerRemoteRoutes(e);
+  registerAutoRoutes(e);
   registerSettingsRoutes(e);
   registerPhoneRoutes(e);
   registerGdriveRoutes(e);

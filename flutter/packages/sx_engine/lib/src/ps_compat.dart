@@ -62,3 +62,17 @@ List<T> psSorted<T>(Iterable<T> items, List<Comparable Function(T)> keys) {
 /// `yyyy-MM-ddTHH:mm:ss` in local time: .NET's `ToString('s')`, which the old
 /// tools use for the times they save. It never follows the machine's culture.
 String sortableTime(DateTime t) => t.toIso8601String().substring(0, 19);
+
+/// PowerShell's `-like` with `*` and `?`, ignoring case.
+bool psLike(String s, String pattern) {
+  final rx = StringBuffer('^');
+  for (final ch in pattern.split('')) {
+    rx.write(switch (ch) {
+      '*' => '.*',
+      '?' => '.',
+      _ => RegExp.escape(ch),
+    });
+  }
+  rx.write(r'$');
+  return RegExp(rx.toString(), caseSensitive: false, dotAll: true).hasMatch(s);
+}

@@ -7,22 +7,12 @@ import '../api.dart';
 import '../engine.dart';
 import 'aim.dart';
 
-/// Live output's state between calls, shared with `e.provide` so the
-/// ShowXpress and queue code can see the hold.
-class LiveAimSession {
+/// Live output's state between calls.
+class _LiveAimSession {
   /// Channels (1-based) whose values go out reversed: 65535 - v, or 255 - v
   /// for a raw byte. Pan and fine pan of heads with `rp`, tilt and fine tilt
   /// of heads with `rt`. Empty in raw mode. The old server's `$liveInv`.
   final inv = <int>{};
-
-  /// When live aim last started, or null. The old server's `$liveHold`: the
-  /// save queue must not run (and reopen ShowXpress) for 180 seconds after
-  /// this, while someone is aiming.
-  DateTime? hold;
-
-  /// True while the queue should wait for live aim. Port of the
-  /// `((Get-Date) - $script:liveHold).TotalSeconds -lt 180` check.
-  bool get holding => hold != null && DateTime.now().difference(hold!) < const Duration(seconds: 180);
 }
 
 final _token = RegExp(r'^(z|k|b:\d{1,4}:\d{1,3}|[ps]:\d{1,4}:\d{1,4}:\d{1,5})$', caseSensitive: false);
@@ -35,8 +25,7 @@ final _byte = RegExp(r'^b:(\d+):(\d+)$', caseSensitive: false);
 /// Port of the `/api/live/start`, `/api/live/out`, `/api/live/stop` and
 /// `/api/live/save` branches of `df_aim_gui.ps1`.
 void registerLiveRoutes(Engine e) {
-  final session = LiveAimSession();
-  e.provide(session);
+  final session = _LiveAimSession();
 
   e.api.post('/api/live/start', (req) async {
     if (e.sx.running) {
@@ -60,7 +49,7 @@ void registerLiveRoutes(Engine e) {
         throw ToolError(err.message.isEmpty ? 'Could not read the show.' : err.message);
       }
     }
-    session.hold = DateTime.now();
+    e.liveHold.start();
     // the screen works "as if hung normally"; reversed heads get 65535 - v on the way out
     session.inv.clear();
     if (!raw) {
@@ -103,7 +92,7 @@ void registerLiveRoutes(Engine e) {
 
   e.api.post('/api/live/stop', (req) async {
     await e.dmx.stopLive();
-    session.hold = null;
+    e.liveHold.clear();
     return {'ok': true};
   });
 
@@ -130,7 +119,7 @@ void registerLiveRoutes(Engine e) {
       res['applied'] = applied['ok'] == true;
       res['applyError'] = '${applied['error'] ?? ''}';
     }
-    session.hold = null;
+    e.liveHold.clear();
     if (!e.queue.isEmpty) await e.queue.run(reopen: false);
     if (psTruthy(req.body['reopen'])) {
       try {

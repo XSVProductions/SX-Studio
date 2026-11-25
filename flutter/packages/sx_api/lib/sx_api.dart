@@ -1,11 +1,13 @@
 /// Wire types and the HTTP client shared by the SX Studio engine and UI.
 library;
 
+export 'src/auto.dart';
 export 'src/apc.dart';
 export 'src/aim.dart';
 export 'src/client.dart';
 export 'src/color.dart';
 export 'src/json.dart';
+export 'src/remote.dart';
 export 'src/move_edit.dart';
 export 'src/lab.dart';
 export 'src/looks.dart';

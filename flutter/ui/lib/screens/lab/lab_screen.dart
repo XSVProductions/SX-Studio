@@ -517,7 +517,7 @@ class _LabScreenState extends State<LabScreen> {
     if (!ok || !mounted) return no;
     ToolResult r;
     try {
-      r = await _client.sxCloseForDmx();
+      r = await _client.sxClose(live: true);
     } on ApiException {
       r = const ToolResult.failed('Lost connection.');
     }
@@ -625,13 +625,13 @@ class _LabScreenState extends State<LabScreen> {
     _pollNow();
   }
 
-  bool get _autoRunning => _app.status?.auto?.boolean('running') ?? false;
+  bool get _autoRunning => _app.status?.auto?.running ?? false;
 
   /// Stops the player (lbStop). Asks first while something plays.
   Future<void> _stop() async {
     final reo = !kIsWeb && _reopen;
     final st = _st;
-    final autoHere = _autoRunning && _app.status?.auto?.str('target') == 'player';
+    final autoHere = _autoRunning && _app.status?.auto?.target == 'player';
     if ((st != null && st.on.isNotEmpty) || autoHere) {
       final ok = await askUser(
         context,

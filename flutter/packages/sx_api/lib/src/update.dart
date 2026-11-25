@@ -3,7 +3,17 @@ import 'json.dart';
 
 /// The newest release on GitHub against the running version.
 class UpdateInfo {
-  const UpdateInfo({required this.ok, required this.current, this.mac = false, this.latest = '', this.newer = false, this.asset = '', this.name = '', this.page = '', this.error = ''});
+  const UpdateInfo({
+    required this.ok,
+    required this.current,
+    this.mac = false,
+    this.latest = '',
+    this.newer = false,
+    this.asset = '',
+    this.name = '',
+    this.page = '',
+    this.error = '',
+  });
 
   factory UpdateInfo.fromJson(Json j) => UpdateInfo(
     ok: j.boolean('ok'),

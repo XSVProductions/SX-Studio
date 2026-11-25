@@ -155,7 +155,12 @@ class ApcChange {
   final int? on;
   final int? off;
 
-  Json toJson() => {'sec': sec, 'title': title, 'note': note, if (on != null || off != null) ...{'on': on, 'off': off}};
+  Json toJson() => {
+    'sec': sec,
+    'title': title,
+    'note': note,
+    if (on != null || off != null) ...{'on': on, 'off': off},
+  };
 }
 
 extension ApcApi on SxClient {

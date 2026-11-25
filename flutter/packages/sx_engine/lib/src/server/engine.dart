@@ -13,6 +13,7 @@ import '../show/find_show.dart';
 import '../show/show_env.dart';
 import '../dmx/default_dmx.dart';
 import '../sx/default_sx_app.dart';
+import '../sx/live_hold.dart';
 import '../sx/sx_app.dart';
 import 'api.dart';
 import 'phone.dart';
@@ -72,7 +73,7 @@ class EngineConfig {
 /// HTTP, and so does a phone, which is why both see the same thing.
 class Engine {
   Engine(this.config, {SxApp? sx}) : sx = sx ?? defaultSxApp(), dmx = DmxHub(config.dmx ?? defaultDmxSpec()) {
-    queue = SaveQueue(sxOpen: () => this.sx.running, busy: () => dmx.busy, reopenSx: this.sx.launch);
+    queue = SaveQueue(sxOpen: () => this.sx.running, busy: () => dmx.busy || liveHold.on, reopenSx: this.sx.launch);
     registerRoutes(this);
   }
 
@@ -81,7 +82,15 @@ class Engine {
   final api = Api();
   late final SaveQueue queue;
 
+  /// Set while someone aims live or the SX Player starts, so the queue does
+  /// not reopen ShowXpress under them. The old server's `$liveHold`.
+  final liveHold = LiveHold();
+
   final _parts = <Type, Object>{};
+  final _onStop = <FutureOr<void> Function()>[];
+
+  /// Runs [fn] when the engine stops. For an area's timers and sessions.
+  void onStop(FutureOr<void> Function() fn) => _onStop.add(fn);
 
   /// Shares one area's state with the others (the player, the settings...).
   /// An area calls this from its `register...Routes`.
@@ -150,6 +159,9 @@ class Engine {
 
   Future<void> stop() async {
     _tick?.cancel();
+    for (final fn in _onStop) {
+      await fn();
+    }
     await dmx.stopAll();
     await _phoneServer?.close(force: true);
     await _server?.close(force: true);

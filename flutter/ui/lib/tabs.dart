@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'screens/auto/auto_screen.dart';
 import 'screens/color/color_screen.dart';
 import 'screens/aim/aim_screen.dart';
 import 'screens/home/home_screen.dart';
@@ -53,7 +54,7 @@ const tabs = [
   TabDef('color', "Tonight's Color", TabGroup.gig, 'The decor color on the movers and uplights', ColorScreen.new),
   TabDef('pre', 'Pre-show Check', TabGroup.gig, 'One look before the guests arrive', PreScreen.new),
   TabDef('lab', 'SX Player', TabGroup.live, 'Play the show without ShowXpress', LabScreen.new),
-  TabDef('auto', 'Auto Show', TabGroup.live, 'Your looks change every few bars while you mix', _todo),
+  TabDef('auto', 'Auto Show', TabGroup.live, 'Your looks change every few bars while you mix', AutoScreen.new),
   TabDef('rig', "Tonight's Rig", TabGroup.rig, 'Which movers are hung tonight', RigScreen.new),
   TabDef('skip', 'Skip Flash', TabGroup.rig, 'Which heads the flash skips', SkipScreen.new),
   TabDef('apc', 'APC mini', TabGroup.rig, 'Pads and their lights', ApcScreen.new),

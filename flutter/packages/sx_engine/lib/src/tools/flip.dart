@@ -115,7 +115,7 @@ String flipApply(ShowEnv env, Map<String, Flip> flip) {
       for (final m in movers)
         if (want[m.id] case final w?) m.id: {'label': m.label, 'pan': w.pan, 'tilt': w.tilt},
     };
-    out.add(statePath, rigPsJson({'saved': _sortable(env.now()), 'heads': heads}), bom: false);
+    out.add(statePath, rigPsJson({'saved': sortableTime(env.now()), 'heads': heads}), bom: false);
   } else if (File(statePath).existsSync() && readText(statePath) != rigEmptyState) {
     out.add(statePath, rigEmptyState, bom: false);
   }
@@ -136,7 +136,6 @@ String flipApply(ShowEnv env, Map<String, Flip> flip) {
 String _str(Object? v) => v == null ? '' : '$v';
 
 /// `(Get-Date).ToString('s')`.
-String _sortable(DateTime t) => t.toIso8601String().substring(0, 19);
 
 final _fixtureBlock = RegExp(r'(<Fixture id="(\d+)">)(.*?)(</Fixture>)', dotAll: true);
 final _channelTag = RegExp(r'<Channel\b[^>]*>');

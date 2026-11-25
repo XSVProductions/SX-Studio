@@ -308,7 +308,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 2600));
     await t.pump();
     expect(s.posts.map((p) => p.$1), containsAllInOrder(['/api/lab/snap', '/api/sx/close', '/api/lab/start']));
-    expect(s.posts.firstWhere((p) => p.$1 == '/api/sx/close').$2, {'live': true});
+    expect(s.posts.firstWhere((p) => p.$1 == '/api/sx/close').$2, {'force': false, 'live': true});
     expect(find.text('Playing on DMX USB. Tap a button to start or stop it. Carried on from ShowXpress: RED.'), findsOneWidget);
     await h.end();
   });

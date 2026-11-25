@@ -2,6 +2,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../ps_compat.dart';
 import '../../show/show_env.dart';
+import '../../sx/pending_presses.dart';
 import '../../tools/aim/aim.dart';
 import '../api.dart';
 import '../engine.dart';
@@ -29,7 +30,13 @@ void registerAimRoutes(Engine e) {
 
   e.api.get('/api/preview', (req) => aimPreview(e.show(), aimModeOf(req.query['mode'] ?? '')));
 
-  e.api.post('/api/apply', queue: aimQueue, (req) => applyAims(e.show(), req.body));
+  e.api.post('/api/apply', queue: aimQueue, (req) {
+    final out = applyAims(e.show(), req.body);
+    // the CHECK buttons come on when ShowXpress next opens (`Set-PendingPress`)
+    final room = aimModeOf(req.body.str('mode')) == AimMode.room;
+    e.find<ButtonPresses>()?.pressWhenOpen(room ? const ['ROOM CHECK'] : const ['DF CHECK 140', 'DF CHECK 251'], room ? 'ROOM CHECK' : 'DF CHECK 140 + 251');
+    return out;
+  });
 
   e.api.post(
     '/api/home',
@@ -41,12 +48,7 @@ void registerAimRoutes(Engine e) {
   e.api.post('/api/aim/install', queue: const Queueable('ROOM buttons on the SETUP page'), (req) => aimInstall(e.show(), AimMode.room));
 }
 
-/// `/api/apply` with the old server's input check. Also called by
-/// `/api/live/save`, as the old server's `Invoke-Action '/api/apply'`.
-///
-/// The old server then sets the CHECK press for when ShowXpress opens
-/// (`Set-PendingPress`: DF CHECK 140 + DF CHECK 251, or ROOM CHECK). That
-/// belongs to the remote control area and is not done here.
+/// `aimApply` with the old server's input check for `/api/apply`.
 String applyAims(ShowEnv env, Json body) {
   final w = psInt(body['w']), d = psInt(body['d']);
   if (w < 20 || w > 300 || d < 20 || d > 300) throw ToolError('Size must be 20-300%.');

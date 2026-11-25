@@ -650,12 +650,3 @@ extension LabApi on SxClient {
     return r.ok ? PlayerLayout.fromJson(r.extra.obj('settings').obj('playerLayout')) : null;
   }
 }
-
-/// The player's "close ShowXpress first" step, the same request the old
-/// page's sxCloseLive sends. It belongs to the status area and is here until
-/// that area offers it.
-extension LabSxApi on SxClient {
-  /// Closes ShowXpress for a program that needs the interface: the queue must
-  /// not open it again meanwhile (`/api/sx/close` with `live`).
-  Future<ToolResult> sxCloseForDmx() => run('/api/sx/close', {'live': true});
-}

@@ -79,11 +79,12 @@ class _Glide {
   double target;
 }
 
-void _sender((DmxSpec, SendPort) args) {
+Future<void> _sender((DmxSpec, SendPort) args) async {
   final (spec, toOwner) = args;
   final DmxOutput out;
   try {
-    out = openDmx(spec);
+    // The Mac's driver runs in a helper program, which only opens asynchronously.
+    out = await openDmxAsync(spec);
   } on DmxError catch (e) {
     toOwner.send(e.message);
     return;

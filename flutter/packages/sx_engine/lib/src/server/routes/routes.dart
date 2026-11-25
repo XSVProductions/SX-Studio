@@ -2,6 +2,7 @@ import '../engine.dart';
 import 'gdrive.dart';
 import 'phone.dart';
 import 'settings.dart';
+import 'lab.dart';
 import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
@@ -14,4 +15,5 @@ void registerRoutes(Engine e) {
   registerPhoneRoutes(e);
   registerGdriveRoutes(e);
   registerUpdateRoutes(e);
+  registerLabRoutes(e);
 }

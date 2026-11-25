@@ -3,7 +3,13 @@ library;
 
 export 'src/dmx/dmx_hub.dart';
 export 'src/dmx/dmx_output.dart';
+export 'src/dmx/efk_dmx.dart' show dmxNotFound;
 export 'src/dmx/live_dmx.dart';
+export 'src/player/lab_player.dart' show LabPlayer, PlayEvent;
+export 'src/player/player_commands.dart';
+export 'src/player/player_links.dart';
+export 'src/player/os2l.dart' show splitJsonObjects;
+export 'src/player/sx_player.dart';
 export 'src/ps_compat.dart';
 export 'src/server/api.dart';
 export 'src/server/engine.dart';

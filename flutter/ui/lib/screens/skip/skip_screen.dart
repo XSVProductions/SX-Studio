@@ -77,7 +77,7 @@ class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
     final app = AppScope.of(context);
     final d = _data;
     return ScreenBody(
-      bar: RigBar(
+      bar: SaveBar(
         hint: _hint(app),
         actions: [
           TextButton(

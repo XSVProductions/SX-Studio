@@ -4,6 +4,7 @@ import 'package:sx_api/sx_api.dart';
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../remote/remote_row.dart';
 import '../rig/rig_widgets.dart';
 
 /// Rig Test: which 140 hangs where tonight. RIG ID lights every 140 in its
@@ -119,7 +120,7 @@ class _RtScreenState extends State<RtScreen> with ReloadWhenShown {
     final placed = d == null ? const <String, String>{} : _placed(d);
     final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
     return ScreenBody(
-      bar: RigBar(
+      bar: SaveBar(
         hint: _hint(app, d),
         actions: [
           TextButton(onPressed: d != null && _assign.isNotEmpty ? () => _edit(_assign.clear) : null, child: const Text('New event')),
@@ -165,7 +166,16 @@ class _RtScreenState extends State<RtScreen> with ReloadWhenShown {
                   ),
                 ),
               ),
-              const _RemoteRow(),
+              // The old `#rtrem`, under the header (`margin: 12px 0 0`).
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: RemoteRow(
+                  tab: 'rt',
+                  sets: [
+                    RemoteSet('RIG ID', ['RIG ID']),
+                  ],
+                ),
+              ),
               ErrorBox(_error),
               if (d == null && _error.isEmpty)
                 Padding(
@@ -623,217 +633,4 @@ class _Check extends StatelessWidget {
       ],
     ),
   );
-}
-
-/// ShowXpress's remote control: SX Studio presses RIG ID so the heads light
-/// up. The routes belong to the remote area; this calls them with the old
-/// page's request shapes.
-class _RemoteRow extends StatefulWidget {
-  const _RemoteRow();
-
-  @override
-  State<_RemoteRow> createState() => _RemoteRowState();
-}
-
-class _RemoteRowState extends State<_RemoteRow> {
-  static const _titles = ['RIG ID'];
-
-  Json? _r;
-
-  /// SX Studio pressed RIG ID itself when the tab opened.
-  var _turnedOn = false;
-
-  @override
-  void initState() {
-    super.initState();
-    // When ShowXpress is open, turn RIG ID on straight away (unless the show is playing).
-    _refresh(auto: AppScope.read(context).sxOpen);
-  }
-
-  Future<void> _refresh({bool auto = false}) async {
-    final client = AppScope.read(context).client;
-    Json r;
-    try {
-      r = auto ? (await client.run('/api/remote/press', {'titles': _titles, 'solo': true, 'idle': true})).toJson() : await client.get('/api/remote', (j) => j);
-    } on ApiException catch (e) {
-      r = {'ok': false, 'error': e.message};
-    }
-    if (!mounted) return;
-    final pressedNow = r['pressedNow'];
-    setState(() {
-      _r = r;
-      _turnedOn = auto && r.boolean('connected') && !r.boolean('skipped') && pressedNow is List && pressedNow.isNotEmpty;
-    });
-  }
-
-  Future<bool> _ask(String title, String body, String yes) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(title, style: Sx.title),
-          content: Text(body, style: TextStyle(color: Sx.text2)),
-          actions: [
-            OutlinedButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(yes)),
-          ],
-        ),
-      ) ??
-      false;
-
-  Future<void> _act(Future<ToolResult> Function(SxClient c) call) async {
-    final r = await call(AppScope.read(context).client);
-    if (!mounted) return;
-    setState(() {
-      _r = r.toJson();
-      _turnedOn = false;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final app = AppScope.of(context);
-    final r = _r;
-    final b = TextStyle(color: Sx.text, fontWeight: FontWeight.w700);
-    final InlineSpan text;
-    final List<Widget> buttons;
-    if (r == null) {
-      text = const TextSpan(text: 'Checking ShowXpress.');
-      buttons = [];
-    } else if (r['ok'] == false && r['setup'] == null) {
-      text = TextSpan(text: r.str('error'));
-      buttons = [MiniButton('Try again', onPressed: _refresh)];
-    } else if (!r.boolean('ready')) {
-      text = TextSpan(
-        children: [
-          TextSpan(text: 'Let SX Studio press RIG ID for you.', style: b),
-          TextSpan(text: " Turn on ShowXpress remote control once. It's saved in the show${app.sxOpen ? ' (done when ShowXpress next closes).' : '.'}"),
-        ],
-      );
-      buttons = [
-        MiniButton(
-          'Turn on remote control',
-          primary: true,
-          onPressed: () async {
-            if (!await _ask(
-              'Turn on ShowXpress remote control?',
-              'Lets SX Studio press buttons in ShowXpress (RIG ID, DF CHECK, ROOM CHECK, Auto Show). It switches on External App in ShowXpress and remote access for every Live page, with a password only SX Studio uses. Only this computer connects to it.'
-                  '${app.sxOpen ? "\n\nShowXpress is open, so it's done when you next close it." : ''}',
-              'Turn it on',
-            )) {
-              return;
-            }
-            if (!context.mounted) return;
-            await runSave(context, () => app.client.run('/api/remote/enable', {}), after: _refresh);
-          },
-        ),
-      ];
-    } else if (!r.boolean('open')) {
-      text = TextSpan(
-        children: [
-          const TextSpan(text: 'ShowXpress is closed. Open it and SX Studio turns on '),
-          TextSpan(text: 'RIG ID', style: b),
-          const TextSpan(text: ' by itself.'),
-        ],
-      );
-      buttons = [MiniButton('Launch ShowXpress', icon: Icons.play_arrow, onPressed: () => _act((c) => c.run('/api/sx/launch', {})))];
-    } else if (!r.boolean('connected')) {
-      text = TextSpan(text: r.str('error'));
-      buttons = [MiniButton('Try again', onPressed: _refresh)];
-    } else {
-      final pressed = r.list('pressed', (j) => (title: j.str('title'), page: j.str('page')));
-      final on = {for (final p in pressed) p.title};
-      final have = r.strList('titles').toSet();
-      final playing = r.strList('playing');
-      final isOn = _titles.every(on.contains);
-      text = TextSpan(
-        children: [
-          if (_turnedOn) ...[
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: Icon(Icons.check, size: 15, color: Sx.green),
-            ),
-            const TextSpan(text: ' Turned on by SX Studio. '),
-          ],
-          if (r.boolean('skipped')) ...[
-            TextSpan(
-              text: 'Your show is playing',
-              style: b.copyWith(color: Sx.amber),
-            ),
-            TextSpan(text: " (${playing.take(4).join(', ')}${playing.length > 4 ? '...' : ''}). SX Studio didn't press anything, so it isn't cut. "),
-          ],
-          if (isOn) ...[
-            WidgetSpan(
-              alignment: PlaceholderAlignment.middle,
-              child: Icon(Icons.circle, size: 9, color: Sx.green),
-            ),
-            TextSpan(
-              text: ' RIG ID',
-              style: b.copyWith(color: Sx.green),
-            ),
-            const TextSpan(text: ' is on in ShowXpress.'),
-          ] else
-            TextSpan(text: on.isNotEmpty ? 'Playing: ${on.take(5).join(', ')}${on.length > 5 ? '...' : ''}' : 'Nothing is playing in ShowXpress.'),
-        ],
-      );
-      final missing = _titles.any((t) => !have.contains(t));
-      buttons = [
-        Tooltip(
-          message: missing ? 'Not in the show yet' : '',
-          child: MiniButton(
-            'RIG ID',
-            on: isOn,
-            onPressed: missing
-                ? null
-                : () async {
-                    final others = [
-                      for (final p in pressed)
-                        if (!RegExp(r'^\s*setup\s*$', caseSensitive: false).hasMatch(p.page) && !_titles.contains(p.title)) p.title,
-                    ];
-                    if (others.isNotEmpty &&
-                        !await _ask(
-                          'Turn off what is playing?',
-                          '${others.take(6).join(', ')}${others.length > 6 ? '...' : ''} ${others.length > 1 ? 'are' : 'is'} playing. Turning on RIG ID turns ${others.length > 1 ? 'them' : 'it'} off.',
-                          'Turn on RIG ID',
-                        )) {
-                      return;
-                    }
-                    await _act((c) => c.run('/api/remote/press', {'titles': _titles, 'solo': true}));
-                  },
-          ),
-        ),
-        if (on.isNotEmpty)
-          MiniButton(
-            'All off',
-            onPressed: () async {
-              if (!await _ask('Turn everything off?', 'Releases every button that is playing in ShowXpress.', 'All off')) return;
-              await _act((c) => c.run('/api/remote/off', {}));
-            },
-          ),
-      ];
-    }
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: Sx.green.withValues(alpha: .05),
-        border: Border.all(color: Sx.green.withValues(alpha: .3)),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          Text.rich(
-            TextSpan(
-              style: TextStyle(color: Sx.text2, fontSize: 13),
-              children: [text],
-            ),
-          ),
-          ...buttons,
-        ],
-      ),
-    );
-  }
 }

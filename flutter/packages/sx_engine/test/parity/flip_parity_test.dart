@@ -57,7 +57,7 @@ void main() {
           '<Fixture id="$keptHead">\n        <Channel index="0" name="pan" value="10"/>',
         );
         scenes[scenes.keys.first] = first;
-        return rigPsJson({'hung': j['hung'], 'scenes': scenes});
+        return psJson({'hung': j['hung'], 'scenes': scenes});
       }),
       options: _maskSaved,
       dart: (env) {

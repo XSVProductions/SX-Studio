@@ -18,83 +18,6 @@ import '../show/text_files.dart';
 //
 // Port of `rig.ps1`.
 
-/// The text PowerShell 7's `ConvertTo-Json` writes for [value]: two-space
-/// indent, `"key": value`, LF line ends, and its string escapes. Maps keep
-/// their order, so pass them in the order the old tool would write.
-///
-/// Used for the state files the rig tools write. It belongs in `ps_compat`
-/// once another area needs it.
-String rigPsJson(Object? value) {
-  final b = StringBuffer();
-  void write(Object? v, String indent) {
-    final inner = '$indent  ';
-    switch (v) {
-      case null:
-        b.write('null');
-      case bool x:
-        b.write('$x');
-      case int x:
-        b.write('$x');
-      case String s:
-        b.write(_psJsonString(s));
-      case List<Object?> l when l.isEmpty:
-        b.write('[]');
-      case List<Object?> l:
-        b.write('[\n');
-        for (final (i, e) in l.indexed) {
-          b.write(inner);
-          write(e, inner);
-          b.write(i < l.length - 1 ? ',\n' : '\n');
-        }
-        b.write('$indent]');
-      case Map<String, Object?> m when m.isEmpty:
-        b.write('{}');
-      case Map<String, Object?> m:
-        b.write('{\n');
-        for (final (i, e) in m.entries.indexed) {
-          b.write('$inner${_psJsonString(e.key)}: ');
-          write(e.value, inner);
-          b.write(i < m.length - 1 ? ',\n' : '\n');
-        }
-        b.write('$indent}');
-      default:
-        throw ArgumentError('rigPsJson: ${v.runtimeType}');
-    }
-  }
-
-  write(value, '');
-  return b.toString();
-}
-
-/// A string as Newtonsoft.Json (inside `ConvertTo-Json`) escapes it.
-String _psJsonString(String s) {
-  final b = StringBuffer('"');
-  for (final c in s.runes) {
-    switch (c) {
-      case 0x22:
-        b.write(r'\"');
-      case 0x5C:
-        b.write(r'\\');
-      case 0x08:
-        b.write(r'\b');
-      case 0x09:
-        b.write(r'\t');
-      case 0x0A:
-        b.write(r'\n');
-      case 0x0C:
-        b.write(r'\f');
-      case 0x0D:
-        b.write(r'\r');
-      case < 0x20 || 0x85 || 0x2028 || 0x2029:
-        b.write('\\u${c.toRadixString(16).padLeft(4, '0')}');
-      default:
-        b.writeCharCode(c);
-    }
-  }
-  b.write('"');
-  return b.toString();
-}
-
 /// Show files that are saved together: all of them or none.
 ///
 /// The old tools wrote one file after another, so a failure halfway left the
@@ -413,7 +336,7 @@ String rigApply(ShowEnv env, List<String> heads) {
   final allHung = ids.length == r.movers.length;
   final statePath = env.path('rig_state.json');
   if (!allHung || newState.isNotEmpty) {
-    writes.add(statePath, rigPsJson({'hung': allHung ? null : ids, 'scenes': newState}), bom: false);
+    writes.add(statePath, psJson({'hung': allHung ? null : ids, 'scenes': newState}), bom: false);
   } else if (File(statePath).existsSync() && readText(statePath) != rigEmptyState) {
     writes.add(statePath, rigEmptyState, bom: false);
   }

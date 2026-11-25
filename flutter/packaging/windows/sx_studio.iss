@@ -5,7 +5,6 @@
   #define AppVer "2.0.0"
 #endif
 #define Release "..\..\ui\build\windows\x64\runner\Release"
-#define Sys32 GetEnv("SystemRoot") + "\System32"
 ; StopOld closes the PowerShell SX Studio (or SX Helper, or AIM MOVERS) this app replaces. It is PowerShell, base64-encoded so no quoting is needed:
 ;   Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='pwsh.exe'" |
 ;     Where-Object { $_.CommandLine -like '*df_aim_gui*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
@@ -41,13 +40,10 @@ CloseApplications=no
 Name: "desktopicon"; Description: "Put SX Studio on the Desktop"
 
 [Files]
+; the app, with the Visual C++ runtime build.ps1 puts next to it
 Source: "{#Release}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; the page phones and tablets load from the laptop
 Source: "..\..\ui\build\web\*"; DestDir: "{app}\web"; Flags: ignoreversion recursesubdirs
-; the Visual C++ runtime the app needs, next to it, for a laptop that has none installed
-Source: "{#Sys32}\msvcp140.dll";       DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Sys32}\vcruntime140.dll";   DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Sys32}\vcruntime140_1.dll"; DestDir: "{app}"; Flags: ignoreversion
 ; the PowerShell app's own updater opens this file when the installer is done: it starts the new app
 Source: "showxpress_helper.vbs"; DestDir: "{app}"; Flags: ignoreversion
 

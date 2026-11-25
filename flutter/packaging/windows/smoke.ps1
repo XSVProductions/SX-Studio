@@ -6,7 +6,7 @@ $setup = Get-ChildItem (Join-Path $root 'build\windows\SX-Studio-windows-setup-*
 if (-not $setup) { throw 'No installer in build\windows. Run build.ps1 first.' }
 Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\ShowXpress Helper'
-foreach ($f in 'sx_studio.exe', 'flutter_windows.dll', 'data\app.so', 'web\index.html', 'vcruntime140.dll', 'showxpress_helper.vbs') {
+foreach ($f in 'sx_studio.exe', 'flutter_windows.dll', 'data\app.so', 'web\index.html', 'vcruntime140_1.dll', 'showxpress_helper.vbs') {
   if (-not (Test-Path -LiteralPath (Join-Path $app $f))) { throw "Not installed: $f" }
 }
 $env:SX_PORT = '47390'

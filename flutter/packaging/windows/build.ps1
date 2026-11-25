@@ -13,6 +13,13 @@ try {
   if ($LASTEXITCODE) { throw 'The Windows build failed.' }
 } finally { Pop-Location }
 
+# The Visual C++ runtime the app needs, next to it, for a laptop that has none installed.
+# The 64-bit files: a 32-bit PowerShell sees them under Sysnative.
+$sys = Join-Path $env:SystemRoot $(if ([Environment]::Is64BitProcess) { 'System32' } else { 'Sysnative' })
+foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+  Copy-Item -LiteralPath (Join-Path $sys $dll) -Destination (Join-Path $root 'ui\build\windows\x64\runner\Release')
+}
+
 $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
   Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 if (-not $iscc) { throw 'Inno Setup 6 was not found. Install it from jrsoftware.org.' }

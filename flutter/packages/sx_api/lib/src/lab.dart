@@ -651,14 +651,11 @@ extension LabApi on SxClient {
   }
 }
 
-/// Two calls the player's "close ShowXpress first" step makes, the same
-/// requests the old page's sxCloseLive sends. They belong to the status and
-/// live areas; they are here until those areas offer them.
+/// The player's "close ShowXpress first" step, the same request the old
+/// page's sxCloseLive sends. It belongs to the status area and is here until
+/// that area offers it.
 extension LabSxApi on SxClient {
   /// Closes ShowXpress for a program that needs the interface: the queue must
   /// not open it again meanwhile (`/api/sx/close` with `live`).
   Future<ToolResult> sxCloseForDmx() => run('/api/sx/close', {'live': true});
-
-  /// Clears that hold again when ShowXpress didn't close.
-  Future<ToolResult> liveStop() => run('/api/live/stop');
 }

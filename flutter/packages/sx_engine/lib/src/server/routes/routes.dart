@@ -8,6 +8,8 @@ import 'looks.dart';
 import 'apc.dart';
 import 'health.dart';
 import 'preshow.dart';
+import 'aim.dart';
+import 'live.dart';
 import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
@@ -26,4 +28,6 @@ void registerRoutes(Engine e) {
   registerApcRoutes(e);
   registerHealthRoutes(e);
   registerPreshowRoutes(e);
+  registerAimRoutes(e);
+  registerLiveRoutes(e);
 }

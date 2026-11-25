@@ -200,13 +200,15 @@ class Engine {
     if (psEq(path, _pairPath)) return _pair(req, fromPhone: fromPhone);
     final route = api.find(path);
     if (route == null) return _json({'ok': false, 'error': 'Unknown action.', 'out': ''}, 404);
-    final key = req.headers['x-sx-token'] ?? '';
+    // the header, or `?t=` as the old page's `sendBeacon` sent it on leaving
+    final header = req.headers['x-sx-token'] ?? '';
+    final key = header.isEmpty ? req.url.queryParameters['t'] ?? '' : header;
     if (fromPhone) {
       // the old server's refusals, word for word. Laptop-only first, as before.
       if (!route.phone) return _json({'ok': false, 'error': 'Only on the computer.', 'out': ''}, 403);
       // A phone's own key only. The laptop's token means nothing on this port.
       if (phones.check(key, ip: _ip(req)) == null) return _json({'ok': false, 'error': 'Pair this phone again.', 'out': ''}, 401);
-    } else if (!sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
+    } else if (!sameSecret(key, config.token)) {
       return _json({'ok': false, 'error': 'Open SX Studio from its icon.', 'out': ''}, 401);
     }
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);

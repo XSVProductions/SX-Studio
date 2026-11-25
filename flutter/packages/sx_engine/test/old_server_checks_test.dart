@@ -33,7 +33,7 @@ const _liveIni =
 Future<(int, String)> _post(int port, String path, Object? body, {String? token}) async {
   final http = HttpClient();
   try {
-    final req = await http.post('127.0.0.1', port, path);
+    final req = await http.postUrl(Uri.parse('http://127.0.0.1:$port$path'));
     if (token != null) req.headers.set('X-SX-Token', token);
     req.headers.contentType = ContentType.json;
     req.write(jsonEncode(body ?? const {}));
@@ -119,6 +119,15 @@ void main() {
       final (code, text) = await _post(engine.port, '/api/speed/apply', {'changes': []}, token: 'wrong');
       expect(code, 401);
       expect(jsonDecode(text), containsPair('error', 'Open SX Studio from its icon.'));
+    });
+
+    test("leaving the page stops live output with the key in the address, as the old page's beacon did", () async {
+      for (final (port, key) in [(engine.phonePort!, phoneKey), (engine.port, 'secret')]) {
+        await engine.dmx.startLive();
+        final (code, _) = await _post(port, '/api/live/stop?t=${Uri.encodeQueryComponent(key)}', const {});
+        expect(code, 200);
+        expect(engine.dmx.liveOn, isFalse);
+      }
     });
 
     test('a phone can force close ShowXpress', () async {

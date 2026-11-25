@@ -1,9 +1,9 @@
 # Installs the built installer silently, opens the app and checks it answers. Used by the build workflow.
-#   powershell -ExecutionPolicy Bypass -File packaging\windows\smoke.ps1
+#   powershell -ExecutionPolicy Bypass -File ui\windows\installer\smoke.ps1
 $ErrorActionPreference = 'Stop'
-$root = Split-Path (Split-Path $PSScriptRoot)
+$root = Split-Path (Split-Path (Split-Path $PSScriptRoot))
 $setup = Get-ChildItem (Join-Path $root 'build\windows\SX-Studio-windows-setup-*.exe') | Select-Object -First 1
-if (-not $setup) { throw 'No installer in build\windows. Run build.ps1 first.' }
+if (-not $setup) { throw 'No installer in build\windows. Run ui	oolelease.ps1 first.' }
 Start-Process -Wait -FilePath $setup.FullName -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\ShowXpress Helper'
 foreach ($f in 'sx_studio.exe', 'flutter_windows.dll', 'data\app.so', 'web\index.html', 'vcruntime140_1.dll', 'showxpress_helper.vbs') {

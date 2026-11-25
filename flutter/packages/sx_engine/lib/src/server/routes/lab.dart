@@ -1,21 +1,12 @@
 import 'dart:io';
 
-import '../../ps_compat.dart';
 import '../../player/cs_compat.dart';
 import '../../player/lab_player.dart';
 import '../../player/player_commands.dart';
 import '../../player/player_links.dart';
 import '../../player/player_show.dart';
 import '../engine.dart';
-
-/// `"$x"` of a JSON value, as the old server read request fields.
-String _psText(Object? v) => switch (v) {
-  null => '',
-  true => 'True',
-  false => 'False',
-  double d when d == d.truncateToDouble() && d.abs() < 1e15 => '${d.toInt()}',
-  _ => '$v',
-};
+import '../ps_body.dart';
 
 /// The SX Player: its list, start, stop, commands, status, and the hand-over
 /// to ShowXpress. Port of the `/api/lab...` routes of `df_aim_gui.ps1`.
@@ -47,13 +38,14 @@ void registerLabRoutes(Engine e) {
     const gone = {'ok': false, 'gone': true, 'error': 'The SX Player stopped.'};
     if (!lab.running) return gone;
     final body = req.body;
-    final c = _psText(body['cmd']);
+    // `$c -eq 'press'` and the rest ignore case
+    final c = bodyText(body['cmd']).toLowerCase();
     PlayerCommand? cmd;
     var err = '';
     const notThere = 'That button is not in the show any more - press Reload.';
     switch (c) {
       case 'press':
-        final b = lab.labButton(_psText(body['sec']));
+        final b = lab.labButton(bodyText(body['sec']));
         if (b != null && extraButtonRx.hasMatch(b.sec) && b.kind == 'missing') {
           err = 'The file for ${b.title} is missing.';
         } else if (!lab.isPlayable(b)) {
@@ -62,7 +54,7 @@ void registerLabRoutes(Engine e) {
           cmd = PressCommand(b!.sec);
         }
       case 'fader':
-        final k = csInt(_psText(body['k'])), v = csDouble(_psText(body['v']));
+        final k = csInt(bodyText(body['k'])), v = csDouble(bodyText(body['v']));
         // NaN is refused here: the old server let it through and it garbled the button's clock
         if (k == null || k < 0 || k > 15 || v == null || v.isNaN) {
           err = 'Bad fader value.';
@@ -74,21 +66,21 @@ void registerLabRoutes(Engine e) {
       case 'sync':
         cmd = const SyncCommand();
       case 'bpm':
-        final v = csDouble(_psText(body['v']));
+        final v = csDouble(bodyText(body['v']));
         if (v != null && v >= 40 && v <= 250) {
           cmd = BpmCommand(double.parse(v.toStringAsFixed(2)));
         } else {
           err = 'The BPM has to be 40 to 250.';
         }
       case 'key':
-        final k = _psText(body['key']).toLowerCase();
+        final k = bodyText(body['key']).toLowerCase();
         if (RegExp(r'^[a-z0-9]$').hasMatch(k)) {
           cmd = KeyCommand(k);
         } else {
           err = 'Bad key.';
         }
       case 'on' || 'off':
-        final b = lab.labButton(_psText(body['sec']));
+        final b = lab.labButton(bodyText(body['sec']));
         if (!lab.isPlayable(b)) {
           err = notThere;
         } else if (c == 'off') {

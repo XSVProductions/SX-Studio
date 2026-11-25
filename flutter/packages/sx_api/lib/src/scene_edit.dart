@@ -275,10 +275,17 @@ int _wholeOr(Object? v, int bad) {
   return bad;
 }
 
-/// Non-null JSON objects of a list, like the old server's `Where-Object { $null -ne $_ }`.
-List<Json> _objects(Object? raw) => [
+/// The items of a changes list, as the old server and `scene_edit.ps1` kept
+/// them. A null is dropped (`Where-Object { $null -ne $_ }`), and with
+/// [dropFalse] so are false, 0 and '' (`if (-not $x) { continue }`). An item
+/// that is not an object stays as an empty one, so it fails the checks the
+/// way the old tool's did (its fields read as null).
+List<Json> _objects(Object? raw, {bool dropFalse = false}) => [
   for (final e in raw is List ? raw : (raw == null ? const [] : [raw]))
-    if (e is Map) e.cast<String, Object?>(),
+    if (e is Map)
+      e.cast<String, Object?>()
+    else if (e != null && !(dropFalse && (e == false || e == 0 || e == '' || (e is List && e.isEmpty))))
+      <String, Object?>{},
 ];
 
 /// "Set this channel of this head in this step." [v] or [fade] may be left out.
@@ -313,7 +320,7 @@ class SceneStepChange {
   factory SceneStepChange.fromJson(Json j) => SceneStepChange(
     src: _wholeOr(j['src'], -1),
     len: j['len'] == null ? null : _wholeOr(j['len'], -1),
-    set: [for (final s in _objects(j['set'])) SceneSet.fromJson(s)],
+    set: [for (final s in _objects(j['set'], dropFalse: true)) SceneSet.fromJson(s)],
   );
 
   /// 0-based number of the step in the file this one is a copy of.
@@ -353,8 +360,8 @@ class SceneChanges {
     scene: j.str('scene'),
     sha: j.str('sha'),
     steps: [for (final s in _objects(j['steps'])) SceneStepChange.fromJson(s)],
-    addch: [for (final s in _objects(j['addch'])) SceneChannelRef.fromJson(s)],
-    delch: [for (final s in _objects(j['delch'])) SceneChannelRef.fromJson(s)],
+    addch: [for (final s in _objects(j['addch'], dropFalse: true)) SceneChannelRef.fromJson(s)],
+    delch: [for (final s in _objects(j['delch'], dropFalse: true)) SceneChannelRef.fromJson(s)],
   );
 
   /// File name in `scenes/`.

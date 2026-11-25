@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 
@@ -34,7 +35,7 @@ Future<void> enableRemote(BuildContext context, {Future<void> Function()? after}
     'Turn it on',
   );
   if (!ok || !context.mounted) return;
-  await runSave(context, app.client.remoteEnable, after: after);
+  await runSave(context, app.client.remoteEnable, what: 'remote', busy: 'Turning on the remote.', after: after);
 }
 
 /// Buttons that go on together, under one name ("DF CHECK 140 + 251").
@@ -236,7 +237,7 @@ class _RemoteRowState extends State<RemoteRow> {
       actions.add(MiniButton('Turn on remote control', primary: true, onPressed: () => enableRemote(context, after: () async => _refresh(auto: false))));
     } else if (!r.open) {
       text = 'ShowXpress is closed. Open it and SX Studio turns on ${sets.first.label} by itself.';
-      actions.add(MiniButton('Launch ShowXpress', onPressed: () => runSave(context, app.client.sxLaunch, quiet: true)));
+      actions.add(MiniButton('Launch ShowXpress', onPressed: () => launchSx(context)));
     } else if (!r.connected) {
       text = r.error;
       actions.add(MiniButton('Try again', onPressed: () => _refresh(auto: false)));

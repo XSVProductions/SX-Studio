@@ -1,8 +1,44 @@
 #include "flutter_window.h"
 
+#include <flutter/standard_method_codec.h>
+
+#include <cwchar>
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+
+namespace {
+
+constexpr wchar_t kWindowClass[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
+
+// The top-level SX Studio window of process |pid|, shown or hidden.
+HWND FindWindowOf(DWORD pid) {
+  struct Search {
+    DWORD pid;
+    HWND found;
+  } search{pid, nullptr};
+  ::EnumWindows(
+      [](HWND hwnd, LPARAM param) -> BOOL {
+        auto* s = reinterpret_cast<Search*>(param);
+        DWORD owner = 0;
+        ::GetWindowThreadProcessId(hwnd, &owner);
+        if (owner != s->pid) return TRUE;
+        wchar_t name[64] = {};
+        ::GetClassNameW(hwnd, name, 64);
+        if (wcscmp(name, kWindowClass) != 0) return TRUE;
+        s->found = hwnd;
+        return FALSE;
+      },
+      reinterpret_cast<LPARAM>(&search));
+  return search.found;
+}
+
+}  // namespace
+
+UINT ShowWindowMessage() {
+  static UINT message = ::RegisterWindowMessageW(L"XSVProductions.SXStudio.Show");
+  return message;
+}
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -25,6 +61,27 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+
+  channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "sx/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        // showOther(pid): the copy already running brings up its window
+        if (call.method_name() == "showOther") {
+          const auto* pid = std::get_if<int32_t>(call.arguments());
+          HWND other = pid ? FindWindowOf(static_cast<DWORD>(*pid)) : nullptr;
+          if (other) {
+            ::AllowSetForegroundWindow(static_cast<DWORD>(*pid));
+            ::PostMessageW(other, ShowWindowMessage(), 0, 0);
+          }
+          result->Success(flutter::EncodableValue(other != nullptr));
+          return;
+        }
+        result->NotImplemented();
+      });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
@@ -40,6 +97,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -51,6 +109,22 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  // Closing the window only hides it, as closing the old app's browser window
+  // left its server running: the lights, the player, the Auto Show and the
+  // phones carry on, and the app quits by itself later (lifetime.dart).
+  if (message == WM_CLOSE) {
+    ::ShowWindow(hwnd, SW_HIDE);
+    if (channel_) channel_->InvokeMethod("closed", nullptr);
+    return 0;
+  }
+  // Started again: show this window instead.
+  if (message == ShowWindowMessage()) {
+    ::ShowWindow(hwnd, ::IsIconic(hwnd) ? SW_RESTORE : SW_SHOW);
+    ::SetForegroundWindow(hwnd);
+    if (channel_) channel_->InvokeMethod("opened", nullptr);
+    return 0;
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

@@ -4,14 +4,15 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../page_store.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'aim_widgets.dart';
 import 'live_aim_model.dart';
+import 'pointer_lock.dart';
 
 /// How the live aim screen was left. [aims] is null for Cancel.
 typedef LiveAimExit = ({Map<String, LiveAim>? aims, bool reopen});
@@ -20,7 +21,7 @@ typedef LiveAimExit = ({Map<String, LiveAim>? aims, bool reopen});
 /// started ([start]). Returns how it was left; the caller stops the output
 /// or saves.
 Future<LiveAimExit?> openLiveAim(BuildContext context, {required AimMode mode, required LiveStart start, required bool reopen}) async {
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = await openPageStore();
   if (!context.mounted) return null;
   return Navigator.of(context).push<LiveAimExit>(
     PageRouteBuilder(
@@ -43,7 +44,7 @@ class LiveAimScreen extends StatefulWidget {
   final AimMode mode;
   final LiveStart start;
   final bool reopen;
-  final SharedPreferences prefs;
+  final PageStore prefs;
 
   @override
   State<LiveAimScreen> createState() => _LiveAimScreenState();
@@ -57,6 +58,16 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
   late bool _reopen = widget.reopen;
   var _dragging = false;
   String? _gone;
+
+  /// Holds the mouse in place while dragging in the pad (old `requestPointerLock`).
+  late final _lock = PointerLock(
+    onMove: (dx, dy, {required shift, required ctrl}) {
+      if (_dragging) _move(dx, dy, fine: shift, fast: ctrl);
+    },
+    onLost: () {
+      if (mounted) setState(() => _dragging = false);
+    },
+  );
   final _focus = FocusNode();
 
   SxClient get _client => AppScope.read(context).client;
@@ -64,7 +75,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
   @override
   void initState() {
     super.initState();
-    final speed = double.tryParse(widget.prefs.getString('sxh_lvspd') ?? '') ?? 1;
+    final speed = double.tryParse(widget.prefs.get('sxh_lvspd') ?? '') ?? 1;
     _m = LiveAimModel(widget.start.info!, mode: widget.mode, speed: aimSpeeds.any((s) => s.$1 == speed) ? speed : 1, flipOf: _flipOf);
     _pump = LiveOutputPump(
       _buffer,
@@ -78,13 +89,14 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
 
   @override
   void dispose() {
+    _lock.stop();
     _pump.close();
     _focus.dispose();
     super.dispose();
   }
 
   ({bool x, bool y}) _flipOf(String id) {
-    final raw = widget.prefs.getString('sxh_flip_$id');
+    final raw = widget.prefs.get('sxh_flip_$id');
     if (raw == null) return (x: false, y: false);
     try {
       final j = jsonDecode(raw);
@@ -97,9 +109,9 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
 
   void _setFlip(({bool x, bool y}) f) {
     final h = _m.sel, text = jsonEncode({'x': f.x, 'y': f.y});
-    widget.prefs.setString('sxh_flip_${h.id}', text);
+    widget.prefs.set('sxh_flip_${h.id}', text);
     // the head on the same T-bar usually hangs the same way
-    if (h.partner.isNotEmpty && widget.prefs.getString('sxh_flip_${h.partner}') == null) widget.prefs.setString('sxh_flip_${h.partner}', text);
+    if (h.partner.isNotEmpty && widget.prefs.get('sxh_flip_${h.partner}') == null) widget.prefs.set('sxh_flip_${h.partner}', text);
     setState(() => _m.flip = f);
   }
 
@@ -109,6 +121,11 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
     _pump.kick();
     AppScope.read(context).setDirty('aim', _m.edited);
     setState(() {});
+  }
+
+  void _endDrag() {
+    _lock.stop();
+    setState(() => _dragging = false);
   }
 
   void _move(double dx, double dy, {bool fine = false, bool fast = false}) {
@@ -444,15 +461,17 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
       onPointerDown: (e) {
         if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryMouseButton) return;
         _focus.requestFocus();
+        if (e.kind == PointerDeviceKind.mouse) _lock.start(e);
         setState(() => _dragging = true);
       },
       onPointerMove: (e) {
         if (!_dragging) return;
         final mouse = e.kind == PointerDeviceKind.mouse, k = HardwareKeyboard.instance;
-        _move(e.delta.dx, e.delta.dy, fine: mouse && k.isShiftPressed, fast: mouse && k.isControlPressed);
+        final d = mouse ? _lock.delta(e) : e.delta;
+        if (d != Offset.zero) _move(d.dx, d.dy, fine: mouse && k.isShiftPressed, fast: mouse && k.isControlPressed);
       },
-      onPointerUp: (_) => setState(() => _dragging = false),
-      onPointerCancel: (_) => setState(() => _dragging = false),
+      onPointerUp: (_) => _endDrag(),
+      onPointerCancel: (_) => _endDrag(),
       // claims the drag, so the page doesn't scroll on a phone
       child: GestureDetector(
         onPanStart: (_) {},
@@ -525,7 +544,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
                   value: _m.speed,
                   options: {for (final (v, l) in aimSpeeds) v: l},
                   onChanged: (v) {
-                    widget.prefs.setString('sxh_lvspd', v == v.roundToDouble() ? '${v.toInt()}' : '$v');
+                    widget.prefs.set('sxh_lvspd', v == v.roundToDouble() ? '${v.toInt()}' : '$v');
                     setState(() => _m.speed = v);
                   },
                 ),

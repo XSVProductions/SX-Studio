@@ -6,6 +6,7 @@ import '../../show/show_env.dart';
 import '../../sx/auto_player.dart';
 import '../../tools/auto_show.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 
 /// The Auto Show: its settings, and start, stop and commands while it plays.
 /// Shares it as a [PlayerAutoShowLink] for the Lab.
@@ -34,19 +35,20 @@ void registerAutoRoutes(Engine e) {
   e.api.get('/api/auto/status', (req) => AutoAnswer(ok: true, status: auto.status()));
 
   e.api.post('/api/auto/save', (req) {
-    final config = req.body.objOrNull('config');
-    if (config == null) throw ToolError('Nothing to save.');
-    final r = autoSave(e.show(), config);
+    // `if (-not $body.config)`. Settings that are not an object are refused too.
+    final config = req.body['config'];
+    if (!psTruthy(config) || config is! Map) throw ToolError('Nothing to save.');
+    final r = autoSave(e.show(), config.cast<String, Object?>());
     auto.reload();
     return {'ok': true, 'out': r.report, 'error': '', 'config': autoConfigJson(r.config)};
   });
 
-  e.api.post('/api/auto/start', (req) => auto.start(req.body.str('look')));
+  e.api.post('/api/auto/start', (req) => auto.start(bodyText(req.body['look'])));
 
   e.api.post('/api/auto/stop', (req) async => AutoAnswer(ok: true, status: await auto.stop()));
 
   e.api.post('/api/auto/cmd', (req) async {
-    final c = req.body.str('cmd'), v = req.body.str('v');
+    final c = bodyText(req.body['cmd']), v = bodyText(req.body['v']);
     final cmd = AutoCmd.values.where((x) => psEq(x.name, c)).firstOrNull;
     if (cmd == null ||
         (cmd == AutoCmd.bpm && !RegExp(r'^\d{2,3}(\.\d)?$').hasMatch(v)) ||

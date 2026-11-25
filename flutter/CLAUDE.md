@@ -74,7 +74,7 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 ## Rules for the engine
 
 - Every route that writes or acts is a POST. A GET never changes anything.
-- A route a phone must never reach (restart the laptop, force-close ShowXpress, pair a phone, install an update) is registered with `phone: false`.
+- A route a phone must never reach is registered with `phone: false`. These are exactly the old `$phoneNever` list in `df_aim_gui.ps1`: install an update, the phone settings and pairing routes, and `/api/open`. Everything else a phone can reach, as in the old app.
 - A save that edits show files is registered with `queue: Queueable(...)`, using the old server's labels and keys (`$queueable` and `Get-QueueKey` in `df_aim_gui.ps1`).
 - Tools are synchronous file work and run on the engine's isolate. Anything that sends DMX on a timer runs on its own isolate, like `LiveDmx`.
 - No `dynamic`. Parse JSON with the `JsonRead` readers. Model with classes, records and sealed types.

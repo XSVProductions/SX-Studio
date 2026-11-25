@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:sx_api/sx_api.dart';
 
 import '../app_state.dart';
 import '../theme.dart';
+import 'result_card.dart';
+
+export 'result_card.dart';
 
 /// Space left and right of a screen's content: 22 on a laptop, 10 on a phone.
 double sxGutter(BuildContext context) => MediaQuery.sizeOf(context).width <= 640 ? 10 : 22;
@@ -59,7 +61,8 @@ class SxHeader extends StatelessWidget {
 }
 
 /// The scrolling body every screen uses: centered, capped at [Sx.contentWidth],
-/// with room at the bottom for the [SaveBar].
+/// with room at the bottom for the [SaveBar]. The last save's [ResultCard]
+/// comes after the screen's own cards, as the old `#result` did.
 class ScreenBody extends StatelessWidget {
   const ScreenBody({super.key, required this.children, this.bar});
 
@@ -71,6 +74,10 @@ class ScreenBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final gutter = sxGutter(context);
+    final app = AppScope.maybeOf(context);
+    final shown = app?.result;
+    final tab = TabScope.of(context);
+    final children = [...this.children, if (shown != null && (tab == null || tab == app!.resultTab)) ResultCard(shown, key: ValueKey(app!.resultSeq))];
     return Column(
       children: [
         Expanded(
@@ -315,38 +322,6 @@ class Seg<T> extends StatelessWidget {
             child: Text(o.value),
           ),
       ],
-    ),
-  );
-}
-
-/// Runs a save and tells the user how it went.
-///
-/// While ShowXpress is open the engine queues the save instead of running it,
-/// and the message says so. On a real save [after] runs (reload the screen).
-/// A failure opens a dialog with the reason and the tool's full report.
-/// [quiet] skips the message on success, for actions that are not saves.
-Future<void> runSave(BuildContext context, Future<ToolResult> Function() save, {Future<void> Function()? after, bool quiet = false}) async {
-  final app = AppScope.read(context);
-  final messenger = ScaffoldMessenger.of(context);
-  ToolResult r;
-  try {
-    r = await save();
-  } on ApiException catch (e) {
-    r = ToolResult.failed(e.message);
-  }
-  final queued = r.extra['queued'] == true;
-  if (r.ok && !queued) await after?.call();
-  await app.refresh();
-  if (!context.mounted) return;
-  if (!r.ok) {
-    await showReport(context, 'Not saved', r.out, error: r.error);
-    return;
-  }
-  if (quiet) return;
-  messenger.showSnackBar(
-    SnackBar(
-      backgroundColor: Sx.panel,
-      content: Text(queued ? 'Queued. It saves when ShowXpress closes.' : 'Saved.', style: TextStyle(color: Sx.text)),
     ),
   );
 }

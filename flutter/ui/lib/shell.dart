@@ -1,10 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:sx_api/sx_api.dart';
 
 import 'app_state.dart';
 import 'queue_bar.dart';
 import 'screens/settings/settings_model.dart';
 import 'screens/settings/update_card.dart';
+import 'sx_control.dart';
 import 'tabs.dart';
 import 'theme.dart';
 import 'widgets/sx_widgets.dart';
@@ -29,37 +30,69 @@ class _ShellState extends State<Shell> {
     final app = AppScope.of(context);
     if (!_opened.contains(app.tab)) _opened.add(app.tab);
     final gutter = sxGutter(context);
+    // The laptop app lost its engine: the old page's "SX Studio has closed".
+    // A phone keeps trying instead (the strip under the header).
+    if (!app.connected && !kIsWeb) return const _Gone();
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            const _Header(),
-            if (!app.connected)
-              Container(
-                width: double.infinity,
-                margin: EdgeInsets.fromLTRB(gutter, 14, gutter, 0),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                decoration: Sx.tint(Sx.amber, radius: 12),
-                child: Text("Can't reach the laptop. Trying again.", style: TextStyle(color: Sx.amber, fontSize: 13)),
-              ),
-            const QueueBar(),
-            Expanded(
-              child: IndexedStack(
-                index: _opened.indexOf(app.tab),
-                children: [
-                  for (final id in _opened)
-                    KeyedSubtree(
-                      key: ValueKey(id),
-                      child: Builder(builder: (c) => buildTab(c, id)),
-                    ),
-                ],
-              ),
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Column(
+              children: [
+                const _Header(),
+                if (!app.connected)
+                  Container(
+                    width: double.infinity,
+                    margin: EdgeInsets.fromLTRB(gutter, 14, gutter, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: Sx.tint(Sx.amber, radius: 12),
+                    child: Text("Can't reach the laptop. Trying again. (Same Wi-Fi? SX Studio still open?)", style: TextStyle(color: Sx.amber, fontSize: 13)),
+                  ),
+                const QueueBar(),
+                Expanded(
+                  child: IndexedStack(
+                    index: _opened.indexOf(app.tab),
+                    children: [
+                      for (final id in _opened)
+                        KeyedSubtree(
+                          key: ValueKey(id),
+                          child: TabScope(
+                            id: id,
+                            child: Builder(builder: (c) => buildTab(c, id)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          if (app.busy.isNotEmpty) BusyVeil(app.busy),
+        ],
       ),
     );
   }
+}
+
+/// The old page's `.gone`: the window is still open but SX Studio behind it
+/// is not.
+class _Gone extends StatelessWidget {
+  const _Gone();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: Sx.bg,
+    body: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('SX Studio has closed', style: Sx.title.copyWith(fontSize: 16)),
+          const SizedBox(height: 12),
+          Text('Open it again from its icon.', style: TextStyle(color: Sx.dim)),
+        ],
+      ),
+    ),
+  );
 }
 
 /// The logo shown in the light theme. It is chrome on transparent, made for a
@@ -138,8 +171,8 @@ class _Header extends StatelessWidget {
                       ),
                     ),
                     open
-                        ? MiniButton('Close ShowXpress', icon: Icons.stop, onPressed: () => runSave(context, () => app.client.sxClose(), quiet: true))
-                        : MiniButton('Launch ShowXpress', icon: Icons.play_arrow, onPressed: () => runSave(context, app.client.sxLaunch, quiet: true)),
+                        ? MiniButton('Close ShowXpress', icon: Icons.stop, onPressed: () => closeSx(context))
+                        : MiniButton('Launch ShowXpress', icon: Icons.play_arrow, onPressed: () => launchSx(context)),
                   ],
                   const UpdateButton(),
                   Tooltip(
@@ -200,42 +233,47 @@ class _TabBar extends StatelessWidget {
         children: [
           SegButton(on: app.tab == 'home', onTap: () => app.go('home'), padding: pad, child: const Text('Home')),
           for (final g in TabGroup.values)
-            MenuAnchor(
-              alignmentOffset: const Offset(0, 7),
-              menuChildren: [
-                for (final t in shown.where((t) => t.group == g))
-                  MenuItemButton(
-                    onPressed: () => app.go(t.id),
-                    style: MenuItemButton.styleFrom(
-                      foregroundColor: app.tab == t.id ? Sx.accent : Sx.dim,
-                      overlayColor: Sx.tabOn,
-                      minimumSize: const Size(200, 38),
-                      padding: const EdgeInsets.symmetric(horizontal: 13),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      textStyle: const TextStyle(fontFamily: Sx.body, fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: .3),
-                    ),
-                    child: Text(app.dirtyTabs.contains(t.id) ? '${m.nameOf(t)}  (unsaved)' : m.nameOf(t)),
-                  ),
-              ],
-              builder: (context, menu, _) {
-                final current = tabs.where((t) => t.group == g && t.id == app.tab).firstOrNull;
-                return SegButton(
-                  on: current != null,
-                  onTap: () => menu.isOpen ? menu.close() : menu.open(),
-                  padding: pad,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // A phone has no room for both, so it shows the tab's name only.
-                      if (current == null || width > 620) Text(g.title, style: current == null ? null : TextStyle(color: Sx.dim)),
-                      if (current != null && width > 620) Text('  ·  ', style: TextStyle(color: Sx.mute)),
-                      if (current != null) Text(m.nameOf(current)),
-                      Icon(Icons.arrow_drop_down, size: 16, color: Sx.mute),
-                    ],
-                  ),
-                );
-              },
-            ),
+            if (shown.where((t) => t.group == g).toList() case final inGroup when inGroup.isNotEmpty)
+              // A group with one tab left (the others hidden in Settings) is a plain button.
+              if (inGroup.length == 1)
+                SegButton(on: app.tab == inGroup.single.id, onTap: () => app.go(inGroup.single.id), padding: pad, child: Text(m.nameOf(inGroup.single)))
+              else
+                MenuAnchor(
+                  alignmentOffset: const Offset(0, 7),
+                  menuChildren: [
+                    for (final t in inGroup)
+                      MenuItemButton(
+                        onPressed: () => app.go(t.id),
+                        style: MenuItemButton.styleFrom(
+                          foregroundColor: app.tab == t.id ? Sx.accent : Sx.dim,
+                          overlayColor: Sx.tabOn,
+                          minimumSize: const Size(200, 38),
+                          padding: const EdgeInsets.symmetric(horizontal: 13),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          textStyle: const TextStyle(fontFamily: Sx.body, fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: .3),
+                        ),
+                        child: Text(m.nameOf(t)),
+                      ),
+                  ],
+                  builder: (context, menu, _) {
+                    final current = tabs.where((t) => t.group == g && t.id == app.tab).firstOrNull;
+                    return SegButton(
+                      on: current != null,
+                      onTap: () => menu.isOpen ? menu.close() : menu.open(),
+                      padding: pad,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // A phone has no room for both, so it shows the tab's name only.
+                          if (current == null || width > 620) Text(g.title, style: current == null ? null : TextStyle(color: Sx.dim)),
+                          if (current != null && width > 620) Text('  ·  ', style: TextStyle(color: Sx.mute)),
+                          if (current != null) Text(m.nameOf(current)),
+                          Icon(Icons.arrow_drop_down, size: 16, color: Sx.mute),
+                        ],
+                      ),
+                    );
+                  },
+                ),
         ],
       ),
     );

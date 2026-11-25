@@ -45,9 +45,18 @@ void main() {
     expect(tagColor(), Sx.accent);
     expect(tagColor(), isNot(dark));
     expect(tester.state(find.byType(Shell)), same(shell));
-    expect((await SharedPreferences.getInstance()).getString('theme'), 'light');
+    expect((await SharedPreferences.getInstance()).getString('sxh_theme'), 'light');
 
     // Take the app down so its status timer stops.
     await tester.pumpWidget(const SizedBox());
+  });
+
+  test("the theme is read from the old page's key", () async {
+    SharedPreferences.setMockInitialValues({'sxh_theme': 'light'});
+    expect(await loadThemeMode(), ThemeMode.light);
+    SharedPreferences.setMockInitialValues({'sxh_theme': 'auto'});
+    expect(await loadThemeMode(), ThemeMode.system);
+    SharedPreferences.setMockInitialValues({});
+    expect(await loadThemeMode(), ThemeMode.dark);
   });
 }

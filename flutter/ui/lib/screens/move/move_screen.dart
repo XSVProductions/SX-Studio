@@ -3,10 +3,11 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../page_store.dart';
+import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'move_canvas.dart';
@@ -68,6 +69,7 @@ class _MoveScreenState extends State<MoveScreen> {
     super.initState();
     _app.addListener(_tabChanged);
     HardwareKeyboard.instance.addHandler(_key);
+    _made = _app.madeScenes.length;
     _load();
     _loadScenes();
   }
@@ -96,7 +98,15 @@ class _MoveScreenState extends State<MoveScreen> {
   /// Leaving the tab stops the movement on the lights.
   void _tabChanged() {
     if (_app.tab != 'move' && _pv != null) _pvStop(_reo);
+    if (_app.madeScenes.length != _made) {
+      _made = _app.madeScenes.length;
+      unawaited(_loadScenes());
+    }
   }
+
+  /// How many looks were made when "Light it with" was read. A new look is a
+  /// new scene to pick (old `MLS=null`).
+  var _made = 0;
 
   double _now() => _hold ? _holdT : DateTime.now().difference(_t0).inMilliseconds.toDouble();
 
@@ -129,7 +139,7 @@ class _MoveScreenState extends State<MoveScreen> {
 
   /// The scenes for "Light it with". Port of `mvLiteList`.
   Future<void> _loadScenes() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await openPageStore();
     List<_Scene> got;
     try {
       got = await _app.client.get('/api/scenes', (j) => j.list('scenes', (s) => (file: s.str('file'), name: s.str('name'))));
@@ -139,7 +149,7 @@ class _MoveScreenState extends State<MoveScreen> {
       got = const [];
     }
     if (!mounted) return;
-    final cur = _lite.isNotEmpty ? _lite : prefs.getString(_liteKey) ?? '';
+    final cur = _lite.isNotEmpty ? _lite : prefs.get(_liteKey) ?? '';
     setState(() {
       _scenes = got;
       _lite = got.any((s) => s.file == cur) ? cur : '';
@@ -320,6 +330,8 @@ class _MoveScreenState extends State<MoveScreen> {
     await runSave(
       context,
       () => _app.client.moveSave(body),
+      what: 'move',
+      busy: 'Saving the movement.',
       after: () async {
         _list = null;
         await _open(d.file, keep: true);
@@ -373,7 +385,7 @@ class _MoveScreenState extends State<MoveScreen> {
       _list = null;
       await _open(d.file, keep: true);
     }
-    if (mounted) await showReport(context, r.ok ? 'Reverted' : 'Not reverted', r.out, error: r.error);
+    _app.showResult(resultOf(r, 'moverev', reopen: _app.status?.queue.reopen ?? true));
   }
 
   // ---------------------------------------------------------------- on the lights
@@ -405,7 +417,7 @@ class _MoveScreenState extends State<MoveScreen> {
       r = ToolResult.failed(e.message);
     }
     if (!r.ok) {
-      if (mounted) await showReport(context, 'ShowXpress', r.out, error: r.error);
+      _app.showResult(failedResult('clprev', r.error, out: r.out));
       return (go: false, reo: false);
     }
     setState(() => _busy = 'Waiting for ShowXpress to close. Save it if it asks.');
@@ -428,9 +440,7 @@ class _MoveScreenState extends State<MoveScreen> {
       } on ApiException {
         // Nothing was running.
       }
-      if (mounted) {
-        await showReport(context, 'ShowXpress', '', error: 'ShowXpress is still open. Close it (save if it asks), then press Show on the lights again.');
-      }
+      _app.showResult(failedResult('clprev', 'ShowXpress is still open. Close it (save if it asks), then press Show on the lights again.'));
       return (go: false, reo: false);
     }
     setState(() => _busy = 'ShowXpress closed. Waiting for it to let go of the interface.');
@@ -470,7 +480,7 @@ class _MoveScreenState extends State<MoveScreen> {
       } on ApiException {
         // Nothing to stop.
       }
-      if (mounted) await showReport(context, 'Not on the lights', r.out, error: '${r.error}${c.reo ? _reoNote : ''}');
+      _app.showResult(failedResult('clprev', '${r.error}${c.reo ? _reoNote : ''}', out: r.out));
       return;
     }
     setState(() {
@@ -492,7 +502,7 @@ class _MoveScreenState extends State<MoveScreen> {
     if (!mounted) return;
     final reo = _reo;
     setState(() => _pv = null);
-    showReport(context, 'Not on the lights', '', error: '$error${reo ? _reoNote : ''}');
+    _app.showResult(failedResult('clprev', '$error${reo ? _reoNote : ''}'));
   }
 
   /// Stops the movement on the lights and, with [reo], opens ShowXpress again. Port of `mvPvStop`.
@@ -506,22 +516,15 @@ class _MoveScreenState extends State<MoveScreen> {
       });
     }
     await pv.stop();
-    if (reo) {
-      try {
-        final r = await _app.client.sxLaunch();
-        if (!r.ok && mounted) await showReport(context, 'ShowXpress', r.out, error: r.error);
-      } on ApiException catch (e) {
-        if (mounted) await showReport(context, 'ShowXpress', '', error: e.message);
-      }
-    }
     if (mounted) setState(() => _busy = '');
+    if (reo && mounted) await launchSx(context);
     await _app.refresh();
   }
 
   /// Loads the scene picked in "Light it with". Port of `mvLiteLoad`.
   Future<void> _liteLoad() async {
     final f = _lite;
-    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_liteKey, f)));
+    unawaited(openPageStore().then((p) => p.set(_liteKey, f)));
     if (f.isEmpty) {
       _liteV = null;
       _pv?.push();

@@ -58,6 +58,7 @@ void main() {
   });
 
   test('turning the remote on waits while ShowXpress is open', () async {
+    await client.status();
     final r = await client.remoteEnable();
     expect(r.extra['queued'], isTrue);
     expect(r.extra['label'], 'ShowXpress remote control');

@@ -87,7 +87,7 @@ void main() {
   test('a call without the token is refused', () async {
     final stranger = SxClient(client.base, token: 'guess');
     addTearDown(stranger.close);
-    await expectLater(stranger.speed(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)));
+    await expectLater(stranger.speed(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 403)));
   });
 
   test('a save cannot be sent as a GET', () async {
@@ -96,6 +96,7 @@ void main() {
 
   test('a save made while ShowXpress is open waits, then runs and reopens it', () async {
     sx.running = true;
+    await client.status();
     final r = await client.speedApply(change);
     expect(r.extra['queued'], isTrue);
     expect(ini(), isNot(contains('masterspeedfader')), reason: 'nothing written while ShowXpress is open');

@@ -20,6 +20,7 @@ jobs:
       - name: Tests
         shell: pwsh
         run: |
+          Push-Location packages\sx_release; dart pub get; dart test; if ($LASTEXITCODE) { exit $LASTEXITCODE }; Pop-Location
           Push-Location packages\sx_engine; dart pub get; dart test; if ($LASTEXITCODE) { exit $LASTEXITCODE }; Pop-Location
           Push-Location ui; flutter test; if ($LASTEXITCODE) { exit $LASTEXITCODE }; Pop-Location
       - name: Build Windows installer
@@ -27,10 +28,10 @@ jobs:
         run: |
           $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0' }
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
-          packaging\windows\build.ps1 -Version $ver
+          ui\tool\release.ps1 -Version $ver -NoSign
       - name: Smoke test (install it, open the app, call its engine)
         shell: pwsh
-        run: packaging\windows\smoke.ps1
+        run: ui\windows\installer\smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -84,15 +85,33 @@ jobs:
           # the real protocol, with no interface: it must answer and exit cleanly
           printf 'z\nq\n' | /tmp/sxh_dmx --dir /tmp/sxapp
 
+  # Signs release.json with the release key (repository secret SX_RELEASE_KEY: the text of the key file) and publishes.
+  # Without the secret it stops: sign on the laptop instead (ui/tool/release.ps1 -MacPkg <pkg from the mac job>).
   release:
     if: github.ref_type == 'tag'
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      - name: Sign release.json
+        env:
+          SX_RELEASE_KEY_TEXT: ${{ secrets.SX_RELEASE_KEY }}
+        run: |
+          [ -n "$SX_RELEASE_KEY_TEXT" ] || { echo "No SX_RELEASE_KEY secret: sign this release on the laptop."; exit 1; }
+          # the PowerShell SX Studio installs the first .exe of the newest release
+          [ "$(ls dist/*.exe | wc -l)" = 1 ] || { echo "A release must hold exactly one .exe."; exit 1; }
+          export SX_RELEASE_KEY="$RUNNER_TEMP/release_key"
+          printf '%s\n' "$SX_RELEASE_KEY_TEXT" > "$SX_RELEASE_KEY"
+          cd packages/sx_release && dart pub get
+          dart run sx_release:release_tool manifest --version "${GITHUB_REF_NAME#v}" --out ../../dist \
+            --windows "$(ls ../../dist/*.exe)" --mac "$(ls ../../dist/*.pkg)"
+          rm -f "$SX_RELEASE_KEY"
+          cat ../../dist/release.json ../../dist/SHA256SUMS.txt
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

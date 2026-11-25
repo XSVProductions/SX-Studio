@@ -1,5 +1,6 @@
 import 'package:sx_api/sx_api.dart';
 
+import '../../ps_compat.dart';
 import '../../show/show_env.dart';
 import '../../tools/flip.dart';
 import '../../tools/rig.dart';
@@ -7,6 +8,7 @@ import '../../tools/rig_test.dart';
 import '../../tools/skip_flash.dart';
 import '../api.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 
 final _digits = RegExp(r'^\d+$');
 
@@ -19,25 +21,24 @@ void registerRigRoutes(Engine e) {
   e.api.get('/api/rt', (req) => rtPreview(e.show()));
 
   e.api.post('/api/skip/apply', queue: const Queueable('Skip Flash'), (req) {
-    final ids = req.body.strList('heads');
+    final ids = bodyTexts(req.body['heads']);
     if (ids.any((i) => !_digits.hasMatch(i)) || ids.length < 2) throw ToolError('Pick at least 2 heads.');
     return skipApply(e.show(), ids);
   });
 
   e.api.post('/api/rig/apply', queue: const Queueable("Tonight's Rig"), (req) {
-    final ids = req.body.strList('heads');
+    final ids = bodyTexts(req.body['heads']);
     if (ids.any((i) => !_digits.hasMatch(i)) || ids.isEmpty) throw ToolError('Tick at least one head.');
     final env = e.show();
     // Reversed heads are saved from this tab too, always the full list, so a
     // queued save that replaces an older one keeps it
     var fo = '';
-    final flipBody = req.body.objOrNull('flip');
+    final flipBody = req.body['flip'];
     if (flipBody != null) {
       final flip = <String, Flip>{};
-      for (final MapEntry(:key, :value) in flipBody.entries) {
+      for (final MapEntry(:key, :value) in _properties(flipBody).entries) {
         if (!_digits.hasMatch(key)) throw ToolError('Unknown head.');
-        final v = value is Map ? value.cast<String, Object?>() : const <String, Object?>{};
-        final pan = _truthy(v['pan']), tilt = _truthy(v['tilt']);
+        final pan = psTruthy(field(value, 'pan')), tilt = psTruthy(field(value, 'tilt'));
         if (pan || tilt) flip[key] = (pan: pan, tilt: tilt);
       }
       final String fout;
@@ -61,16 +62,18 @@ void registerRigRoutes(Engine e) {
   e.api.post('/api/rt/install', queue: const Queueable('RIG ID button'), (req) => rtInstall(e.show()));
 
   e.api.post('/api/rt/apply', queue: const Queueable('Rig Test (2D view)'), (req) {
-    final assign = <String, String>{};
+    final assign = psMap<String>();
     final slot = RegExp(r'^(tl|tr|tm|bl|br|bm)-(l|r)$', caseSensitive: false);
-    for (final MapEntry(:key, :value) in req.body.obj('assign').entries) {
-      final id = value == null ? '' : '$value';
-      if (slot.hasMatch(key) && _digits.hasMatch(id)) assign[key] = id;
+    if (psTruthy(req.body['assign'])) {
+      for (final MapEntry(:key, :value) in _properties(req.body['assign']).entries) {
+        final id = bodyText(value);
+        if (slot.hasMatch(key) && _digits.hasMatch(id)) assign[key] = id;
+      }
     }
     if (assign.isEmpty) throw ToolError('Put at least one mover on a truss.');
     final env = e.show();
-    var out = rtApply(env, assign, extra: _truthy(req.body['extra']));
-    if (_truthy(req.body['rig'])) {
+    var out = rtApply(env, assign, extra: psTruthy(req.body['extra']));
+    if (psTruthy(req.body['rig'])) {
       String? last(String prefix) => out.split('\n').where((l) => RegExp('^$prefix: [\\d,]+\$').hasMatch(l)).lastOrNull?.substring(prefix.length + 2);
       final rigHeads = last('RIGHEADS');
       if (rigHeads != null) {
@@ -102,12 +105,13 @@ String _updateSkipFlash(ShowEnv env, List<String> heads) {
   return out.contains('nothing to change') ? '\n  SKIP FLASH already flashes these ${ids.length} heads' : '\n  SKIP FLASH now flashes ${ids.length} heads';
 }
 
-/// PowerShell's `[bool]` of a JSON value.
-bool _truthy(Object? v) => switch (v) {
-  null => false,
-  bool b => b,
-  num n => n != 0,
-  String s => s.isNotEmpty,
-  List l => l.isNotEmpty,
-  _ => true,
+/// `$x.PSObject.Properties` of a value decoded from a request: an object's
+/// fields. Text and lists have their .NET properties (`Length`, `Count`...),
+/// none of them a head or a truss, so they stand in as one such name.
+/// Numbers and true/false have none.
+Map<String, Object?> _properties(Object? v) => switch (v) {
+  Map m => m.cast<String, Object?>(),
+  String _ => const {'Length': null},
+  List _ => const {'Length': null},
+  _ => const {},
 };

@@ -13,6 +13,7 @@ export 'src/player/sx_player.dart';
 export 'src/ps_compat.dart';
 export 'src/server/api.dart';
 export 'src/server/engine.dart';
+export 'src/server/lifetime.dart';
 export 'src/server/phone.dart';
 export 'src/server/queue.dart';
 export 'src/settings/open_on_computer.dart';

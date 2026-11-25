@@ -69,7 +69,17 @@ class _DriveCardState extends State<DriveCard> with ShowWatcher {
       return;
     }
     if (!mounted) return;
-    await runSave(context, app.client.gdriveImport, after: _load);
+    // the old page read every tab again (`reloadAll`)
+    await runSave(
+      context,
+      app.client.gdriveImport,
+      what: 'gimport',
+      busy: 'Copying the show from Google Drive.',
+      after: () async {
+        app.reloadAll();
+        await _load();
+      },
+    );
   }
 
   Future<void> _setFolder(String v) async {
@@ -147,7 +157,7 @@ class _DriveCardState extends State<DriveCard> with ShowWatcher {
           children: [
             const TextSpan(text: 'Copies the show to '),
             TextSpan(text: g.target, style: b),
-            const TextSpan(text: '. New and changed files go up, and a file deleted here since the last sync is removed there. '),
+            const TextSpan(text: '. Only new and changed files, nothing is deleted. '),
             if (g.last.isEmpty)
               const TextSpan(text: 'Not synced yet.')
             else ...[
@@ -187,7 +197,9 @@ class _DriveCardState extends State<DriveCard> with ShowWatcher {
             mainAxisSize: MainAxisSize.min,
             children: [
               FilledButton(
-                onPressed: g.found && g.here ? () => runSave(context, app.client.gdriveSync, after: _load) : null,
+                onPressed: g.found && g.here
+                    ? () => runSave(context, app.client.gdriveSync, what: 'gsync', busy: 'Copying the show to Google Drive.', after: _load)
+                    : null,
                 child: const Text('Sync to Google Drive'),
               ),
               const SizedBox(height: 6),

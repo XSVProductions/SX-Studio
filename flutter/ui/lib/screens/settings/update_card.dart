@@ -1,19 +1,17 @@
 import 'dart:async';
-import 'dart:ui' show AppExitType;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
-import '../../boot/boot.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'settings_bits.dart';
 import 'settings_model.dart';
 
-/// Asks, then updates to [u]: the laptop downloads the installer and runs it,
-/// and SX Studio closes so the installer can replace it. The old `doUpd`.
+/// Asks, then updates to [u]: the laptop downloads and checks the installer,
+/// and SX Studio quits by itself (lights out, player and phones stopped) and
+/// starts it, so the installer can replace it. The old `doUpd`.
 Future<void> startUpdate(BuildContext context, UpdateInfo u) async {
   final app = AppScope.read(context);
   final how = u.mac
@@ -21,7 +19,7 @@ Future<void> startUpdate(BuildContext context, UpdateInfo u) async {
       : 'SX Studio closes and opens again by itself in a few seconds.';
   if (!await confirm(context, 'Update to version ${u.latest}?', "Downloads it from GitHub and installs it. $how Your show isn't touched.", 'Update')) return;
   if (!context.mounted) return;
-  final line = ValueNotifier('Downloading the update.');
+  final line = ValueNotifier('Downloading the update...');
   unawaited(
     showDialog<void>(
       context: context,
@@ -47,8 +45,7 @@ Future<void> startUpdate(BuildContext context, UpdateInfo u) async {
     line.value = u.mac
         ? "Opening the installer. Follow it, and SX Studio opens again when it's done."
         : 'Installing the update. SX Studio opens again by itself.';
-    await shutdown();
-    await ServicesBinding.instance.exitApplication(AppExitType.required);
+    // the engine ends the app now (boot_io.dart), then the installer starts
     return;
   }
   if (!context.mounted) return;

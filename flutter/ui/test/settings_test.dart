@@ -119,7 +119,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(engine.posts['/api/update/install'], hasLength(1));
     expect(find.text('Download failed: no network'), findsOneWidget);
-    expect(find.text('Downloading the update.'), findsNothing);
+    expect(find.text('Downloading the update...'), findsNothing);
   });
 
   _test('unticking a tab hides it everywhere', (tester) async {
@@ -187,6 +187,29 @@ void main() {
       );
       return paired;
     }
+
+    testWidgets('with phone access turned off the pair screen says so, until a code is tried', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: sxTheme(),
+          home: PairScreen(
+            client: SxClient(
+              Uri.parse('http://laptop:47322'),
+              token: '',
+              client: MockClient((r) async => http.Response(jsonEncode({'ok': false, 'error': 'That code is not right.'}), 200)),
+            ),
+            onPaired: (_) {},
+            off: true,
+          ),
+        ),
+      );
+      const off = 'Phone access is turned off on the laptop (Settings, Phone & iPad).';
+      expect(find.text(off), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '123456');
+      await tester.pumpAndSettle();
+      expect(find.text(off), findsNothing);
+      expect(find.text('That code is not right.'), findsOneWidget);
+    });
 
     testWidgets('six digits pair the phone', (tester) async {
       String? sent;

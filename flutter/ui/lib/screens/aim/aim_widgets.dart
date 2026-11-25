@@ -23,24 +23,6 @@ Future<bool> askUser(BuildContext context, String title, Widget body, String yes
     ) ??
     false;
 
-/// Text with **bold** parts, for the old copy's `<b>` tags. [text] uses `*`
-/// around the bold words.
-Text boldText(String text, {TextStyle? style, Color? bold}) {
-  final parts = text.split('*');
-  return Text.rich(
-    TextSpan(
-      children: [
-        for (final (i, p) in parts.indexed)
-          TextSpan(
-            text: p,
-            style: i.isOdd ? TextStyle(fontWeight: FontWeight.w600, color: bold ?? Sx.text) : null,
-          ),
-      ],
-    ),
-    style: style,
-  );
-}
-
 /// A checkbox with its label, the old `label.link`.
 class CheckRow extends StatelessWidget {
   const CheckRow(this.label, {super.key, required this.value, required this.onChanged});

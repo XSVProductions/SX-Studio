@@ -101,7 +101,11 @@ class _SkipScreenState extends State<SkipScreen> with ShowWatcher, RigReloads {
                       for (final h in d.heads)
                         if (_picked.contains(h.id)) h.id,
                     ]),
-                    after: load,
+                    what: 'skip',
+                    after: () async {
+                      await load();
+                      app.showEdited();
+                    },
                   )
                 : null,
             child: const Text('Save'),

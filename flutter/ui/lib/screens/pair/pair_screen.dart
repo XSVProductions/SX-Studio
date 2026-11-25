@@ -7,12 +7,17 @@ import '../../theme.dart';
 /// Connects a phone or tablet to the laptop with the 6-digit code the
 /// laptop shows. Shown by `boot_web.dart` before the app when the phone has
 /// no key, or its key stopped working. [onPaired] gets the phone's new key.
+/// [off] says phone access is turned off on the laptop, as the old
+/// `phUnpaired` did.
 class PairScreen extends StatefulWidget {
-  const PairScreen({super.key, required this.client, required this.onPaired});
+  const PairScreen({super.key, required this.client, required this.onPaired, this.off = false});
 
   /// A client for the laptop with no key yet.
   final SxClient client;
   final ValueChanged<String> onPaired;
+
+  /// The laptop refused this phone because phone access is turned off.
+  final bool off;
 
   @override
   State<PairScreen> createState() => _PairScreenState();
@@ -21,6 +26,7 @@ class PairScreen extends StatefulWidget {
 class _PairScreenState extends State<PairScreen> {
   final _pin = TextEditingController();
   var _msg = '';
+  late var _off = widget.off;
   var _busy = false;
 
   @override
@@ -32,12 +38,16 @@ class _PairScreenState extends State<PairScreen> {
   Future<void> _pair() async {
     final v = _pin.text.replaceAll(RegExp(r'\D'), '');
     if (v.length != 6) {
-      setState(() => _msg = 'Type the 6 digits from the laptop.');
+      setState(() {
+        _off = false;
+        _msg = 'Type the 6 digits from the laptop.';
+      });
       return;
     }
     if (_busy) return;
     setState(() {
       _busy = true;
+      _off = false;
       _msg = '';
     });
     try {
@@ -140,6 +150,15 @@ class _PairScreenState extends State<PairScreen> {
                       child: FilledButton(onPressed: _busy ? null : _pair, child: Text(_busy ? 'Connecting' : 'Connect')),
                     ),
                   ),
+                  if (_off)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        'Phone access is turned off on the laptop (Settings, Phone & iPad).',
+                        style: TextStyle(color: Sx.amber, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   if (_msg.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),

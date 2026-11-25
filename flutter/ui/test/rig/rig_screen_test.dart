@@ -77,6 +77,8 @@ void main() {
     });
     // the save reloads what the engine has, which matches again
     expect(app.dirtyTabs, isEmpty);
+    // and the tabs that show the rig read the show again (old `S=null;H=null`)
+    expect(app.sxCloses, 1);
     await finish(tester, app);
   });
 

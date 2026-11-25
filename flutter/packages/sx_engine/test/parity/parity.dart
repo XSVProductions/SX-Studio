@@ -297,14 +297,40 @@ class OldRun {
 
 String _quote(String s) => "'${s.replaceAll("'", "''")}'";
 
+/// What the old tools see as ShowXpress's process, for [runOld]'s `sxOpenShow`.
+/// A function wins over the cmdlet of the same name, so `Get-SxProcess` in
+/// `show_common.ps1` finds this one.
+const _fakeSxProcess = r"function global:Get-Process { [pscustomobject]@{ ProcessName = 'ShowXpress'; Id = $PID } }; ";
+
+/// Points the old tools' `Find-Show` at [show] through a `show_path.txt` in a
+/// made up `APPDATA` folder ([at], or next to the show), and returns that
+/// folder.
+String oldShowPathFor(String show, {String? at}) {
+  final appData = at ?? p.join(p.dirname(show), 'appdata');
+  File(p.join(appData, 'ShowXpress Helper', 'show_path.txt'))
+    ..createSync(recursive: true)
+    ..writeAsStringSync(show);
+  return appData;
+}
+
 /// Runs an old tool. [args] maps parameter names to values, `true` for a switch.
-Future<OldRun> runOld(String script, Map<String, Object> args) async {
+///
+/// With [sxOpenShow], the tool runs as on the laptop, without `-TestRoot`, on
+/// that show (found through `show_path.txt`) while ShowXpress looks open, so
+/// its `Test-SxRunning` refusal can be compared. `-TestRoot` skips that check.
+Future<OldRun> runOld(String script, Map<String, Object> args, {String? sxOpenShow}) async {
   final call = StringBuffer('& ${_quote(p.join(oldSrcPath!, script))}');
   args.forEach((k, v) => call.write(v == true ? ' -$k' : ' -$k ${_quote('$v')}'));
   final cmd =
-      "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \$ErrorActionPreference='Stop'; "
+      "[Console]::OutputEncoding=[Text.Encoding]::UTF8; \$ErrorActionPreference='Stop'; ${sxOpenShow == null ? '' : _fakeSxProcess}"
       "try { $call } catch { [Console]::Error.WriteLine('SXERR:' + \$_.Exception.Message); exit 3 }";
-  final r = await Process.run(pwshPath!, ['-NoProfile', '-NonInteractive', '-Command', cmd], stdoutEncoding: utf8, stderrEncoding: utf8);
+  final r = await Process.run(
+    pwshPath!,
+    ['-NoProfile', '-NonInteractive', '-Command', cmd],
+    environment: sxOpenShow == null ? null : {'APPDATA': oldShowPathFor(sxOpenShow)},
+    stdoutEncoding: utf8,
+    stderrEncoding: utf8,
+  );
   final err = const LineSplitter().convert(r.stderr as String).where((l) => l.startsWith('SXERR:')).map((l) => l.substring(6)).join('\n');
   return OldRun(r.exitCode, r.stdout as String, r.stderr as String, r.exitCode == 0 ? null : err);
 }
@@ -427,6 +453,9 @@ String _tidy(String text) {
 ///
 /// [setup] edits the show copy before each side runs, to build the situation
 /// under test. The real show itself is never touched.
+///
+/// [sxOpen] runs both sides while ShowXpress looks open: the old tool without
+/// `-TestRoot` (see [runOld]) and the port with `sxRunning` true.
 void parityTest(
   String name, {
   required String script,
@@ -436,6 +465,7 @@ void parityTest(
   required FutureOr<Object?> Function(ShowEnv env) dart,
   void Function(ShowEnv env)? setup,
   ParityOptions options = const ParityOptions(),
+  bool sxOpen = false,
 }) {
   test(name, skip: paritySkip, () async {
     final tmp = Directory.systemTemp.createTempSync('sx_parity_');
@@ -450,19 +480,19 @@ void parityTest(
     }
 
     fresh();
-    final psArgs = {...args, 'TestRoot': show.path};
+    final psArgs = {...args, if (!sxOpen) 'TestRoot': show.path};
     if (changes != null) {
       final cf = File(p.join(tmp.path, 'changes.json'))..writeAsStringSync(jsonEncode(changes));
       psArgs[changesArg] = cf.path;
     }
-    final old = await runOld(script, psArgs);
+    final old = await runOld(script, psArgs, sxOpenShow: sxOpen ? show.path : null);
     final oldFiles = _snapshot(show, options);
 
     fresh();
     Object? answer;
     String? error;
     try {
-      answer = await dart(ShowEnv(show.path));
+      answer = await dart(ShowEnv(show.path, sxRunning: () => sxOpen));
     } on ToolError catch (e) {
       error = e.message;
     }

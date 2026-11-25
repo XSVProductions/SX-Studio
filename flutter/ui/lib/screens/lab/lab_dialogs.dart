@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../app_state.dart';
 import '../../theme.dart';
+import '../../widgets/sx_widgets.dart';
 import 'lab_board.dart';
 
 /// Asks before something that can't be taken back. True when the user said yes.
@@ -21,35 +23,10 @@ Future<bool> askUser(BuildContext context, String title, String text, String yes
     ) ??
     false;
 
-/// Says an action didn't work, with the reason and the tool's report.
-Future<void> showFailure(BuildContext context, String error, {String out = ''}) => showDialog<void>(
-  context: context,
-  builder: (context) => AlertDialog(
-    title: Text("Didn't work", style: Sx.title),
-    content: SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(error, style: TextStyle(color: Sx.redText)),
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text('Nothing was changed.', style: Sx.sub),
-          ),
-          if (out.trim().isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: SelectableText(
-                out,
-                style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Sx.dim),
-              ),
-            ),
-        ],
-      ),
-    ),
-    actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
-  ),
-);
+/// Says an action didn't work in the result card, as the old
+/// `showResult(r, 'lab')`: the reason, and the tool's report under Full details.
+Future<void> showFailure(BuildContext context, String error, {String out = ''}) async =>
+    AppScope.read(context).showResult(failedResult('lab', error, out: out));
 
 /// The name and "one at a time" of a player page (lbPageForm). Null when cancelled.
 Future<(String, bool)?> askPageForm(BuildContext context, {required String title, required String yes, String name = '', bool swap = false}) =>

@@ -253,7 +253,13 @@ function Invoke-Engine([string]$engineArgs, [string]$script = $engine) {
   $psi.StandardOutputEncoding = [Text.Encoding]::UTF8; $psi.StandardErrorEncoding = [Text.Encoding]::UTF8
   $p = [Diagnostics.Process]::Start($psi)
   $o = $p.StandardOutput.ReadToEndAsync(); $e = $p.StandardError.ReadToEndAsync()
-  if (-not $p.WaitForExit(180000)) { try { $p.Kill() } catch {}; return @{ ok = $false; out = ''; error = 'Timed out.' } }
+  # wait up to 180 s, one second at a time. The DMX children (SX Player, live aim, the editors' previews) put the lights
+  # out after 30 s without a line, and while this waits nobody else can send them one, so send the keep-alive here
+  for ($waited = 0; -not $p.WaitForExit(1000); $waited++) {
+    if ($waited -ge 180) { try { $p.Kill() } catch {}; return @{ ok = $false; out = ''; error = 'Timed out.' } }
+    Step-PlayerKeep
+    if (Test-Live) { try { $script:liveP.StandardInput.WriteLine('k') } catch {} }
+  }
   $esc = [string][char]27 + '\[[0-9;]*m'; $out = $o.Result -replace $esc, ''; $err = $e.Result -replace $esc, ''
   $msg = ''
   if ($p.ExitCode -ne 0 -or $err.Trim()) {
@@ -560,7 +566,7 @@ function Invoke-Action([string]$path, $body) {
     }
     '/api/health/fix' {
       $k = "$($body.key)"
-      if ($k -notmatch '^(speed|midiout|midilight|pad|color|fixtures)\|(page\d+_button\d+|\d+)$') { return @{ ok = $false; error = 'Unknown fix.'; out = '' } }
+      if ($k -notmatch '^(speed|midiout|midilight|pad|color|color251|fixtures)\|(page\d+_button\d+|\d+)$') { return @{ ok = $false; error = 'Unknown fix.'; out = '' } }
       return (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
     }
     '/api/rt/install' { return (Invoke-Engine '-Action Install' $rtEngine) }
@@ -1207,6 +1213,12 @@ function Get-PhoneInfo {
 # routes a phone may use without its key, and routes only the computer itself may use
 $phoneOpen = @('/', '/icon.png', '/brand.png', '/logo.png', '/mark.png', '/api/phone/pair', '/fonts/saira.woff2', '/fonts/orbitron.woff2')
 $phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open')
+# the only routes a GET may use: they just read. Everything else changes something and must be a POST, so a link to it
+# on another web page can't set it off (a phone's key is a cookie, and the phone sends it along when such a link is opened)
+$getOk = @('/', '/icon.png', '/brand.png', '/logo.png', '/mark.png', '/fonts/saira.woff2', '/fonts/orbitron.woff2',
+  '/api/phone', '/api/sx', '/api/remote', '/api/auto', '/api/auto/status', '/api/lab', '/api/lab/status', '/api/settings', '/api/update',
+  '/api/preview', '/api/color', '/api/gdrive', '/api/skip', '/api/rig', '/api/apc', '/api/apc40', '/api/apc40/status', '/api/speed', '/api/health', '/api/rt', '/api/pre',
+  '/api/scenes', '/api/scene', '/api/scene/backups', '/api/moves', '/api/move', '/api/move/backups', '/api/looks')
 if ($script:ph.on) { Start-PhoneRelay }
 
 $html = @'
@@ -2116,16 +2128,20 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
  $('qreo').onchange=async e=>{const r=await api('/api/queue/reopen',{on:e.target.checked});Q=r.q;};
  const qc=$('qclose');if(qc)qc.onclick=sxClose;}
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
-function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
- LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE)seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
-async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+function reloadAll(){// the queue just changed the show: read everything again (queued edits are now saved)
+ // the Scene Editor is reopened only if it has no edits, or only the edits that were queued (SEQ); newer edits stay
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE&&(!seDirty()||JSON.stringify(seBody())===SEQ))seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
+// one failed poll is not enough to say the app has closed: try 5 times, 2 s apart, and keep trying after that
+let pollFail=0;
+async function poll(){try{const r=await api('/api/sx');pollFail=0;$('gone').style.display='';if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
  updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();updScene();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
  catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — opening the new version…';return;}
-  if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+  if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}
+  if(++pollFail<5){setTimeout(poll,2000);return;}$('gone').style.display='flex';setTimeout(poll,5000);return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
 const TABS=['home','rt','rig','aim','skip','color','apc','apc40','speed','health','pre','auto','settings','lab','scene','move','look'];
@@ -2172,7 +2188,7 @@ function renderSkip(){if(!S)return;const er=$('skerr');
  const grp=(is140,name)=>{const hs=S.heads.filter(h=>h.is140===is140);if(!hs.length)return'';const n=hs.filter(h=>sel.has(h.id)).length;
   return `<div class="gh"><h3>${name}</h3><span class="cnt">${n} of ${hs.length}</span><div class="grow"></div><button class="mini" data-all="${is140?1:0}">All</button><button class="mini" data-none="${is140?1:0}">None</button></div><div class="heads">${hs.map(h=>headTile(h,s)).join('')}</div>`;};
  $('skgroups').innerHTML=grp(true,'140SR')+grp(false,'251SR');
- document.querySelectorAll('.hd').forEach(t=>t.onclick=()=>{const id=t.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderSkip();});
+ $('skgroups').querySelectorAll('.hd').forEach(t=>t.onclick=()=>{const id=t.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);renderSkip();});
  const setG=(is140,on)=>{S.heads.filter(h=>h.is140===is140).forEach(h=>on?sel.add(h.id):sel.delete(h.id));renderSkip();};
  document.querySelectorAll('[data-all]').forEach(b=>b.onclick=()=>setG(b.dataset.all==='1',true));
  document.querySelectorAll('[data-none]').forEach(b=>b.onclick=()=>setG(b.dataset.none==='1',false));
@@ -2193,7 +2209,7 @@ function stateTag(id,d){const st=$(id);st.style.display='inline-block';st.classN
 const QH='<span style="color:var(--amber)">ShowXpress is open &mdash; this is <b>queued</b> and done as soon as you save and close ShowXpress.</span>';
 function sxHint(what){return sxOpen?QH:null;}
 async function getJ(p){try{return await api(p);}catch(e){return {ok:false,error:'Could not read the show.'};}}
-async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':label);let r;try{r=await api(p,wq(body));}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok&&!r.queued)await after();showResult(r,what);}
+async function saveTo(p,body,label,after,what){busy(true,sxOpen?'Queueing…':label);let r;try{r=await api(p,wq(body));}catch(e){r={ok:false,error:'Lost connection.'}}busy(false);if(r.ok&&!r.queued)await after();showResult(r,what);return r;}
 function showErr(id,obj){const er=$(id);if(obj&&!obj.ok){er.style.display='block';er.innerHTML=esc(obj.error);return true;}er.style.display='none';return false;}
 
 // ---------------- Tonight's rig (same step rule as rig.ps1)
@@ -2297,8 +2313,8 @@ function renderApc(){if(!A)return;
  else $('apside').innerHTML=`<h3>Move a pad</h3><p class="sub" style="margin:0 0 8px">Tap a pad to see what it plays, then tap where it should go &mdash; or drag it there. Right-click a pad to take it off. A blue dot = moved, not saved yet.</p>${apMsg?'<p class="sub" style="color:var(--amber)">'+apMsg+'</p>':''}<div class="kv"><span>Pads used</span><b>${used} of 64</b><span>Free</span><b>${free.join(', ')||'none'}</b></div>`;
  $('apfaders').innerHTML=(A.faders||[]).map(f=>`<div class="fd"><b>Fader ${f.n}</b><span>CC ${f.cc} &rarr; </span>${esc(f.caption||'?')} speed</div>`).join('');
  const iss=[];
- for(let n=0;n<64;n++){const ps=padsAt(n);if(ps.length>1)iss.push(['error',rc(n)+' plays '+ps.length+' buttons',ps.map(p=>p.title+' ('+p.pageName+')').join(', ')+' &mdash; one press fires all of them. Tap the pad (again to pick the next one) and move one away.','']);}
- A.pads.filter(p=>!p.sceneOk&&apN[p.sec]>=0).forEach(p=>iss.push(['error',p.title+': scene file missing','Plays '+p.scene+', which isn\'t in the show any more.','']));
+ for(let n=0;n<64;n++){const ps=padsAt(n);if(ps.length>1)iss.push(['error',rc(n)+' plays '+ps.length+' buttons',ps.map(p=>esc(p.title+' ('+p.pageName+')')).join(', ')+' &mdash; one press fires all of them. Tap the pad (again to pick the next one) and move one away.','']);}
+ A.pads.filter(p=>!p.sceneOk&&apN[p.sec]>=0).forEach(p=>iss.push(['error',p.title+': scene file missing','Plays '+esc(p.scene)+', which isn\'t in the show any more.','']));
  A.pads.filter(p=>!onGrid(p)&&apN[p.sec]!==-1).forEach(p=>iss.push(['warn',p.title+' ('+p.pageName+') is mapped outside the pads',(p.type===0?'Note ':'MIDI type '+p.type+', number ')+apN[p.sec]+' &mdash; a round button or track button.',p.type===0?`<button class="mini" data-pick="${esc(p.sec)}">Move to a pad</button> <button class="mini" data-del="${esc(p.sec)}">Take off</button>`:`<button class="mini" data-del="${esc(p.sec)}">Take off</button>`]));
  A.pads.filter(p=>apN[p.sec]===-1).forEach(p=>iss.push(['info',p.title+' ('+p.pageName+') will be taken off the pads','Not saved yet.',`<button class="mini" data-back="${esc(p.sec)}">Put back</button>`]));
  $('apissues').innerHTML=iss.length?iss.map(i=>`<div class="iss ${i[0]}"><div class="ic">${i[0]==='error'?'!':i[0]==='warn'?'?':'i'}</div><div class="grow"><b>${esc(i[1])}</b><div class="d">${i[2]}</div></div><div class="act">${i[3]}</div></div>`).join(''):'<p style="color:var(--green);margin:4px 0">&#10003; Every pad plays one button and every scene exists.</p>';
@@ -2501,7 +2517,7 @@ function renderRt(){if(!RT)return;
  stateTag('rtstate',rtDirty());$('foot').textContent='Show: '+RT.show+(RT.saved?' · Rig Test last saved '+RT.saved.replace('T',' '):'');updRt();}
 function rtOpen(k){rtSlot=k;const s=RT.slots.find(x=>x.key===k),cur=rtA[k];$('rtpt').textContent=s.towerName+' tower — '+s.side+' mover';
  const where=id=>{const e=Object.entries(rtA).find(([kk,v])=>v===id&&kk!==k&&rtUsed(kk));if(!e)return'';const o=RT.slots.find(x=>x.key===e[0]);return 'now '+o.towerName.toLowerCase()+' '+o.side;};
- const grid=fl=>`<div class="pick">${RT.heads.filter(h=>h.flash===fl).map(h=>`<div data-pk="${h.id}" class="${h.id===cur?'cur':''}">${lookHtml(h)}#${h.num}<small>${esc(h.look)}</small><small>${esc(where(h.id))||'&nbsp;'}</small></div>`).join('')}</div>`;
+ const grid=fl=>`<div class="pick">${RT.heads.filter(h=>h.flash===fl).map(h=>`<div data-pk="${esc(h.id)}" class="${h.id===cur?'cur':''}">${lookHtml(h)}#${h.num}<small>${esc(h.look)}</small><small>${esc(where(h.id))||'&nbsp;'}</small></div>`).join('')}</div>`;
  $('rtpb').innerHTML='<div class="gh"><h3>SOLID</h3></div>'+grid(false)+'<div class="gh"><h3>FLASHING</h3></div>'+grid(true);
  document.querySelectorAll('[data-pk]').forEach(e=>e.onclick=()=>{const id=e.dataset.pk;for(const kk of Object.keys(rtA))if(rtA[kk]===id)delete rtA[kk];rtA[k]=id;$('rtpick').style.display='none';renderRt();});
  $('rtpick').style.display='flex';}
@@ -2753,7 +2769,7 @@ function renderColor(){if(!CL)return;if(showErr('clerr',CL)){$('clstate').style.
  const k=$('clknob');if(clHex){const [h,s]=hex2hsv(clHex),a=h*Math.PI/180;k.style.display='block';k.style.left=(100+Math.sin(a)*s*100)+'px';k.style.top=(100-Math.cos(a)*s*100)+'px';k.style.background='#'+clHex;}else k.style.display='none';
  $('clval').value=clV;$('clwheel').style.filter='brightness('+Math.max(.25,clV/100)+')';
  if(document.activeElement!==$('clhex'))$('clhex').value=clHex?'#'+clHex:'';$('clpick').value='#'+(clHex||'ffffff');
- const big=$('clbig');big.style.background=clHex?'#'+clHex:'repeating-linear-gradient(45deg,#1d212a 0 10px,#171a21 10px 20px)';big.innerHTML='<span>'+(clHex?'#'+clHex:'pick a colour')+'</span>';
+ const big=$('clbig');big.style.background=clHex?'#'+clHex:'repeating-linear-gradient(45deg,#1d212a 0 10px,#171a21 10px 20px)';big.innerHTML='<span>'+esc(clHex?'#'+clHex:'pick a colour')+'</span>';
  const n1=clHex&&nearest(CL.wheel140,clHex),n2=clHex&&nearest(CL.wheel251,clHex),sw=e=>e?`<span class="sw" style="background:#${e.hex}"></span>${esc(e.name)}`:'&mdash;',wa=CL.washes||[];
  $('clmap').innerHTML=`<span>140 movers</span><b>${sw(n1)}</b><span>251 movers</span><b>${sw(n2)}</b><span>Uplights</span><b>${clHex?'<span class="sw" style="background:#'+clHex+'"></span>exact colour':'&mdash;'}${wa.length?'<br><small style="color:var(--dim)">'+esc(wa.join(', '))+'</small>':' &middot; <span style="color:var(--amber)">none found</span>'}</b>`+
   (CL.hex?`<span>Saved</span><b><span class="sw" style="background:#${CL.hex}"></span>#${CL.hex}${CL.name?' '+esc(CL.name):''}${CL.saved?' &middot; '+fmtT(CL.saved):''}</b>`:'');
@@ -2816,7 +2832,9 @@ async function gdImport(){if(!G||!G.srcFound)return;
  if(!await ask('Import the show from Google Drive?','The show on this computer is <b>replaced</b> by the Google Drive copy'+(G.srcTime?' (saved '+fmtT(G.srcTime)+')':'')+' &mdash; anything changed here since then is lost. The old show is kept as a backup.'+(sxOpen?'<br><br>ShowXpress is open: this waits until you close it.':''),'Import'))return;
  await saveTo('/api/gdrive/import',{},'Copying the show from Google Drive…',async()=>{reloadAll();},'gimport');}
 $('gdimp').onclick=()=>gdImport();
-async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
+async function sxLaunch(){// only one program can use the DMX interface: stop this window's previews first (each does nothing if it isn't on)
+ await cpStop(false);await sePvStop(false);await mvPvStop(false);await lkPvStop(false);
+ busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
  if(r.ok&&r.already){busy(false);
   if(!await ask('ShowXpress is still running','SX Studio sees ShowXpress running on the laptop. If you can see its window there, just use it.<br><br>If you <b>can&rsquo;t</b> see it, it got stuck while closing: <b>Force close</b> stops it and opens it again (anything not saved is lost).','Force close and open'))return;
   if(!await sxForce())return;busy(true,'Starting ShowXpress…');try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}}
@@ -3275,7 +3293,7 @@ applyTheme();
 
 // ---------------- Scene Editor (scene_edit.ps1, user 2026-11-24): change a scene's steps and values, see it on the lights.
 // The page keeps a working copy of the steps; Save sends only what differs from the file (scene_edit.ps1 changes just that).
-let SL=null,SE=null,SW=null,seI=0,seSel=new Set(),seMo='',SEP=null,seVer=0,seTab=null;
+let SL=null,SE=null,SW=null,SEQ='',seI=0,seSel=new Set(),seMo='',SEP=null,seVer=0,seTab=null;
 const seKey=(f,i)=>f+'|'+i,seCs=w=>w.len==null?100:w.len,seSec=cs=>(cs/100).toFixed(2).replace(/0$/,'');
 async function loadScenes(){$('secount').textContent='Loading…';SL=await getJ('/api/scenes');renderScenes();}
 function renderScenes(){const pick=!SE;$('sepickw').style.display=pick?'':'none';$('sew').style.display=pick?'none':'';$('seback').style.display=pick?'none':'';
@@ -3410,8 +3428,8 @@ $('seq').oninput=renderScenes;
 $('seback').onclick=async()=>{if(SE&&seDirty()&&!await ask('Leave this scene?','Your changes to <b>'+esc(SE.name)+'</b> are not saved yet. They will be lost.','Leave it'))return;await sePvStop(SEP?SEP.reo:false);SE=null;SW=null;if(!SL)loadScenes();else renderScenes();};
 $('serefresh').onclick=async()=>{if(SE){if(seDirty()&&!await ask('Reload the scene?','Your changes that are not saved yet will be lost.','Reload'))return;seOpen(SE.file,true);}else loadScenes();};
 $('seundo').onclick=()=>{if(!SE)return;seReset();seI=Math.min(seI,SW.steps.length-1);renderScene();sePush();};
-$('sesave').onclick=()=>{if(!SE||!seDirty())return;const f=SE.file;
- saveTo('/api/scene/save',seBody(),'Saving the scene…',async()=>{SL=null;await seOpen(f,true);},'scene');};
+$('sesave').onclick=()=>{if(!SE||!seDirty())return;const f=SE.file,b=seBody();
+ saveTo('/api/scene/save',b,'Saving the scene…',async()=>{SL=null;await seOpen(f,true);},'scene').then(r=>{SEQ=r.queued?JSON.stringify(b):'';});};
 // ---- earlier versions (backups kept by scene_edit.ps1, outside the show folder)
 async function seBackups(){if(!SE){$('sebk').style.display='none';return;}const f=SE.file,r=await getJ('/api/scene/backups?f='+encodeURIComponent(f));if(!SE||SE.file!==f)return;
  const b=(r.ok&&r.backups)||[];$('sebk').style.display=b.length?'':'none';
@@ -3943,7 +3961,7 @@ function renderPhone(){const p=PHI,b=$('phbody');if(!p)return;$('phon').checked=
   '<div class="phbox" style="text-align:center"><h3>PAIR A PHONE</h3>'+(p.pin?'<div class="phpin">'+esc(p.pin)+'</div><div style="margin:6px 0 2px">'+cb(p.pin).replace('&#128203; Copy','&#128203; Copy code')+'</div><p class="sub" style="margin:4px 0 10px">Type this on the phone. Good for '+Math.max(1,Math.ceil(p.pinLeft/60))+' more min.</p>':
    '<p class="sub" style="margin:0 0 10px">Each phone or iPad is paired once, with a 6-digit code.</p><button id="phpinb" class="primary" style="padding:10px 22px;font-size:14px">Pair a phone</button>')+
   '<div style="margin-top:12px"><button id="phunp" class="mini">Unpair all phones</button></div></div></div>';
- const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await getJ('/api/phone/pin');renderPhone();};
+ const pb=$('phpinb');if(pb)pb.onclick=async()=>{PHI=await api('/api/phone/pin',{}).catch(()=>PHI);renderPhone();};
  $('phunp').onclick=async()=>{if(!await ask('Unpair all phones?','Every paired phone and iPad has to be paired again with a new code.','Unpair'))return;PHI=await api('/api/phone/unpair',{});renderPhone();};}
 $('phon').onchange=async e=>{busy(true,e.target.checked?'Turning on phone access…':'Turning off phone access…');try{PHI=await api('/api/phone/set',{on:e.target.checked});}catch(x){PHI={ok:false,error:'Lost connection.'};}busy(false);renderPhone();};
 if(!PH){loadPhone();setInterval(()=>{if(PHI&&PHI.on&&$('v-settings').classList.contains('on')&&!document.hidden)loadPhone();},5000);}
@@ -3981,9 +3999,14 @@ try {
         if ($phoneNever -contains $path) { Send-Text $ctx 403 'text/plain' 'Only on the computer.'; continue }
         if ($phoneOpen -notcontains $path -and -not ($script:ph.key -and ($req.QueryString['t'] -ceq $script:ph.key -or (Get-PhoneCookieKey $req)))) { Send-Text $ctx 403 'text/plain' 'Pair this phone again.'; continue }
       } elseif ($req.QueryString['t'] -ne $token) { Send-Text $ctx 403 'text/plain' 'Open SX Studio from its icon.'; continue }
+      if ($req.HttpMethod -ne 'POST' -and $getOk -notcontains $path) { Send-Text $ctx 405 'text/plain' 'Use POST.'; continue }
       $last = Get-Date
       $body = $null
       if ($req.HttpMethod -eq 'POST') { $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8); $raw = $sr.ReadToEnd(); if ($raw) { $body = $raw | ConvertFrom-Json } }
+      # a phone may not restart the laptop or force ShowXpress closed (anything not saved in it is lost)
+      if ($fromPhone -and (($path -eq '/api/pre/fix' -and "$($body.key)" -eq 'restart') -or ($path -eq '/api/sx/close' -and $body -and $body.force))) {
+        Send-Json $ctx @{ ok = $false; error = 'Only on the computer.'; out = '' }; continue
+      }
       if ($req.HttpMethod -eq 'POST' -and $queueable.ContainsKey($path)) {
         # ShowXpress open + the page asked to queue -> do it when ShowXpress closes; else now
         if ($body -and $body.queue -and (Test-SxOpen)) { Send-Json $ctx (Add-Queue $path $body) } else { Send-Json $ctx (Invoke-Action $path $body) }
@@ -4260,7 +4283,7 @@ try {
         }
         '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }
         '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }
-        '/api/sx/launch' { Stop-Player; Send-Json $ctx (Start-Sx) }
+        '/api/sx/launch' { Stop-Player; Stop-Live; Send-Json $ctx (Start-Sx) }   # also stops a preview a phone or another window is running
         '/api/sx/close' {
           if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
           $ps = @(Get-SxProcess)

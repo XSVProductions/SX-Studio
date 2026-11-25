@@ -37,7 +37,8 @@ function Read-FixLog {
   ,$l
 }
 function Save-FixLog($l) {
-  if (-not $l.Count) { if (Test-Path -LiteralPath $logPath) { Remove-Item -LiteralPath $logPath }; return }
+  # an empty log is kept as [] rather than deleted: a deleted file would come back with the next Google Drive import
+  if (-not $l.Count -and -not (Test-Path -LiteralPath $logPath)) { return }
   [IO.File]::WriteAllText($logPath, (ConvertTo-Json -InputObject $l.ToArray() -Depth 6), $utf8)
 }
 function Test-NeedClosed { if (-not $TestRoot -and (Test-SxRunning)) { throw "ShowXpress is OPEN - NOTHING was changed. Close ShowXpress (save first) and try again." } }

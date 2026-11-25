@@ -175,7 +175,7 @@ function Read-Step($step, $m, $default) {
 }
 
 function Read-AimScene($movers) {
-  if (-not (Test-Path $scene)) { throw "Aim scene not found: $scene" }
+  if (-not (Test-Path -LiteralPath $scene)) { throw "Aim scene not found: $scene" }
   [xml]$x = [IO.File]::ReadAllText($scene)
   $steps = @($x.Scene.Steps.Step)
   $r = @{ center = @{}; corner = @{}; steps = $steps.Count; moved = 0 }
@@ -219,7 +219,7 @@ function Get-HeadFix($movers, $center, $corner, [switch]$Reset) {
 
 function Get-TargetGpjs {
   if ($Mode -eq 'Room') { return @($roomFiles + @($checks.Keys) | Select-Object -Unique) }
-  $lt = Get-Content "$root/Live/live.ini" -Encoding UTF8
+  $lt = Get-Content -LiteralPath "$root/Live/live.ini" -Encoding UTF8
   $pages = @(); $pg = $null
   foreach ($l in $lt) {
     if ($l -match '^\[(page\d+)\]$') { $pg = $matches[1]; continue }
@@ -250,10 +250,10 @@ function Get-FixtureSections($file) {
 
 function New-CheckGpj($name, $model, $movers) {
   # 4-corner trace of the reference floor for every head of one model (points mode, 1 s per corner)
-  $path = "$gdir/$name"; if (Test-Path $path) { return }
+  $path = "$gdir/$name"; if (Test-Path -LiteralPath $path) { return }
   $ids = @($movers | Where-Object { $_.Model -eq $model } | ForEach-Object { $_.Id })
   $secs = @{}
-  foreach ($f in (Get-ChildItem $gdir -Filter *.gpj)) {
+  foreach ($f in (Get-ChildItem -LiteralPath $gdir -Filter *.gpj)) {
     foreach ($s in (Get-FixtureSections $f.FullName)) { $id = ($s | Where-Object { $_ -match '^ID = ' }) -replace '^ID = ', ''; if ($id -and -not $secs.ContainsKey($id)) { $secs[$id] = $s } }
   }
   $out = New-Object Collections.Generic.List[string]
@@ -287,7 +287,7 @@ function New-CheckGpj($name, $model, $movers) {
 
 function Load-State {
   $st = @{ sx = 1.0; sy = 1.0; files = @{}; copied = @{} }
-  if (Test-Path $stateF) {
+  if (Test-Path -LiteralPath $stateF) {
     $j = [IO.File]::ReadAllText($stateF) | ConvertFrom-Json
     $st.sx = [double]$j.sx; $st.sy = [double]$j.sy
     $toXY = { param($v) if ("$v" -match '^(-?\d+),(-?\d+)$') { @([int]$matches[1], [int]$matches[2]) } else { $null } }
@@ -362,7 +362,7 @@ function Update-Gpjs($fix, [double]$sx, [double]$sy, $st) {
   # $fix: id -> head fix (offsets + zooms); sx/sy = overall shape size (1 = original)
   $files = Get-TargetGpjs; $total = 0; $warn = @()
   foreach ($f in $files) {
-    $path = "$gdir/$f"; if (-not (Test-Path $path)) { $warn += "missing: $f"; continue }
+    $path = "$gdir/$f"; if (-not (Test-Path -LiteralPath $path)) { $warn += "missing: $f"; continue }
     $useZoom = -not (Test-Like $f $noZoom); $scaleThis = -not (Test-Like $f $noScale)
     $bytes = [IO.File]::ReadAllBytes($path)
     $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
@@ -742,7 +742,7 @@ if ($Action -eq 'Menu') {
 Test-SxClosed
 if ($Action -eq 'Rebuild') { Update-RenderedScenes; return }   # only the step scenes (GRAND ENTRANCE) from their .gpj
 # aim scene: create, or upgrade an old 1-step scene to center + corner (keeps your center aims)
-if (-not (Test-Path $scene)) {
+if (-not (Test-Path -LiteralPath $scene)) {
   $h = Get-HomeAims $movers; Write-AimScene $movers $h.center $h.corner
   "  CHANGED  created aim scene ${aimTitle}: step 1 = CENTER, step 2 = CORNER"
 } else {

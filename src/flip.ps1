@@ -134,10 +134,12 @@ foreach ($p in $writes.Keys) {
   [IO.File]::WriteAllText($p, $writes[$p], (New-Object Text.UTF8Encoding($bom)))
 }
 if ($rsOut) { [IO.File]::WriteAllText($rsPath, ($rsOut | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false))) }
-if ($want.Count) {
+# no head reversed any more: the file stays, with no heads in it. A deleted file would come back with the next
+# Google Drive import (gdrive.ps1 never deletes), and then the Helper would think the heads are still reversed
+if ($want.Count -or (Test-Path -LiteralPath $statePath)) {
   $hs = [ordered]@{}; foreach ($m in $movers) { if ($want[$m.Id]) { $hs[$m.Id] = [ordered]@{ label = (Get-Label $m); pan = $want[$m.Id].pan; tilt = $want[$m.Id].tilt } } }
   [IO.File]::WriteAllText($statePath, ([ordered]@{ saved = (Get-Date).ToString('s'); heads = $hs } | ConvertTo-Json -Depth 4), (New-Object Text.UTF8Encoding($false)))
-} elseif (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath }
+}
 
 foreach ($m in $movers) {
   if (-not $delta[$m.Id]) { continue }

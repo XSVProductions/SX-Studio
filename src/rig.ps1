@@ -152,8 +152,9 @@ foreach ($w in $writes) {
 }
 $allHung = ($ids.Count -eq $movers.Count)
 $o = [ordered]@{ hung = $(if ($allHung) { $null } else { @($ids) }); scenes = $newState }
-if (-not $allHung -or $newState.Count) { [IO.File]::WriteAllText($statePath, ($o | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false))) }
-elseif (Test-Path -LiteralPath $statePath) { Remove-Item -LiteralPath $statePath }
+# every head hung and nothing trimmed: the file stays as { hung: null, scenes: {} } (read the same as no file), because a
+# deleted file would come back with the next Google Drive import (gdrive.ps1 never deletes)
+if (-not $allHung -or $newState.Count -or (Test-Path -LiteralPath $statePath)) { [IO.File]::WriteAllText($statePath, ($o | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding($false))) }
 "  heads hung: $($ids.Count) of $($movers.Count)" + $(if (-not $allHung) { "  (not hung: $((@($movers | Where-Object { -not $hungSet.Contains($_.Id) } | ForEach-Object { Get-Label $_ })) -join ', '))" } else { '' })
 "  chase scenes: $($scenes.Count), changed: $($writes.Count)"
 $lines

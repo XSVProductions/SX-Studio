@@ -10,9 +10,20 @@ void main() {
   late List<Sent> sent;
   late AppState app;
 
+  // what the fake engine's status says, and how often the scenes were read
+  var sxOpen = false, queueDone = '';
+  var listReads = 0, sceneReads = 0;
+
   Map<String, Object? Function(Map<String, Object?>)> engine() => {
-    '/api/sx': (_) => {'ok': true, 'open': false, 'q': {}},
+    '/api/sx': (_) => {
+      'ok': true,
+      'open': sxOpen,
+      'q': {
+        if (queueDone.isNotEmpty) 'done': {'at': queueDone},
+      },
+    },
     '/api/scenes': (_) => {
+      'reads': ++listReads,
       'ok': true,
       'show': '/show',
       'scenes': [
@@ -28,7 +39,10 @@ void main() {
         },
       ],
     },
-    '/api/scene': (q) => sceneJson('${q['f']}'),
+    '/api/scene': (q) {
+      sceneReads++;
+      return sceneJson('${q['f']}');
+    },
     '/api/scene/backups': (_) => {'ok': true, 'file': 'TEST SCENE.scex', 'backups': []},
     '/api/scene/save': (_) => {'ok': true, 'out': '  CHANGED  TEST SCENE: 1 value'},
     '/api/live/start': (_) => {'ok': true, 'test': true, 'iface': ''},
@@ -41,6 +55,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     sent = [];
+    sxOpen = false;
+    queueDone = '';
+    listReads = sceneReads = 0;
     app = AppState(fakeEngine(sent, engine()), tab: 'scene');
     await tester.pumpWidget(
       AppScope(
@@ -193,6 +210,32 @@ void main() {
     await tester.tap(find.text('Leave it'));
     await tester.pumpAndSettle();
     expect(find.text('OTHER'), findsOneWidget);
+    expect(app.dirtyTabs, isEmpty);
+    await finish(tester);
+  });
+
+  testWidgets('after the queue saved, the list and the open scene are read again', (tester) async {
+    await pumpScreen(tester);
+    await openScene(tester);
+    await tester.tap(find.text('Copy step'));
+    await tester.pump();
+    expect((listReads, sceneReads), (1, 1));
+
+    // ShowXpress closing alone leaves the Scene Editor as it is
+    sxOpen = true;
+    await app.refresh();
+    sxOpen = false;
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect((listReads, sceneReads), (1, 1));
+
+    // the queue ran: its saves are in the show, the edits on screen are gone, no question asked
+    queueDone = '2026-11-25T01:30:00';
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect((listReads, sceneReads), (2, 2));
+    expect(find.text('Leave this scene?'), findsNothing);
+    expect(find.text('TEST SCENE'), findsOneWidget);
     expect(app.dirtyTabs, isEmpty);
     await finish(tester);
   });

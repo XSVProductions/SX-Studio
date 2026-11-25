@@ -21,7 +21,7 @@ class SceneScreen extends StatefulWidget {
   State<SceneScreen> createState() => _SceneScreenState();
 }
 
-class _SceneScreenState extends State<SceneScreen> {
+class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   static const _tab = 'scene';
   static const _reoNote = ' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';
 
@@ -66,6 +66,18 @@ class _SceneScreenState extends State<SceneScreen> {
       if (mounted) _open(f);
     });
   }
+
+  /// The queue saved into the show: read the list again, and the open scene
+  /// from disk, keeping the step and picked heads. The old `reloadAll`.
+  /// (When ShowXpress closes the old page left the Scene Editor alone.)
+  @override
+  void onQueueRan() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) return;
+    _list = null;
+    unawaited(_loadList());
+    final w = _work;
+    if (w != null) unawaited(_open(w.scene.file, keep: true));
+  });
 
   @override
   void dispose() {

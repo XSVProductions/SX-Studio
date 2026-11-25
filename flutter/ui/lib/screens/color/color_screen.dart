@@ -98,7 +98,7 @@ class ColorScreen extends StatefulWidget {
   State<ColorScreen> createState() => _ColorScreenState();
 }
 
-class _ColorScreenState extends State<ColorScreen> {
+class _ColorScreenState extends State<ColorScreen> with ShowWatcher {
   ColorPreview? _data;
   var _error = '';
 
@@ -154,6 +154,17 @@ class _ColorScreenState extends State<ColorScreen> {
       });
     }
     _markDirty();
+  }
+
+  /// The queue saved a color into the show: read it again (the old `reloadAll`).
+  @override
+  void onQueueRan() => _load();
+
+  /// ShowXpress closed: read again unless a color is picked and not saved
+  /// (`if(CL&&!clDirty())loadColor()`).
+  @override
+  void onSxClosed() {
+    if (_data != null && !_dirty) _load();
   }
 
   bool get _dirty {

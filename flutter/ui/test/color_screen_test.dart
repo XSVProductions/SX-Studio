@@ -175,6 +175,68 @@ void main() {
     app.dispose();
   });
 
+  testWidgets('reads the color again after the queue runs, and when ShowXpress closes unless a pick is unsaved', (tester) async {
+    var open = true, reads = 0;
+    Object? done;
+    final client = SxClient(
+      Uri.parse('http://engine'),
+      token: 't',
+      client: MockClient((req) async {
+        final Object answer = switch (req.url.path) {
+          '/api/color' => () {
+            reads++;
+            return _preview;
+          }(),
+          _ => {
+            'ok': true,
+            'open': open,
+            'q': {'items': <Object>[], 'reopen': true, 'done': ?done},
+          },
+        };
+        return http.Response(jsonEncode(answer), 200);
+      }),
+    );
+    final app = AppState(client, tab: 'color');
+    await tester.binding.setSurfaceSize(const Size(1300, 1200));
+    await tester.pumpWidget(
+      AppScope(
+        state: app,
+        child: MaterialApp(
+          theme: sxTheme(),
+          home: Scaffold(body: Builder(builder: ColorScreen.new)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await app.refresh();
+    expect(reads, 1);
+
+    // a pick waiting to be saved holds the screen back when ShowXpress closes
+    await tester.tap(find.text('Red').first);
+    await tester.pumpAndSettle();
+    open = false;
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect(reads, 1);
+    expect(find.text('Not saved yet'), findsOneWidget);
+
+    // the queue saved it: read again
+    done = {'at': '2026-11-25T20:00:00', 'ok': true};
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect(reads, 2);
+
+    // nothing unsaved: a close reads again
+    open = true;
+    await app.refresh();
+    open = false;
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect(reads, 3);
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+
   test('the uplight mix for the lights matches the saved scene on the pinned colors', () {
     const chs = ['dimmer', 'red', 'green', 'blue', 'white'];
     expect(uplightValues('f4a6b8', chs), [(0, 244), (1, 255), (2, 0), (3, 137), (4, 222)]);

@@ -135,7 +135,7 @@ Map<String, String> snapshot(Directory dir) {
     var rel = p.relative(f.path, from: dir.path);
     final m = _id.firstMatch(p.basename(f.path));
     if (m != null) rel = rel.replaceFirst(m[0]!, ids[f.parent.path]![m[0]!]!);
-    final bytes = f.readAsBytesSync();
+    final bytes = forCompare(f.path, f.readAsBytesSync());
     out[rel] = rel.endsWith('.json') && m != null ? utf8.decode(bytes).replaceAll(_at, '<at>') : base64.encode(sha256.convert(bytes).bytes);
   }
   return out;
@@ -250,10 +250,12 @@ foreach ($l in [IO.File]::ReadAllLines("$Root/fixtures.ini")) {
 $f = New-Object byte[] 8192
 foreach ($j in ([IO.File]::ReadAllText($Job) | ConvertFrom-Json)) {
   $m = $null; try { $m = [SxMove]::LoadMove((Join-Path "$Root/Editor/Generator/projects" $j.file)) } catch { "$($j.file)`tERR`t$($_.Exception.InnerException.Message)"; continue }
+  # each sample by its place in the list: Windows PowerShell reads 0.0 from JSON as a Decimal and prints it "0.0"
+  $k = 0
   foreach ($t in $j.times) {
     [Array]::Clear($f, 0, $f.Length); [void][SxMove]::Eval($m, [double]$t, $f)
     $o = @(for ($i = 0; $i -lt $f.Length; $i++) { if ($f[$i]) { "$($i + 1):$($f[$i])" } }) -join ' '
-    "$($j.file)`t$t`t$o"
+    "$($j.file)`t$k`t$o"; $k++
   }
 }
 ''';
@@ -565,19 +567,13 @@ void main() {
             for (final d in realDocs) {'file': d.file, 'times': sampleTimes(d)},
           ]),
         );
-      final ps = File(p.join(tmp.path, 'pin.ps1'))..writeAsStringSync(_pinScript);
-      final r = await Process.run(pwshPath!, [
-        '-NoProfile',
-        '-NonInteractive',
-        '-File',
-        ps.path,
-        '-Root',
-        realShowPath!,
-        '-Job',
-        job.path,
-        '-Player',
-        p.join(oldSrcPath!, 'player.ps1'),
-      ]);
+      final ps = writePsScript(p.join(tmp.path, 'pin.ps1'), _pinScript);
+      final r = await Process.run(
+        pwshPath!,
+        ['-NoProfile', '-NonInteractive', '-File', ps.path, '-Root', realShowPath!, '-Job', job.path, '-Player', p.join(oldSrcPath!, 'player.ps1')],
+        stdoutEncoding: utf8,
+        stderrEncoding: utf8,
+      );
       expect(r.exitCode, 0, reason: '${r.stderr}');
       final old = <String, String>{};
       for (final l in const LineSplitter().convert(r.stdout as String)) {
@@ -588,14 +584,13 @@ void main() {
       for (final d in realDocs) {
         if (d.readonly.isNotEmpty || old.containsKey('${d.file}\tERR')) continue;
         final st = MoveState.of(d);
-        for (final t in sampleTimes(d)) {
+        for (final (i, t) in sampleTimes(d).indexed) {
           final f = moveFrame(d, st, t, player: true);
           final mine = [
             for (final k in f.keys.toList()..sort())
               if (f[k] != 0) '$k:${f[k]}',
           ].join(' ');
-          final key = '${d.file}\t${psText(t)}';
-          expect(mine, old[key], reason: '${d.file} at $t ms');
+          expect(mine, old['${d.file}\t$i'], reason: '${d.file} at $t ms');
           compared++;
         }
       }
@@ -603,6 +598,3 @@ void main() {
     });
   });
 }
-
-/// `"$t"` the way the pin script prints a time.
-String psText(double t) => t == t.truncateToDouble() ? t.toInt().toString() : '$t';

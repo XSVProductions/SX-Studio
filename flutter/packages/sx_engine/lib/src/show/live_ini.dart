@@ -208,12 +208,14 @@ class LiveInfo {
 /// The file a live button plays: a `.scex` in `scenes/`, or a `.gpj` in the
 /// Generator projects (or `scenes/`). Null when it is not in the show.
 ///
-/// Port of `Get-ScenePath`.
+/// Port of `Get-ScenePath`. Built as `"$root/scenes/$name"` like the old
+/// code, with `/` on Windows too, since tools echo the path in their answers.
 String? scenePath(ShowEnv env, String name) {
   if (name.isEmpty) return null;
   final candidates = name.toLowerCase().endsWith('.gpj') ? ['Editor/Generator/projects/$name', 'scenes/$name'] : ['scenes/$name'];
   for (final c in candidates) {
-    if (File(env.path(c)).existsSync()) return env.path(c);
+    final path = '${env.root}/$c';
+    if (File(path).existsSync()) return path;
   }
   return null;
 }

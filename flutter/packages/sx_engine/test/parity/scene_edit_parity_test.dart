@@ -41,8 +41,8 @@ Map<String, List<int>> _snapshot(Directory dir) {
   return {
     for (final f in files)
       mask(p.relative(f.path, from: dir.path)): f.path.endsWith('.json') && f.path.contains('scene_backups')
-          ? utf8.encode(f.readAsStringSync().replaceAll(_atRx, '"at":"AT"'))
-          : f.readAsBytesSync(),
+          ? utf8.encode(utf8.decode(forCompare(f.path, f.readAsBytesSync())).replaceAll(_atRx, '"at":"AT"'))
+          : forCompare(f.path, f.readAsBytesSync()),
   };
 }
 

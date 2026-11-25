@@ -53,7 +53,7 @@ Future<Object?> _runOld(String dir, {Json? body, bool fromPhone = false}) async 
       '} }',
     ],
   ].join('\n');
-  final sf = File(p.join(dir, '..', 'run.ps1'))..writeAsStringSync(script);
+  final sf = writePsScript(p.join(dir, '..', 'run.ps1'), script);
   final r = await Process.run(pwshPath!, ['-NoProfile', '-NonInteractive', '-File', sf.path], stdoutEncoding: utf8, stderrEncoding: utf8);
   if (r.exitCode != 0) fail('old code failed: ${r.stderr}');
   return jsonDecode((r.stdout as String).trim().split('\n').last);
@@ -83,7 +83,7 @@ void _case(String name, {String? file, Json? body, bool fromPhone = false}) {
     }
 
     final set = p.join(dir, 'settings.json');
-    String? bytes() => File(set).existsSync() ? File(set).readAsStringSync() : null;
+    String? bytes() => File(set).existsSync() ? utf8.decode(forCompare(set, File(set).readAsBytesSync())) : null;
     fresh();
     final old = await _runOld(dir, body: body, fromPhone: fromPhone);
     final oldFile = bytes();

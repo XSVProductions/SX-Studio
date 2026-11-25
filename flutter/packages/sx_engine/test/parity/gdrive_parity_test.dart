@@ -82,7 +82,8 @@ List<int> _maskState(String path, List<int> bytes) {
 /// Every file under [dir] except the new sync record, which only the port writes.
 Map<String, List<int>> _snapshot(String dir) => {
   for (final f in Directory(dir).listSync(recursive: true, followLinks: false).whereType<File>())
-    if (p.basename(f.path) != syncFilesFile) p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, f.readAsBytesSync()),
+    if (p.basename(f.path) != syncFilesFile)
+      p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, forCompare(f.path, f.readAsBytesSync())),
 };
 
 /// PowerShell 7 reads `"2026-11-23T06:20:16"` from JSON as a date and prints

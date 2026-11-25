@@ -1,7 +1,10 @@
 import 'package:flutter/widgets.dart';
 
+import 'screens/color/color_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/move/move_screen.dart';
+import 'screens/lab/lab_screen.dart';
+import 'screens/look/look_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
 import 'theme.dart';
@@ -38,9 +41,9 @@ Widget _todo(BuildContext context) => ScreenBody(
 const tabs = [
   TabDef('rt', 'Rig Test', TabGroup.gig, 'Which mover hangs where', _todo),
   TabDef('aim', 'Aim Movers', TabGroup.gig, "Fit the dance floor and AROUND ROOM to tonight's venue", _todo),
-  TabDef('color', "Tonight's Color", TabGroup.gig, 'The decor color on the movers and uplights', _todo),
+  TabDef('color', "Tonight's Color", TabGroup.gig, 'The decor color on the movers and uplights', ColorScreen.new),
   TabDef('pre', 'Pre-show Check', TabGroup.gig, 'One look before the guests arrive', _todo),
-  TabDef('lab', 'SX Player', TabGroup.live, 'Play the show without ShowXpress', _todo),
+  TabDef('lab', 'SX Player', TabGroup.live, 'Play the show without ShowXpress', LabScreen.new),
   TabDef('auto', 'Auto Show', TabGroup.live, 'Your looks change every few bars while you mix', _todo),
   TabDef('rig', "Tonight's Rig", TabGroup.rig, 'Which movers are hung tonight', _todo),
   TabDef('skip', 'Skip Flash', TabGroup.rig, 'Which heads the flash skips', _todo),
@@ -49,6 +52,8 @@ const tabs = [
   TabDef('scene', 'Scene Editor', TabGroup.edit, 'Edit step scenes', _todo),
   TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', MoveScreen.new),
   TabDef('look', 'Looks', TabGroup.edit, 'Make color looks for the whole rig', _todo),
+  TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', _todo),
+  TabDef('look', 'Looks', TabGroup.edit, 'Make color looks for the whole rig', LookScreen.new),
   TabDef('health', 'Health Check', TabGroup.edit, 'Find problems in the show', _todo),
 ];
 

@@ -1,5 +1,8 @@
 import '../engine.dart';
 import 'move.dart';
+import 'lab.dart';
+import 'color.dart';
+import 'looks.dart';
 import 'speed.dart';
 import 'sx.dart';
 
@@ -8,4 +11,7 @@ void registerRoutes(Engine e) {
   registerSxRoutes(e);
   registerSpeedRoutes(e);
   registerMoveRoutes(e);
+  registerLabRoutes(e);
+  registerColorRoutes(e);
+  registerLooksRoutes(e);
 }

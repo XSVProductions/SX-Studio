@@ -2,7 +2,10 @@
 library;
 
 export 'src/client.dart';
+export 'src/color.dart';
 export 'src/json.dart';
 export 'src/move_edit.dart';
+export 'src/lab.dart';
+export 'src/looks.dart';
 export 'src/speed.dart';
 export 'src/status.dart';

@@ -89,6 +89,7 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 - Nothing that repaints continuously. No `CircularProgressIndicator`, no pulsing, no shimmer. While loading, show a line of text.
 - Keep the old screen's wording, trimmed. No em dashes anywhere, in copy or comments.
 - A screen that holds unsaved edits calls `AppScope.read(context).setDirty(tabId, true)` and clears it after saving or undoing.
+- A screen that shows show files mixes in `ShowWatcher` (`sx_widgets.dart`) and reloads in `onQueueRan` (always) and `onSxClosed` (unless it holds unsaved edits), as the old page's poll did for that tab.
 - To open a file in another tab's editor, call `AppScope.read(context).openFile(tabId, file)`. The editor screen calls `AppScope.of(context).takeFile(tabId)` in `didChangeDependencies` and opens what it gets.
 - Works from 380 px wide (a phone) to a laptop window. Test both.
 - Test screen logic with `flutter test` and `package:http/testing.dart`'s `MockClient`. Keep tests focused on behavior a user would notice.

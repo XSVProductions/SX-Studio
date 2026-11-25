@@ -100,29 +100,11 @@ class _UpdateCardState extends State<UpdateCard> {
   }
 }
 
-/// For Home: the version line (`#hver`) and an Update button when GitHub has
-/// a newer one. Checks once when shown, unless the user turned that off.
-/// Shows nothing on a phone.
-class UpdateNotice extends StatefulWidget {
-  const UpdateNotice({super.key});
+/// Home's version line (`#hver`). Shows nothing on a phone.
+class UpdateLine extends StatelessWidget {
+  const UpdateLine({super.key, required this.color});
 
-  @override
-  State<UpdateNotice> createState() => _UpdateNoticeState();
-}
-
-class _UpdateNoticeState extends State<UpdateNotice> {
-  UpdateInfo? _u;
-  var _asked = false;
-
-  Future<void> _ask(SettingsModel m) async {
-    _asked = true;
-    try {
-      final u = await m.client.update();
-      if (mounted) setState(() => _u = u);
-    } on ApiException {
-      return;
-    }
-  }
+  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -131,24 +113,32 @@ class _UpdateNoticeState extends State<UpdateNotice> {
       listenable: m,
       builder: (context, _) {
         if (!m.loaded || m.phone) return const SizedBox.shrink();
-        if (!_asked && m.settings.autoUpd) _ask(m);
-        final u = _u;
-        return Wrap(
-          spacing: 10,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              'Version ${m.ver}${u == null
-                  ? ''
-                  : u.newer
-                  ? ', version ${u.latest} is available'
-                  : ', up to date'}',
-              style: TextStyle(fontSize: 12.5, color: Sx.mute),
-            ),
-            if (u != null && u.newer) MiniButton('Update to ${u.latest}', icon: Icons.arrow_upward, primary: true, onPressed: () => startUpdate(context, u)),
-          ],
-        );
+        final u = m.update;
+        final more = u == null
+            ? ''
+            : u.newer
+            ? '  ·  version ${u.latest} is available'
+            : '  ·  up to date';
+        return Text('Version ${m.ver}$more', style: TextStyle(fontSize: 12.5, color: color));
+      },
+    );
+  }
+}
+
+/// The header's Update button (`#upd`), there only when GitHub has a newer
+/// version.
+class UpdateButton extends StatelessWidget {
+  const UpdateButton({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final m = SettingsModel.of(AppScope.of(context));
+    return ListenableBuilder(
+      listenable: m,
+      builder: (context, _) {
+        final u = m.update;
+        if (u == null || !u.newer || m.phone) return const SizedBox.shrink();
+        return MiniButton('Update to ${u.latest}', icon: Icons.arrow_upward, primary: true, onPressed: () => startUpdate(context, u));
       },
     );
   }

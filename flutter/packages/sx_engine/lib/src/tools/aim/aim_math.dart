@@ -220,13 +220,9 @@ double psDouble(Object? v) {
   return double.tryParse(s) ?? (throw FormatException('Cannot convert "$v" to a number.'));
 }
 
-/// How PowerShell 7 writes a number into text (`"$x"`, `-f '{0}'`): whole
-/// doubles without ".0", others in the shortest form that reads back the same.
-String psNum(num v) {
-  if (v is int) return '$v';
-  if (v == v.truncateToDouble() && v.abs() < 1e15) return '${v.toInt()}';
-  return '$v';
-}
+/// How PowerShell writes a number into text (`"$x"`, `-f '{0}'`): whole
+/// numbers without ".0", doubles as [psDoubleText] writes them.
+String psNum(num v) => v is int ? '$v' : psDoubleText(v.toDouble());
 
 /// .NET's `{0:0}` for a double: rounded to 15 significant digits, then to a
 /// whole number with halves away from zero.

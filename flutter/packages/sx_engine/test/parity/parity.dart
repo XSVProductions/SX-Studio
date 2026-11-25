@@ -182,12 +182,31 @@ Object? _readJson(String s) {
   return v;
 }
 
+/// The exact decimal value of a JSON number, in one spelling: `1`, `1.0` and
+/// `1E+00` all give `1`, while `1.1` and `1.10000000000000001` stay apart
+/// (they are the same double, but not the same number written down).
+String _exactValue(String text) {
+  final m = RegExp(r'^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$').firstMatch(text)!;
+  final frac = m[3] ?? '';
+  var digits = '${m[2]}$frac'.replaceFirst(RegExp('^0+'), '');
+  var exp = int.parse(m[4] ?? '0') - frac.length; // value = digits * 10^exp
+  if (digits.isEmpty) return '0';
+  final trail = digits.length - digits.replaceFirst(RegExp(r'0+$'), '').length;
+  digits = digits.substring(0, digits.length - trail);
+  exp += trail;
+  final sign = m[1]!;
+  if (exp >= 0) return exp <= 30 ? '$sign$digits${'0' * exp}' : '$sign${digits}E$exp';
+  if (-exp > digits.length + 30) return '$sign${digits}E$exp';
+  final whole = digits.length + exp;
+  return whole > 0 ? '$sign${digits.substring(0, whole)}.${digits.substring(whole)}' : '${sign}0.${'0' * -whole}$digits';
+}
+
 /// [v] laid out as PowerShell 7's `ConvertTo-Json` does (two-space indent,
 /// `"key": value`, LF), or as `-Compress` does when [compact].
 String _writeJson(Object? v, bool compact, [String indent = '']) {
   final inner = '$indent  ', nl = compact ? '' : '\n', sep = compact ? ':' : ': ';
   return switch (v) {
-    _JsonNum n => n.text,
+    _JsonNum n => _exactValue(n.text),
     String s => jsonEncode(s),
     List l when l.isEmpty => '[]',
     List l => '[$nl${[for (final e in l) '${compact ? '' : inner}${_writeJson(e, compact, inner)}'].join(',$nl')}$nl${compact ? '' : indent}]',
@@ -199,10 +218,11 @@ String _writeJson(Object? v, bool compact, [String indent = '']) {
 }
 
 /// A JSON file's bytes in one layout, so files written by Windows PowerShell
-/// 5.1 and by PowerShell 7 compare by what they hold. Key order, string
-/// values and every number's text are kept as written, so a number written
-/// with other digits still differs. A file on one line stays compact. A byte
-/// order mark is kept. Bytes that are not JSON come back unchanged.
+/// 5.1 and by PowerShell 7 compare by what they hold. Key order and string
+/// values are kept. Numbers compare by exact decimal value: 5.1 writes a
+/// whole double as `1` where 7 writes `1.0`, but any other digits still
+/// differ. A file on one line stays compact. A byte order mark is kept.
+/// Bytes that are not JSON come back unchanged.
 List<int> jsonLayout(List<int> bytes) {
   final bom = bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
   try {
@@ -223,13 +243,20 @@ List<int> jsonLayout(List<int> bytes) {
 List<int> forCompare(String path, List<int> bytes) => oldIsWinPs && path.toLowerCase().endsWith('.json') ? jsonLayout(bytes) : bytes;
 
 /// Why parity cases can't run here, or null when they can.
-final String? paritySkip = pwshPath == null
-    ? 'no PowerShell found (set SX_PWSH)'
-    : oldSrcPath == null
-    ? 'old app source not found (set SX_OLD_SRC)'
-    : realShowPath == null
-    ? 'no show folder to test with (set SX_SHOW)'
-    : null;
+///
+/// Reading it also sets [psFlavor] to the PowerShell the old side runs under,
+/// so the port is compared with the same one. Every parity file reads it
+/// before any case runs.
+final String? paritySkip = () {
+  psFlavor = oldIsWinPs ? PsFlavor.winPs51 : PsFlavor.ps7;
+  return pwshPath == null
+      ? 'no PowerShell found (set SX_PWSH)'
+      : oldSrcPath == null
+      ? 'old app source not found (set SX_OLD_SRC)'
+      : realShowPath == null
+      ? 'no show folder to test with (set SX_SHOW)'
+      : null;
+}();
 
 /// Per-case allowances for things that legitimately differ between two runs,
 /// such as a timestamp in a backup file name.

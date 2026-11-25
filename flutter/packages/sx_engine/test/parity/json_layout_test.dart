@@ -16,9 +16,12 @@ void main() {
     expect(lay(ps7), ps7);
   });
 
-  test("a number's text is kept, so other digits still differ", () {
-    expect(lay('{"beats": 1}'), isNot(lay('{"beats": 1.0}')));
-    expect(lay('[0.1, 1E+20, -3]'), '[0.1,1E+20,-3]');
+  test('numbers compare by exact value: 1 is 1.0, other digits still differ', () {
+    expect(lay('{"beats": 1}'), lay('{"beats": 1.0}'));
+    expect(lay('[3, 1E+20, -0.0]'), lay('[3.0, 100000000000000000000, 0]'));
+    expect(lay('[1.1]'), isNot(lay('[1.10000000000000001]')));
+    expect(lay('[1.1]'), isNot(lay('[1.2]')));
+    expect(lay('[0.1, 1E-07, -3, 12.50]'), '[0.1,0.0000001,-3,12.5]');
   });
 
   test('key order and a byte order mark are kept, one-line files stay compact', () {

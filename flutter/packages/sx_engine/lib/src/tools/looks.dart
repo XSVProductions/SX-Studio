@@ -224,9 +224,6 @@ LookRig looksRig(ShowEnv env) {
 
 final _nameRx = RegExp(r'^[^\\/:*?"<>|\x00-\x1f]{1,120}\.scex$', caseSensitive: false);
 
-/// [n] as PowerShell prints a number: whole numbers without a decimal point.
-String _psNumber(num n) => n == n.truncate() ? '${n.truncate()}' : '$n';
-
 /// Checks a look and writes it as a new scene. Returns the report text.
 ///
 /// The old tool tested "already in the show" with `Test-Path`, which ignores
@@ -331,7 +328,7 @@ String looksMake(ShowEnv env, LookDraft look) {
     file.deleteSync(); // never leave half a scene
     rethrow;
   }
-  final sec = _psNumber(plan.fold<int>(0, (a, s) => a + s.len) / 100);
+  final sec = psDoubleText(plan.fold<int>(0, (a, s) => a + s.len) / 100);
   final n = plan.length, hn = used.length;
   return [
     '  Made the scene $bare: $n step${n != 1 ? 's' : ''}, $hn head${hn != 1 ? 's' : ''}, $sec s.',

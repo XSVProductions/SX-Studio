@@ -62,12 +62,13 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 - `[int]` and `[Math]::Round` round halves to even. Use `psRound` and `psInt`. `[int]''` and `[int]$null` are 0.
 - `/` on two integers gives a fraction. `[int](7/2)` is 4, `[int](5/2)` is 2.
 - `Sort-Object` ignores case. Dart's `sort` is not stable. Use `psSorted`.
+- Windows PowerShell 5.1's `Sort-Object` is not stable either: equal keys come back in any order (two ties under `-Descending` were seen reversed). `psSorted` stays stable, like PowerShell 7. If an old result hangs on the order of ties, give the port an explicit order.
 - `"$x"` of null is `''`. A missing hashtable key is null, not an error.
 - A pipeline that yields one item is that item, not a list, unless wrapped in `@( )`. `ConvertTo-Json` then writes a bare value where you expected a list. `JsonRead.list` already accepts both.
 - `ConvertTo-Json -Depth N` cuts off deeper levels and writes them as strings. Check the depth.
 - `[IO.File]::ReadAllText` drops a byte order mark. `WriteAllText` with `UTF8Encoding($false)` writes none. Use `readText`, `readLines` and `writeTextSafely`, and keep each file's mark and line endings as found.
 - .NET `\d` and `\w` match more than ASCII. Dart's match ASCII only. Rarely matters.
-- Number to text: `"$d"` of a double uses the shortest form that round trips on PowerShell 7 and 15 digits on Windows PowerShell 5.1. If a tool writes fractions into a file, check both.
+- Number to text: `"$d"` of a double uses the shortest form that round trips on PowerShell 7 and 15 digits on Windows PowerShell 5.1. If a tool writes fractions into a file, check both. Use `psDoubleText`, which follows `psFlavor` (5.1 unless a test sets it). A number read with `ConvertFrom-Json` is not a double on 5.1: a fraction is a `Decimal` and prints as written.
 - Dates: `(Get-Date).ToString()` and `"$(Get-Date)"` follow the machine's culture.
 
 ## Rules for the engine

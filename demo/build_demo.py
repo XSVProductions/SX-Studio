@@ -31,8 +31,8 @@ def main():
     rep('href="/icon.png"', 'href="icon.png"')
     rep('<title>SX Studio</title>', '<title>SX Studio – Demo</title>', 1)
     rep('content="SX Studio"', 'content="SX Demo"', 1)
-    # the SX Player and the Scene Editor need the real laptop + show - the demo has no pretend ones, so hide their tabs and Home tiles
-    rep('</head>', '<style>[data-tab="lab"],[data-go="lab"],[data-tab="scene"],[data-go="scene"]{display:none!important}</style></head>', 1)
+    # the SX Player and the Scene / Movement Editors need the real laptop + show - the demo has no pretend ones, so hide their tabs and Home tiles
+    rep('</head>', '<style>[data-tab="lab"],[data-go="lab"],[data-tab="scene"],[data-go="scene"],[data-tab="move"],[data-go="move"],[data-tab="look"],[data-go="look"]{display:none!important}</style></head>', 1)
     rep('/fonts/saira.woff2?t=__TOKEN__', 'fonts/saira.woff2', 1)
     rep('/fonts/orbitron.woff2?t=__TOKEN__', 'fonts/orbitron.woff2', 1)
     rep("bi.src='/brand.png?t='+T;", "bi.src='brand.png';", 1)

@@ -28,6 +28,8 @@ $playerEngine = Join-Path $here 'player.ps1'
 $remoteEngine = Join-Path $here 'sx_remote.ps1'
 $quitEngine = Join-Path $here 'sx_quit.ps1'
 $sceneEngine = Join-Path $here 'scene_edit.ps1'
+$moveEngine = Join-Path $here 'move_edit.ps1'
+$looksEngine = Join-Path $here 'looks.ps1'
 $repo   = 'XSVProductions/showxpress-helper'
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -531,6 +533,16 @@ function Invoke-Action([string]$path, $body) {
       [IO.File]::WriteAllText($cf, ($o | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
       try { return (Invoke-Engine "-Action Save -ChangesFile `"$cf`"" $sceneEngine) } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
     }
+    '/api/move/save' {
+      # MOVEMENT EDITOR: only the changes go to move_edit.ps1, which changes just those lines of the .gpj
+      $f = "$($body.move)"
+      if ($f -notmatch $moveRx) { return @{ ok = $false; error = 'Unknown movement.'; out = '' } }
+      $o = [ordered]@{ move = $f; sha = "$($body.sha)"; secs = @($body.secs | Where-Object { $null -ne $_ }); heads = @($body.heads | Where-Object { $null -ne $_ }) }
+      $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+      [IO.File]::WriteAllText($cf, ($o | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
+      try { $r = Invoke-Engine "-Action Save -ChangesFile `"$cf`"" $moveEngine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+      return (Update-MoveScenes $f $r)
+    }
     '/api/remote/enable' { return (Invoke-Engine '-Action Enable' $remoteEngine) }
     '/api/rt/apply' {
       $as = [ordered]@{}
@@ -562,14 +574,24 @@ $queueable = @{
   '/api/apc/apply' = 'APC pads'; '/api/speed/apply' = 'Speed faders'; '/api/health/fix' = 'Health fix'
   '/api/rt/install' = 'RIG ID button'; '/api/rt/apply' = 'Rig Test (2D view)'; '/api/gdrive/sync' = 'Sync to Google Drive'
   '/api/gdrive/import' = 'Import from Google Drive'
-  '/api/remote/enable' = 'ShowXpress remote control'; '/api/scene/save' = 'Scene' }
+  '/api/remote/enable' = 'ShowXpress remote control'; '/api/scene/save' = 'Scene'; '/api/move/save' = 'Movement' }
 $sceneRx = '^[^\\/:*?"<>|\x00-\x1f]{1,120}\.scex$'
+$moveRx = '^[^\\/:*?"<>|\x00-\x1f]{1,120}\.gpj$'
+# a step scene made from a movement (GRAND ENTRANCE.scex follows GRAND ENTRANCE.gpj, df_aim.ps1) is made again after it changes
+function Update-MoveScenes([string]$f, $r) {
+  if ($r.ok -and $f -eq 'GRAND ENTRANCE.gpj' -and "$($r.out)" -match 'CHANGED') {
+    $r2 = Invoke-Engine '-Action Rebuild' $engine
+    $r.out += $(if ($r2.ok) { "`n  GRAND ENTRANCE scene made again from the movement." } else { "`n  WARNING: the GRAND ENTRANCE scene was NOT made again: $($r2.error)" })
+  }
+  $r
+}
 $queue = New-Object Collections.Generic.List[object]
 $qReopen = $true; $qDone = $null; $qClosed = 0
 function Get-QueueKey([string]$path, $body) {
   if ($path -eq '/api/apply' -or $path -eq '/api/home') { return "aim-$(if ("$($body.mode)" -eq 'room') { 'room' } else { 'floor' })" }
   if ($path -eq '/api/health/fix') { return "fix-$($body.key)" }
   if ($path -eq '/api/scene/save') { return "scene-$("$($body.scene)".ToLower())" }   # one queued save per scene
+  if ($path -eq '/api/move/save') { return "move-$("$($body.move)".ToLower())" }     # one queued save per movement
   $path
 }
 function Add-Queue([string]$path, $body) {
@@ -578,6 +600,7 @@ function Add-Queue([string]$path, $body) {
   if ($key -like 'aim-*') { $label = "$label - $(if ($key -eq 'aim-room') { 'Room' } else { 'Dance Floor' })" }
   if ($path -eq '/api/color/apply') { $label = "$label (#$("$($body.hex)".TrimStart('#').ToLower()))" }
   if ($path -eq '/api/scene/save') { $label = "$label $("$($body.scene)" -replace '\.scex$', '')" }
+  if ($path -eq '/api/move/save') { $label = "$label $("$($body.move)" -replace '\.gpj$', '')" }
   $old = @($queue | Where-Object { $_.key -eq $key })
   foreach ($o in $old) { [void]$queue.Remove($o) }
   $queue.Add([pscustomobject]@{ key = $key; label = $label; path = $path; body = ($body | ConvertTo-Json -Depth 8 -Compress) })
@@ -705,7 +728,7 @@ $setF = Join-Path $cfgDir 'settings.json'
 # 2026-11-24 (user): pages can be collapsed / hidden (collapsed:[n..], hidden:[n..]), and the player has pages of its own
 # (custom:[{id:"x1", name, swap, buttons:[{id:"x1_b1", title, file, fader, bpm, flash, beats, color}]}]) that play the
 # show's scene / movement files. All of it is SX Studio's settings only - live.ini and the scenes are never written.
-$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab', 'scene')
+$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab', 'scene', 'move', 'look')
 $secRx = '^[\w .\-]{1,60}$'
 function Get-TabNames($v) {
   $o = [ordered]@{}
@@ -1258,6 +1281,39 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 .secr{display:grid;grid-template-columns:110px minmax(80px,1fr) 64px 160px 64px 20px;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line)}
 .secr .nm{font-weight:600;font-size:12.5px;word-break:break-word}.secr .nm small{display:block;color:var(--mute);font-weight:400}.secr.chg .nm{color:var(--blue)}.secr.mix .num{color:var(--dim)}
 .secr .x{border:none;background:none;color:var(--mute);padding:0;font-size:18px;line-height:1}.secr .x:hover{color:var(--red)}.secr .fd{font-size:12px}
+.lktpl{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}
+.lktpl button{text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:11px 13px}.lktpl button b{display:block;font-size:14px;margin-bottom:2px}.lktpl button span{color:var(--dim);font-size:12px;font-weight:400}
+.lktpl button.on{border-color:var(--amber);background:rgba(255,176,32,.12)}
+.lkgrid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:14px;margin-top:14px}
+.lkopts{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:9px;align-content:start}
+.lkopts .gh{margin:0}.lkopts .mvf select{width:auto;max-width:230px}.lkopts input[type=range]{width:170px}
+.lkpair{display:flex;align-items:center;gap:7px}.lkpair select{width:118px}
+.lksw{display:inline-block;width:14px;height:14px;border-radius:50%;border:1px solid rgba(255,255,255,.3);flex:none;vertical-align:-2px}
+.lkchips{display:flex;flex-wrap:wrap;gap:6px}.lkcc{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:99px;padding:5px 11px;font-size:12.5px}
+.lkcc.on{border-color:var(--amber);background:rgba(255,176,32,.12)}.lkcc b{font-size:11px;color:var(--amber)}
+.lkpr{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}.lkpr b{min-width:104px}.lkpr select{width:118px}.lkpr input[type=range]{flex:1;min-width:90px;width:auto}
+.chip.lkgc.on{border-color:var(--amber);background:rgba(255,176,32,.13)}.chip.lkgc:disabled{opacity:.4;cursor:default}.chip.lkgc small{color:var(--dim)}
+.lkvis{background:#07080b;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:10px;min-height:60px;margin-top:8px}
+.lkrow small{display:block;color:#8a8f99;font-size:11px;margin-bottom:5px}.lkrow div{display:flex;flex-wrap:wrap;gap:7px}
+.lkrow i{width:22px;height:22px;border-radius:50%;background:#1b1d22;border:1px solid #2a2d33}
+.lkrow i.pr{background:conic-gradient(#fff,#9cf,#fff,#c9f,#fff,#9cf,#fff,#c9f,#fff)!important;animation:lkspin 1.6s linear infinite}
+@keyframes lkspin{to{transform:rotate(360deg)}}
+@media(max-width:760px){.lktpl{grid-template-columns:1fr 1fr}.lkgrid{grid-template-columns:1fr}}
+.ctxm{position:fixed;z-index:80;background:var(--panel);border:1px solid var(--line2);border-radius:10px;padding:4px;box-shadow:0 10px 28px rgba(0,0,0,.45);min-width:190px;display:none}
+.ctxm.on{display:block}.ctxm .ctxh{padding:6px 12px 4px;font-size:11px;color:var(--mute);font-weight:600;letter-spacing:.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px}
+.ctxm button{display:block;width:100%;text-align:left;border:none;background:none;padding:8px 12px;border-radius:7px;font-size:13px;color:var(--txt)}.ctxm button:hover:not(:disabled){background:var(--hover)}.ctxm button:disabled{color:var(--mute)}
+.mvwrap{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:16px;margin-top:14px;align-items:start}
+@media (max-width:900px){.mvwrap{grid-template-columns:1fr}}
+.mvcvw{background:var(--well);border:1px solid var(--line);border-radius:12px;padding:8px}
+#mvcv{display:block;width:100%;cursor:crosshair;touch-action:none;margin:0 auto}#mvcv[data-kind=pt]{max-width:620px}
+.mvside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:9px}
+.mvf{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}.mvf .num{width:96px;font-size:13px;padding:5px 7px}.mvf select{width:130px}
+.mvtools{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}.mvf>span:last-child{white-space:nowrap}
+.mvnote{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--panel);border:1px solid var(--line);color:var(--dim);font-size:13px}.mvnote b{color:var(--txt)}
+.sst.off{opacity:.62}
+.mvheads{margin-top:14px;overflow-x:auto}.mvheads table{width:100%;border-collapse:collapse;font-size:12.5px}
+.mvheads th{font-weight:500;color:var(--dim);text-align:left;padding:4px 6px;white-space:nowrap}.mvheads td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:middle}
+.mvheads .num{width:86px;font-size:13px;padding:4px 6px}.mvheads .num.chg{border-color:var(--blue);color:var(--blue)}
 @media (max-width:760px){.sewrap{grid-template-columns:1fr}.seheads{max-height:260px}.secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.secr select{grid-column:1/3}}
 .ph .sewrap{grid-template-columns:1fr}.ph .seheads{max-height:260px}.ph .secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.ph .secr select{grid-column:1/3}
 </style>
@@ -1268,7 +1324,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
  <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
 </defs></svg>
 <header><div class="brandmk" id="logo" title="Home"><svg class="mk" viewBox="0 0 778 445" aria-label="SX"><use href="#sxm"/></svg><h1 id="ttl">STUDIO</h1></div>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button><button data-tab="scene">Scene Editor</button></nav>
+  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
@@ -1297,6 +1353,8 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
    <button class="ht" data-go="speed"><i>CONTROL</i><b>Speed Faders</b><span>Which fader drives which button</span></button>
    <button class="ht" data-go="health"><i>SHOW</i><b>Health Check</b><span>Find and fix problems in the show</span></button>
    <button class="ht" data-go="scene"><i>SHOW</i><b>Scene Editor</b><span>Change a scene and see it on the lights</span></button>
+   <button class="ht" data-go="move"><i>SHOW</i><b>Movement Editor</b><span>Change a movement&rsquo;s shape and speed</span></button>
+   <button class="ht" data-go="look"><i>SHOW</i><b>One-click Looks</b><span>Make a new scene from a template</span></button>
    <button class="ht" data-go="settings"><i>SETUP</i><b>&#9881; Settings</b><span>Google Drive, phone &amp; iPad, tabs, light mode</span></button>
   </div>
  </div>
@@ -1331,7 +1389,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
    <div class="row" style="margin-top:14px;gap:8px;flex-wrap:wrap" id="lbctl"></div><div id="lbmsg" class="summary" style="margin-top:8px"></div></section>
   <section class="card" id="lbbpm" style="display:none"></section>
   <section class="card" id="lbfd" style="display:none"></section>
-  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page, and <b>Hide</b> takes a page out of the player. <b>New page</b> makes a page that&rsquo;s only in the SX Player, with copies of any of the show&rsquo;s buttons. It&rsquo;s all saved for this computer, the phone and the iPad &mdash; ShowXpress and its live screen stay exactly as they are.<div class="grow"></div><button id="lbnewpg" class="mini">+ New page</button><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
+  <div class="arrbar" id="lbarrbar"><b>Arrange</b> Drag a button to move it inside its page; the arrows move a whole page, and <b>Hide</b> takes a page out of the player. <b>New page</b> makes a page that&rsquo;s only in the SX Player, with copies of any of the show&rsquo;s buttons. Every change shows and is saved straight away (for this computer, the phone and the iPad) &mdash; press <b>Done</b> when you&rsquo;re finished. ShowXpress and its live screen stay exactly as they are.<div class="grow"></div><button id="lbnewpg" class="mini">+ New page</button><button id="lbarrreset" class="mini">Reset to ShowXpress&rsquo;s order</button><button id="lbarrdone" class="mini son">&#10003; Done</button></div>
   <section class="card idle" id="lbpages"><p class="sub" style="margin:0">Loading&hellip;</p></section>
   <div class="lbtoast" id="lbtoast"></div>
  </div>
@@ -1544,8 +1602,82 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
   </section>
   <section class="card" id="sebk" style="display:none"><h2>Earlier versions</h2><p class="sub">Every save keeps the scene as it was just before. Revert puts one back (with ShowXpress closed).</p><div id="sebkl" class="scenes"></div></section>
  </div>
+ <div class="view" id="v-move">
+  <section class="card">
+    <div class="row"><div class="grow"><h2 id="mvtitle">Movement Editor</h2>
+      <p class="sub" style="margin-bottom:0">Change a movement&rsquo;s shape, speed and the way the heads follow each other, and see it on the lights. Saving changes only what you changed in the movement file &mdash; everything else in it stays exactly as ShowXpress wrote it.</p></div>
+      <span id="mvstate" class="state ok" style="display:none"></span><button id="mvback" style="display:none">&#8592; All movements</button><button id="mvrefresh">&#8635; Reload</button></div>
+    <div id="mverr" class="warnbox"></div>
+    <div id="mvpickw"><div class="row" style="margin-top:14px"><div class="sub grow" id="mvcount" style="margin:0"></div><input id="mvq" class="srch" type="search" placeholder="Find a movement or button&hellip;"></div>
+      <div id="mvlist" class="scenes"></div></div>
+    <div id="mvw" style="display:none">
+      <div id="mvinfo" class="sub" style="margin:8px 0 0"></div>
+      <div id="mvwarn" class="warnbox"></div>
+      <div id="mvnote" class="mvnote" style="display:none"></div>
+      <div id="mvedit">
+        <div class="sepv" id="mvpv"><b>&#9678; On the lights</b><span class="sub grow" style="margin:0" id="mvpvsub">See the movement on the rig as you change it. ShowXpress is closed while this runs; nothing is saved until you press Save.</span>
+          <label class="link" style="cursor:default">Light it with <select id="mvlite" style="width:auto;max-width:220px"></select></label>
+          <span id="mvpvif" class="tag amber" style="display:none"></span><label class="link" style="display:none" id="mvpvreow"><input type="checkbox" id="mvpvreo"> Open ShowXpress again when I stop</label>
+          <button class="mini" id="mvpvgo">Show on the lights</button><button class="mini" id="mvpvstop" style="display:none">&#9632; Stop</button></div>
+        <div class="gh"><h3>CHANNELS</h3><span class="cnt">only the ones that play are sent to the lights</span></div>
+        <div class="sesteps" id="mvsecs"></div>
+        <div class="mvwrap">
+          <div><div class="mvcvw" id="mvcvw"><canvas id="mvcv" data-kind="pt"></canvas></div>
+            <div id="mvlock" class="warnbox">The points of this channel are written in a way SX Studio doesn&rsquo;t change, so they can only be edited in ShowXpress. Its other settings can be changed here.</div>
+            <div class="sub" id="mvcvhint" style="margin:6px 0 0;font-size:12px"></div>
+            <div class="mvtools" id="mvtools"><button class="mini" id="mvsmall">Smaller</button><button class="mini" id="mvbig">Bigger</button><button class="mini" id="mvflipx">Mirror &harr;</button><button class="mini" id="mvflipy">Mirror &varr;</button><button class="mini" id="mvrev">Reverse direction</button><button class="mini" id="mvcentre">Centre</button></div>
+            <div class="mvtools"><button class="mini" id="mvhold">&#10074;&#10074; Pause</button><button class="mini" id="mvsync">Start again</button><button class="mini" id="mvfit">Zoom to the shape</button><button class="mini" id="mvwhole">Whole range</button><div class="grow"></div><button class="mini" id="mvstep">&#8630; Step back</button></div></div>
+          <div class="mvside"><b id="mvsech"></b>
+            <label class="mvf"><span>Plays</span><input type="checkbox" id="mvsel"></label>
+            <label class="mvf"><span>Between points</span><select id="mvtr"><option value="2">Smooth curve</option><option value="1">Straight lines</option><option value="0">Jump</option></select></label>
+            <label class="mvf"><span>Once round in</span><span><input id="mvdur" class="num" type="number" min="0.1" step="0.1"> s</span></label>
+            <label class="mvf"><span>Each next head behind by</span><span><input id="mvshift" class="num" type="number" min="0" max="100" step="0.5"> %</span></label>
+            <div id="mvpt" style="display:none"><div style="border-top:1px solid var(--line);padding-top:9px;display:grid;gap:9px"><b id="mvptn"></b>
+              <label class="mvf"><span id="mvpxl">Pan</span><input id="mvpx" class="num" type="number" min="0" step="1"></label>
+              <label class="mvf"><span id="mvpyl">Tilt</span><input id="mvpy" class="num" type="number" min="0" step="1"></label>
+              <button class="mini" id="mvpdel" style="justify-self:start">Delete point</button></div></div></div>
+        </div>
+        <div class="gh"><h3>HEADS</h3><span class="cnt" id="mvhcnt"></span></div>
+        <div class="mvheads" id="mvhl"></div>
+      </div>
+    </div>
+  </section>
+  <section class="card" id="mvbk" style="display:none"><h2>Earlier versions</h2><p class="sub">Every save keeps the movement as it was just before. Revert puts one back (with ShowXpress closed).</p><div id="mvbkl" class="scenes"></div></section>
+ </div>
+
+ <div class="view" id="v-look">
+  <section class="card">
+    <div class="row"><div class="grow"><h2>One-click Looks</h2>
+      <p class="sub" style="margin-bottom:0">Make a new scene from a template and see it on the lights first. It&rsquo;s always a <b>new</b> scene file &mdash; no scene you have is changed, and ShowXpress&rsquo;s live board isn&rsquo;t touched: put the look on a button in ShowXpress, or on one of the SX Player&rsquo;s own pages.</p></div>
+      <button id="lkrefresh">&#8635; Reload</button></div>
+    <div id="lkerr" class="warnbox"></div>
+    <div id="lkw" style="display:none">
+      <div class="lktpl" id="lktpl">
+        <button data-lt="contrast"><b>Contrast pairs</b><span>Two colours side by side, swapping</span></button>
+        <button data-lt="chase"><b>Colour chase</b><span>One colour after another, back and forth</span></button>
+        <button data-lt="strobe"><b>Strobe</b><span>One flash each beat, or a steady strobe</span></button>
+        <button data-lt="prism"><b>Prism fan</b><span>Spinning prisms, no colour of its own</span></button>
+      </div>
+      <div class="lkgrid">
+        <div class="lkopts" id="lkopts"></div>
+        <div>
+          <div class="gh" style="margin-top:0"><h3>HEADS</h3><span class="cnt" id="lkhcnt"></span></div>
+          <div class="chips" id="lkgroups"></div>
+          <div class="gh"><h3>HOW IT LOOKS</h3><span class="cnt" id="lkinfo"></span></div>
+          <div class="lkvis" id="lkvis"></div>
+        </div>
+      </div>
+      <div class="sepv" id="lkpv"><b>&#9678; On the lights</b><span class="sub grow" style="margin:0" id="lkpvsub">See the look on the rig before you make it. ShowXpress is closed while this runs; nothing is written until you press Make.</span>
+        <span id="lkpvif" class="tag amber" style="display:none"></span><label class="link" style="display:none" id="lkpvreow"><input type="checkbox" id="lkpvreo"> Open ShowXpress again when I stop</label>
+        <button class="mini" id="lkpvgo">Show on the lights</button><button class="mini" id="lkpvstop" style="display:none">&#9632; Stop</button></div>
+      <div class="row" style="margin-top:14px;gap:10px;flex-wrap:wrap"><b style="font-size:13px">Name of the new scene</b><input id="lkname" class="srch" style="flex:1;min-width:200px;max-width:420px;font-size:14px" maxlength="100" spellcheck="false"><span class="sub" id="lknamehint" style="margin:0"></span></div>
+    </div>
+  </section>
+  <section class="card" id="lkdone" style="display:none"></section>
+ </div>
 
 </main>
+<div class="ctxm" id="ctxm"></div>
 <div class="bar"><div class="in" data-for="home"><div class="hint grow">Pick a tab above to start. Nothing in the show changes until you save in a tab.</div></div>
   <div class="in" data-for="color"><button id="clsave" class="primary">Save tonight's color</button><button id="clundo">Undo changes</button><div class="hint grow" id="clhint"></div></div>
   <div class="in" data-for="rt"><button id="rtsave" class="primary">Save to 2D view</button><button id="rtclear">New event (clear spots)</button><button id="rtundo">Undo changes</button><div class="hint grow" id="rthint"></div></div>
@@ -1557,6 +1689,8 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
   <div class="in" data-for="auto"><button id="ausave" class="primary">Save Auto Show</button><button id="auundo">Undo changes</button><div class="hint grow" id="auhint"></div></div>
   <div class="in" data-for="scene"><button id="sesave" class="primary">Save scene</button><button id="seundo">Undo changes</button><div class="hint grow" id="sehint"></div></div>
+  <div class="in" data-for="look"><button id="lkmake" class="primary">Make the scene</button><div class="hint grow" id="lkhint"></div></div>
+  <div class="in" data-for="move"><button id="mvsave" class="primary">Save movement</button><button id="mvundo">Undo changes</button><div class="hint grow" id="mvhint"></div></div>
   <div class="in" data-for="health"><button id="hlrun" class="primary">Check again</button><div class="hint grow" id="hlhint"></div></div></div>
 <div class="live" id="live">
  <div class="lvtop"><b class="lvt">&#9678; LIVE AIM</b><span id="lvmode" class="sub" style="margin:0"></span><span id="lvif" class="tag amber"></span><div class="grow"></div>
@@ -1646,12 +1780,12 @@ function showResult(r,what){const box=$('result');box.className='card result '+(
   $('rbody').innerHTML='<p class="sub" style="margin:4px 0 0">'+(r.replaced?'Replaces what was queued for it before. ':'')+'Nothing is changed yet. Keep setting up; when you&rsquo;re done, <b>save and close ShowXpress</b> &mdash; SX Studio does everything in the list at the top'+(Q&&Q.reopen?' and opens ShowXpress again':'')+'.</p>';
   qPoll();box.scrollIntoView({behavior:'smooth'});return;}
  const lines=(r.out||'').split(/\r?\n/);$('rlog').textContent=r.out||'';
- const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto','scene','scenerev'];
+ const SV=['skip','rig','apc','speed','fix','revert','keep','rt','install','color','gsync','gimport','prefix','roominstall','sx','update','remote','auto','scene','scenerev','move','moverev','look'];
  if(!r.ok){$('rtitle').innerHTML='<span style="color:var(--red)">&#10007;</span> '+(what==='gsync'?'Not copied':what==='gimport'?'Not imported':what==='live'?'Live aim didn&rsquo;t start':what==='clprev'?'Preview didn&rsquo;t start':what==='sx'||what==='update'||what==='prefix'||what==='lab'?'Didn&rsquo;t work':SV.includes(what)?'Not saved':'Not applied');$('rbody').innerHTML='<p>'+esc(r.error)+'</p><p class="sub">Nothing was changed.</p>';}
  else if(SV.includes(what)&&what!=='skip'){const same=lines.some(l=>/nothing to change/.test(l))&&!lines.some(l=>/SKIP FLASH now/.test(l));
   const ls=lines.filter(l=>/^ {2}\S/.test(l)).map(l=>l.trim()).filter(l=>!/^(same\s|live\.ini saved|nothing to change|2D view saved|RIGHEADS|SKIPHEADS)/.test(l)).map(l=>l.replace(/^CHANGED\s+/,''));
-  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved',scene:'Scene saved',scenerev:'Scene reverted'}[what]);
-  const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert','scene','scenerev'].includes(what);
+  $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'Nothing needed changing':{rt:'Saved to the 2D view',install:'RIG ID added',rig:"Tonight's rig saved",apc:'APC pads saved',speed:'Speed faders saved',fix:'Fix applied',revert:'Fix reverted',keep:'Fix kept',color:"Tonight's color saved",gsync:'Copied to Google Drive',gimport:'Imported from Google Drive',prefix:'Done',roominstall:'ROOM buttons added to the SETUP page',sx:'Done',update:'Installer opened',remote:'ShowXpress remote control turned on',auto:'Auto Show saved',scene:'Scene saved',scenerev:'Scene reverted',move:'Movement saved',moverev:'Movement reverted',look:'Look made'}[what]);
+  const use=['rig','apc','speed','rt','install','color','roominstall','remote'].includes(what),chk=['fix','revert','scene','scenerev','move','moverev'].includes(what);
   $('rbody').innerHTML=(ls.length?'<ul>'+ls.map(l=>'<li>'+esc(l)+'</li>').join('')+'</ul>':'')+(use||chk?'<p class="sub" style="margin:8px 0 0">Open ShowXpress to '+(use?'use':'check')+' it.</p>':'');}
  else if(what==='skip'){const same=lines.some(l=>/nothing to change/.test(l));const ls=lines.map(l=>l.trim()).filter(l=>/^(heads|loop):/.test(l));
   $('rtitle').innerHTML='<span style="color:var(--green)">&#10003;</span> '+(same?'SKIP FLASH already uses these heads':'Saved to SKIP FLASH');
@@ -1696,13 +1830,13 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab','scene'];
+const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab','scene','move','look'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();$('cog').classList.toggle('on',t==='settings');
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();if(t==='move'){if(!ML&&!MO)loadMoves();mvLiteList();mvAnim(!!MO);}if(t==='look'){if(!LK)loadLooks();lkAnim(true);}$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 $('logo').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
@@ -2218,7 +2352,7 @@ async function cpFlush(){if(!CP||!CP.on||CP.fl)return;let l=((CP.z?'z ':'')+[...
  if(!r.ok){const reo=$('clreo').checked;await cpStop(false);showResult({ok:false,error:'The preview on the lights stopped: '+(/^The DMX output stopped/.test(r.error||'')?'the DMX interface was unplugged, or SX Studio lost it.':(r.error||'unknown error'))+(reo?' ShowXpress is opening again.':'')},'clprev');if(reo)sxLaunch();return;}
  if(CP.pend.size)cpKick();}
 function cpUi(){const on=!!CP;$('clpv').classList.toggle('on',on);$('clprev').style.display=on?'none':'';$('clprev').disabled=!CL||!CL.ok;}
-async function cpGo(){if(CP||LV||SEP||!CL||!CL.ok)return;
+async function cpGo(){if(CP||LV||SEP||MVP||LKP||!CL||!CL.ok)return;
  const c=await sxCloseLive('Close ShowXpress to show the colour on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show it on the lights','clprev');
  if(!c.go)return;
  const r=await lvStart('floor');
@@ -2349,7 +2483,7 @@ async function sxCloseLive(title,text,yes,again,what){if(!sxOpen)return {go:true
  while(Date.now()-t0<120000){await sleep(1000);try{open=(await api('/api/sx')).open;}catch(e){}if(!open)break;}
  if(open){busy(false);try{await api('/api/live/stop',{});}catch(e){}showResult({ok:false,error:'ShowXpress is still open. Close it (save if it asks), then press '+again+' again.'},what);return {go:false};}
  busy(true,'ShowXpress closed - waiting for it to let go of the interface…');await sleep(2500);return {go:true,reo:true};}
-async function lvGo(){if(LV||CP||SEP)return;
+async function lvGo(){if(LV||CP||SEP||MVP||LKP)return;
  const c=await sxCloseLive('Close ShowXpress to aim live?','Only one program can use the DMX interface, so ShowXpress closes while you aim. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It opens again when you finish.','Close and aim live','Aim live','live');
  if(!c.go)return;const reo=c.reo;
  const r=await lvStart(aimMode);
@@ -2412,8 +2546,8 @@ document.addEventListener('keydown',e=>{if(!LV||!LV.on||$('modal').style.display
  if(k==='Tab'){e.preventDefault();lvStepTo(e.shiftKey?-1:1);return;}
  if(e.ctrlKey||e.altKey)return;
  if(k==='n'||k==='N')lvStepTo(1);else if(k==='p'||k==='P')lvStepTo(-1);else if(k==='1')lvSetStep('c');else if(k==='2')lvSetStep('k');});
-window.addEventListener('beforeunload',()=>{if(LV||CP||SEP)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
-window.addEventListener('pagehide',()=>{if((LV||CP||SEP)&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('beforeunload',()=>{if(LV||CP||SEP||MVP||LKP)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
+window.addEventListener('pagehide',()=>{if((LV||CP||SEP||MVP||LKP)&&PH)navigator.sendBeacon('/api/live/stop?t='+T,'{}');});
 
 // ---------------- SETTINGS (cogwheel, user 2026-11-22): look (per device), tab order / hidden tabs (shared, settings.json
 // on the computer), Google Drive, phone & iPad, ShowXpress, updates
@@ -2479,12 +2613,14 @@ function lbPages(){if(!LB||!LB.ok)return [];const lay=lbLay(),po=lay.pages,od=la
 function lbArrange(on){LBarr=on;$('lbpages').classList.toggle('arr',on);$('lbarrbar').classList.toggle('on',on);$('lbarr').classList.toggle('son',on);
  $('lbarr').innerHTML=on?'&#10003; Arranging':'&#8645; Arrange';$('lbpages').dataset.gen='';if(LB)renderLab();}
 const lbGen=()=>String(LB.show)+LB.pages.length+'|'+LBarr+'|'+JSON.stringify((SET&&SET.playerLayout)||{});
-async function lbSaveLayout(lay){if(!lay){lay=lbLay();const pages=[],order={};
+// a change from the page (drag, page arrows) is already on screen; any other change (hide, add, delete...) redraws at once,
+// so Arrange shows every change live and Done only closes it (user 2026-11-24: before, the change only showed after Done)
+async function lbSaveLayout(lay){const dom=!lay;if(!lay){lay=lbLay();const pages=[],order={};
   document.querySelectorAll('#lbpages .lbpg').forEach(g=>{const n=g.dataset.n,secs=[...g.querySelectorAll('.lbb')].map(x=>x.dataset.sec);pages.push(n);
    const c=lay.custom.find(x=>x.id===n);if(c)c.buttons=secs.map(s=>c.buttons.find(b=>b.id===s)).filter(Boolean);else order[n]=secs;});
   lay.pages.forEach(n=>{if(!pages.includes(n))pages.push(n);});lay.pages=pages;lay.order=Object.assign({},lay.order,order);}
- SET=Object.assign(SET||{},{playerLayout:lay});$('lbpages').dataset.gen=lbGen();
- try{const r=await api('/api/settings/set',{playerLayout:lay});if(r.ok){SET=r.settings;$('lbpages').dataset.gen=lbGen();}else lbToast('<span style="color:var(--amber)">The layout wasn&rsquo;t saved.</span>');}
+ SET=Object.assign(SET||{},{playerLayout:lay});if(dom)$('lbpages').dataset.gen=lbGen();else renderLab();
+ try{const r=await api('/api/settings/set',{playerLayout:lay});if(r.ok){const was=lbGen();SET=r.settings;if(dom||lbGen()===was)$('lbpages').dataset.gen=lbGen();else renderLab();}else lbToast('<span style="color:var(--amber)">The layout wasn&rsquo;t saved.</span>');}
  catch(e){lbToast('<span style="color:var(--amber)">The layout wasn&rsquo;t saved &mdash; lost connection.</span>');}}
 async function lbSetLay(f){const lay=lbLay();f(lay);await lbSaveLayout(lay);renderLab();}
 $('lbarr').onclick=()=>lbArrange(!LBarr);$('lbarrdone').onclick=()=>lbArrange(false);
@@ -2575,6 +2711,19 @@ async function lbCmd(b,quiet){let r;try{r=await api('/api/lab/cmd',b);}catch(e){
  if(quiet&&r.ok)return;
  if(r.ok){}else if(r.gone){LBgen++;LBS={ok:true,running:false};LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);renderLab();return;}else{LBerr='<span style="color:var(--amber)">'+esc(r.error)+'</span>';lbToast(LBerr);}
  drawLab();clearTimeout(LBT);LBT=setTimeout(labPoll,120);}
+// ---- SX Player: right-click (or long-press) a button -> open its scene in the Scene Editor or its movement in the
+// Movement Editor (user 2026-11-24)
+function ctxClose(){$('ctxm').classList.remove('on');}
+function ctxOpen(x,y,title,items){const m=$('ctxm');m.innerHTML='<div class="ctxh">'+esc(title)+'</div>'+items.map((it,i)=>'<button data-ci="'+i+'"'+(it.off?' disabled':'')+'>'+it.h+'</button>').join('');
+ m.querySelectorAll('[data-ci]').forEach(b=>b.onclick=()=>{ctxClose();items[+b.dataset.ci].go();});
+ m.classList.add('on');const r=m.getBoundingClientRect();m.style.left=Math.max(4,Math.min(x,innerWidth-r.width-4))+'px';m.style.top=Math.max(4,Math.min(y,innerHeight-r.height-4))+'px';}
+document.addEventListener('pointerdown',e=>{if(!e.target.closest||!e.target.closest('#ctxm'))ctxClose();},true);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')ctxClose();});window.addEventListener('scroll',ctxClose,true);window.addEventListener('blur',ctxClose);
+async function lbEditFile(b){const f=String(b.file||'');
+ if(/\.gpj$/i.test(f)){setTab('move');await mvOpen(f);}else if(/\.scex$/i.test(f)){setTab('scene');await seOpen(f);}}
+$('lbpages').addEventListener('contextmenu',e=>{const el=e.target.closest('.lbb');if(!el)return;const b=lbAllButtons().find(x=>x.sec===el.dataset.sec);if(!b)return;
+ e.preventDefault();const mv=/\.gpj$/i.test(String(b.file||'')),na=b.kind==='missing';
+ ctxOpen(e.clientX,e.clientY,b.title,[{h:'&#9998; Edit '+(mv?'movement':'scene')+(na?' (file missing)':''),off:na,go:()=>lbEditFile(b)}]);});
 $('lbpages').addEventListener('click',e=>{const el=e.target.closest('.lbb');if(!el||LBarr)return;LBerr='';
  const b=lbAllButtons().find(x=>x.sec===el.dataset.sec);if(!b)return;
  if(b.kind==='missing'){LBerr='<span style="color:var(--amber)">'+esc(b.title)+': its file is missing.</span>';lbToast(LBerr);drawLab();return;}
@@ -2587,7 +2736,7 @@ document.addEventListener('keydown',e=>{if(!$('v-lab').classList.contains('on')|
  const k=(e.key||'').toLowerCase();if(k.length!==1||!/[a-z0-9]/.test(k))return;
  if(!LB||!LB.pages.some(p=>p.buttons.some(x=>(x.key||'').toLowerCase()===k)))return;e.preventDefault();lbCmd({cmd:'key',key:k});});
 async function lbGo(first){if(lbRun())return;
- if(LV||CP||SEP){lbToast('<span style="color:var(--amber)">Aim live, the colour preview or the Scene Editor is using the DMX interface &mdash; finish that first.</span>');return;}
+ if(LV||CP||SEP||MVP||LKP){lbToast('<span style="color:var(--amber)">Aim live, the colour preview or an editor / Looks preview is using the DMX interface &mdash; finish that first.</span>');return;}
  let carry=[];if(sxOpen){try{carry=(await api('/api/lab/snap',{})).titles||[];}catch(e){}}
  const c=await sxCloseLive('Close ShowXpress to start the player?','Only one program can use the DMX interface, so ShowXpress closes while the SX Player runs. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.'+(carry.length?'<br><br>The player carries on with what ShowXpress is playing now: <b>'+carry.map(esc).join(', ')+'</b>.':'')+'<br><br>It can open again when you stop, or straight away with <b>Hand over to ShowXpress</b>.','Close and start','Start the player','lab');
  if(!c.go)return;
@@ -2844,7 +2993,7 @@ async function seFlush(){if(!SEP||!SEP.on||SEP.fl)return;let l=((SEP.z?'z ':'')+
 function sePvUi(){const on=!!SEP;$('sepv').classList.toggle('on',on);$('sepvsub').style.display=on?'none':'';$('sepvgo').style.display=on?'none':'';$('sepvgo').disabled=!SE||!!SE.readonly;$('sepvplay').style.display=on?'':'none';$('sepvstop').style.display=on?'':'none';$('sepvreow').style.display=on?'':'none';
  $('sepvplay').innerHTML=on&&SEP.play?'&#10074;&#10074; Hold this step':'&#9654; Play the scene';const t=$('sepvif');t.style.display=on?'':'none';
  if(on){t.className='tag '+(SEP.test?'red':'blue');t.textContent=SEP.test?'TEST - no real output':'Output: '+SEP.iface;}}
-async function sePvGo(){if(SEP||LV||CP||!SE||SE.readonly)return;
+async function sePvGo(){if(SEP||MVP||LKP||LV||CP||!SE||SE.readonly)return;
  const c=await sxCloseLive('Close ShowXpress to see the scene on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show on the lights','clprev');
  if(!c.go)return;
  const r=await lvStart('floor',true);
@@ -2857,6 +3006,452 @@ async function sePvStop(reo){if(!SEP)return;clearInterval(SEP.kat);clearInterval
  busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)await sxLaunch();}
 $('sepvgo').onclick=sePvGo;$('sepvstop').onclick=()=>sePvStop($('sepvreo').checked);
 $('sepvplay').onclick=()=>{if(!SEP)return;SEP.play=!SEP.play;if(SEP.play)SEP.t0=Date.now();else{if(SEP.at>=0)seI=SEP.at;SEP.at=-1;seStepsDraw();seGridDraw();seHeadsDraw();seChDraw();}sePvUi();sePush();};
+// ---------------- Movement Editor (move_edit.ps1, phase 3, user 2026-11-24): change a Generator movement (.gpj) - its
+// shape, cycle, shift and transition, the other channels' graphs and the heads' aim and size - and see it on the lights.
+// The page keeps a working copy (MW); Save sends only what differs from the file (move_edit.ps1 changes just those lines).
+// The movement is worked out here the same way the SX Player plays it (player.ps1 LoadMove / Eval), so the drawing, the
+// moving dots and the preview on the lights all match what ShowXpress does.
+const MV_PT='Pan/Tilt/uPan/uTilt',MV_TEN=0.75,MVX=65535;
+let ML=null,MLS=null,MO=null,MW=null,MW0='',mvS=0,mvP=-1,MVH=[],MVP=null,mvView=null,mvT0=Date.now(),mvRaf=0,mvDrag=null,mvLite=null,mvHold=false,mvHoldT=0;
+const mvArr=v=>v==null?[]:Array.isArray(v)?v:[v];
+const mvSecs=d=>String(Math.round(d)/10);   // 1/10 s -> "2.5"
+const mvClamp=v=>Math.max(0,Math.min(MVX,Math.round(v)));
+async function loadMoves(){$('mvcount').textContent='Loading…';ML=await getJ('/api/moves');renderMoves();}
+function renderMoves(){const pick=!MO;$('mvpickw').style.display=pick?'':'none';$('mvw').style.display=pick?'none':'';$('mvback').style.display=pick?'none':'';
+ if(pick){$('mvbk').style.display='none';$('mvtitle').textContent='Movement Editor';$('mvstate').style.display='none';}
+ mvAnim(!pick);if(!pick){updMove();return;}
+ if(!ML){$('mvlist').innerHTML='';updMove();return;}
+ if(showErr('mverr',ML)){$('mvlist').innerHTML='';$('mvcount').textContent='';updMove();return;}
+ const all=mvArr(ML.moves),q=$('mvq').value.trim().toLowerCase(),ls=all.filter(m=>!q||m.name.toLowerCase().includes(q)||mvArr(m.used).some(u=>u.toLowerCase().includes(q)));
+ $('mvcount').textContent=all.length+' movements'+(q?' · '+ls.length+' found':'')+' · tap one to open it';
+ $('mvlist').innerHTML=ls.map(m=>{const u=mvArr(m.used),on=mvArr(m.on);
+  return `<div class="sc sesc" data-mf="${esc(m.file)}"><div class="nm">${esc(m.name)}${m.aim?'<span class="tag">Aim &middot; '+(m.aim==='room'?'Room':'Floor')+'</span>':''}${m.readonly?'<span class="tag amber">ShowXpress only</span>':''}<small>${u.length?esc(u.join(' · ')):'not on a live button'}</small></div>`+
+   `<div class="sub" style="margin:0;font-size:12px">${on.length?'also plays '+esc(on.join(', ')):''}</div>`+
+   `<div class="st">${m.moves?'<b>'+m.points+'</b> point'+(m.points===1?'':'s')+' &middot; <b>'+m.cycle+'</b> s &middot; ':''}<b>${m.heads}</b> head${m.heads===1?'':'s'}</div></div>`;}).join('')||'<p class="sub">No movement matches.</p>';
+ $('mvlist').querySelectorAll('[data-mf]').forEach(e=>e.onclick=()=>mvOpen(e.dataset.mf));updMove();}
+async function mvLeaveOk(t){return !(MO&&mvDirty())||await ask(t||'Leave this movement?','Your changes to <b>'+esc(MO.name)+'</b> are not saved yet. They will be lost.','Leave it');}
+async function mvOpen(f,keep){
+ if(!keep&&!await mvLeaveOk())return;
+ if(!keep||(MO&&MO.file!==f))await mvPvStop(MVP?MVP.reo:false);
+ busy(true,'Opening the movement…');const r=await getJ('/api/move?f='+encodeURIComponent(f));busy(false);
+ if(!r.ok){showErr('mverr',r);return;}showErr('mverr',null);
+ const was=keep&&MO&&MO.file===f?{s:MO.secs[mvS]&&MO.secs[mvS].name,p:mvP,v:mvView}:null;
+ r.used=mvArr(r.used);r.heads=mvArr(r.heads);r.secs=mvArr(r.secs);
+ r.heads.forEach(h=>{h.chans=mvArr(h.chans);h.has=mvArr(h.has);h.ix={};h.chans.forEach((c,i)=>{const k=String(c).trim().toLowerCase();if(k&&!(k in h.ix))h.ix[k]=i;});});
+ r.secs.forEach(s=>{s.has=mvArr(s.has);s.pts=mvArr(s.pts).map(p=>[+p[0],+p[1]]);});
+ MO=r;mvReset();
+ mvS=0;const pt=MO.secs.findIndex(s=>s.name===MV_PT);if(pt>=0)mvS=pt;
+ if(was){const i=MO.secs.findIndex(s=>s.name===was.s);if(i>=0)mvS=i;mvP=was.p;}else mvP=-1;
+ mvView=was&&was.v?was.v:null;if(!mvView)mvFit();
+ mvT0=Date.now();mvHold=false;renderMoves();renderMove();mvBackups();if(MVP)mvLiteLoad();}
+function mvReset(){MW={secs:MO.secs.map(s=>({sel:+s.sel?1:0,tr:+s.tr,dur:+s.dur,shift:+s.shift,pts:s.pts.map(p=>p.slice())})),heads:MO.heads.map(h=>({op:+h.op,ot:+h.ot,zp:+h.zp,zt:+h.zt}))};MW0=JSON.stringify(MW);MVH=[];}
+function mvSnap(){MVH.push(JSON.stringify(MW));if(MVH.length>200)MVH.shift();}
+function mvStepBack(){if(!MVH.length)return;MW=JSON.parse(MVH.pop());const s=MW.secs[mvS];if(s&&mvP>=s.pts.length)mvP=-1;renderMove();}
+function mvBody(){const b={move:MO.file,sha:MO.sha,secs:[],heads:[]};
+ MO.secs.forEach((o,i)=>{const w=MW.secs[i],c={name:o.name};let any=false;
+  if(w.sel!==(+o.sel?1:0)){c.sel=w.sel;any=true;}if(w.tr!==+o.tr){c.tr=w.tr;any=true;}if(w.dur!==+o.dur){c.dur=w.dur;any=true;}if(w.shift!==+o.shift){c.shift=w.shift;any=true;}
+  if(!o.locked&&JSON.stringify(w.pts)!==JSON.stringify(o.pts)){c.pts=w.pts;any=true;}if(any)b.secs.push(c);});
+ MO.heads.forEach((o,i)=>{const w=MW.heads[i],c={k:o.k};let any=false;['op','ot','zp','zt'].forEach(p=>{if(w[p]!==+o[p]){c[p]=w[p];any=true;}});if(any)b.heads.push(c);});
+ return b;}
+function mvDirty(){return !!(MO&&!MO.readonly&&MW&&JSON.stringify(MW)!==MW0);}
+function mvSecName(n){return n===MV_PT?'Pan / Tilt':n;}
+function mvWhat(){const b=mvBody(),w=[];
+ b.secs.forEach(c=>{const p=[];if(c.pts)p.push(c.name===MV_PT?'shape':'graph');if(c.sel!==undefined)p.push(c.sel?'turned on':'turned off');if(c.tr!==undefined)p.push('transition');if(c.dur!==undefined)p.push('cycle');if(c.shift!==undefined)p.push('shift');
+  w.push(mvSecName(c.name)+': '+p.join(', '));});
+ if(b.heads.length)w.push(b.heads.length+' head'+(b.heads.length===1?'':'s')+' aimed or sized');
+ return w.join(' · ');}
+// ---- the movement, worked out like the SX Player does
+function mvCard(p0,p1,p2,p3,t){const m1=MV_TEN*(p2-p0),m2=MV_TEN*(p3-p1),t2=t*t,t3=t2*t;return (2*t3-3*t2+1)*p1+(t3-2*t2+t)*m1+(-2*t3+3*t2)*p2+(t3-t2)*m2;}
+function mvCR(p0,p1,p2,p3,t){return 0.5*(2*p1+(-p0+p2)*t+(2*p0-5*p1+4*p2-p3)*t*t+(-p0+3*p1-3*p2+p3)*t*t*t);}
+function mvPathAt(P,tr,u){const n=P.length;if(!n)return [0,0];const s=(u-Math.floor(u))*n,i=Math.min(n-1,Math.floor(s)),t=s-i;
+ if(tr===0||n===1)return P[i];
+ if(tr===1){const j=(i+1)%n;return [P[i][0]+(P[j][0]-P[i][0])*t,P[i][1]+(P[j][1]-P[i][1])*t];}
+ const a=(i-1+n)%n,b=(i+1)%n,c=(i+2)%n;return [mvCard(P[a][0],P[i][0],P[b][0],P[c][0],t),mvCard(P[a][1],P[i][1],P[b][1],P[c][1],t)];}
+function mvSorted(P){return P.map((p,i)=>[p[0],p[1],i]).sort((a,b)=>a[0]-b[0]||a[2]-b[2]);}
+function mvValAt(S,tr,x){const n=S.length;if(!n)return 0;if(n===1||x<=S[0][0])return S[0][1];if(x>=S[n-1][0])return S[n-1][1];
+ let j=0;while(j<n-2&&x>=S[j+1][0])j++;if(tr===0)return S[j][1];const w=S[j+1][0]-S[j][0],t=w>0?(x-S[j][0])/w:0;
+ if(tr===1)return S[j][1]+(S[j+1][1]-S[j][1])*t;return mvCR(S[Math.max(0,j-1)][1],S[j][1],S[j+1][1],S[Math.min(n-1,j+2)][1],t);}
+function mvCentre(P){let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;P.forEach(p=>{x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);});return P.length?[(x0+x1)/2,(y0+y1)/2]:[MVX/2,MVX/2];}
+function mvHeadXY(h,w,c,p){// a point of the shape as head h plays it: size around the shape's centre, then its aim, then Reverse
+ const zp=Math.pow(1+w.zp/100,2),zt=Math.pow(1+w.zt/100,2);let x=c[0]+(p[0]-c[0])*zp+w.op,y=c[1]+(p[1]-c[1])*zt+w.ot;if(+h.rp)x=MVX-x;if(+h.rt)y=MVX-y;return [x,y];}
+function mvNow(){return mvHold?mvHoldT:Date.now()-mvT0;}
+function mvPhase(w,k,el){const dur=Math.max(100,w.dur*100);return el/dur-k*w.shift/100;}
+// DMX values of the whole movement at el ms (channel -> value); only what's ticked plays, like in ShowXpress
+function mvFrame(el){const out={},ptI=MO.secs.findIndex(s=>s.name===MV_PT),pt=ptI>=0?MW.secs[ptI]:null,c=pt?mvCentre(pt.pts):null;
+ MO.heads.forEach((h,hi)=>{if(!h.addr)return;const hw=MW.heads[hi],put=(n,v)=>{const ix=h.ix[n];if(ix===undefined)return;const ch=h.addr+ix;if(ch>=1&&ch<=8192)out[ch]=Math.max(0,Math.min(255,v));};
+  if(pt&&pt.sel&&pt.pts.length){const q=mvHeadXY(h,hw,c,mvPathAt(pt.pts,pt.tr,mvPhase(pt,h.k,el))),pv=mvClamp(q[0]),tv=mvClamp(q[1]);put('pan',pv>>8);put('upan',pv&255);put('tilt',tv>>8);put('utilt',tv&255);}
+  MO.secs.forEach((o,i)=>{const w=MW.secs[i];if(i===ptI||!w.sel||!w.pts.length)return;const u=mvPhase(w,h.k,el);put(o.name.trim().toLowerCase(),mvClamp(mvValAt(mvSorted(w.pts),w.tr,(u-Math.floor(u))*MVX))>>8);});});
+ return out;}
+// ---- drawing
+function mvCol(v){return getComputedStyle(document.body).getPropertyValue(v).trim()||'#888';}
+function mvHue(i,n,a){return 'hsla('+Math.round(360*i/Math.max(1,n))+',85%,62%,'+a+')';}
+function mvFit(){const i=MO?MO.secs.findIndex(s=>s.name===MV_PT):-1;if(i<0){mvView={x:0,y:0,s:MVX};return;}
+ const w=MW.secs[i],c=mvCentre(w.pts),all=[],n=Math.max(48,w.pts.length*24);for(let k=0;k<n;k++){const p=mvPathAt(w.pts,w.tr,k/n);all.push(p);MO.heads.forEach((h,hi)=>all.push(mvHeadXY(h,MW.heads[hi],c,p)));}
+ let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;all.forEach(p=>{x0=Math.min(x0,p[0]);x1=Math.max(x1,p[0]);y0=Math.min(y0,p[1]);y1=Math.max(y1,p[1]);});
+ if(!all.length){mvView={x:0,y:0,s:MVX};return;}
+ const s=Math.min(MVX,Math.max(6000,(x1-x0)*1.3,(y1-y0)*1.3));mvView={x:Math.max(0,Math.min(MVX-s,(x0+x1)/2-s/2)),y:Math.max(0,Math.min(MVX-s,(y0+y1)/2-s/2)),s};}
+function mvCanvas(){const cv=$('mvcv'),r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1,W=Math.max(10,Math.round(r.width)),H=cv.dataset.kind==='pt'?W:220;
+ if(cv.width!==W*d||cv.height!==H*d){cv.width=W*d;cv.height=H*d;cv.style.height=H+'px';}const g=cv.getContext('2d');g.setTransform(d,0,0,d,0,0);return {cv,g,W,H};}
+function mvToPx(p,W,H){const v=mvView;return [(p[0]-v.x)/v.s*W,(p[1]-v.y)/v.s*H];}
+function mvFromPx(x,y,W,H){const v=mvView;return [v.x+x/W*v.s,v.y+y/H*v.s];}
+function mvGx(x,W){return 30+x/MVX*(W-40);}function mvGy(y,H){return H-18-y/MVX*(H-30);}
+function mvGxInv(px,W){return (px-30)/(W-40)*MVX;}function mvGyInv(py,H){return (H-18-py)/(H-30)*MVX;}
+function mvDraw(){if(!MO||MO.readonly)return;const s=MO.secs[mvS],w=MW.secs[mvS];if(!s)return;const {g,W,H}=mvCanvas(),el=mvNow();
+ const amb=mvCol('--amber'),line=mvCol('--line'),dim=mvCol('--dim'),blue=mvCol('--blue');g.clearRect(0,0,W,H);g.lineWidth=1;g.font='11px system-ui,sans-serif';
+ if(s.name===MV_PT){const v=mvView,c=mvCentre(w.pts);
+  // grid every 1/8 of the range that's in view
+  g.strokeStyle=line;for(let k=0;k<=8;k++){const a=k*MVX/8,x=(a-v.x)/v.s*W,y=(a-v.y)/v.s*H;if(x>=0&&x<=W){g.beginPath();g.moveTo(x,0);g.lineTo(x,H);g.stroke();}if(y>=0&&y<=H){g.beginPath();g.moveTo(0,y);g.lineTo(W,y);g.stroke();}}
+  g.fillStyle=dim;g.fillText('pan →',W-44,H-6);g.save();g.translate(12,46);g.rotate(Math.PI/2);g.fillText('tilt →',0,0);g.restore();
+  const n=MO.heads.length,steps=Math.max(48,w.pts.length*24);
+  // each head's own path (its aim and size), faint
+  MO.heads.forEach((h,hi)=>{g.strokeStyle=mvHue(hi,n,.35);g.beginPath();for(let k=0;k<=steps;k++){const q=mvToPx(mvHeadXY(h,MW.heads[hi],c,mvPathAt(w.pts,w.tr,k/steps)),W,H);k?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1]);}g.stroke();});
+  // the shape itself
+  g.strokeStyle=amb;g.lineWidth=2.2;g.beginPath();for(let k=0;k<=steps;k++){const q=mvToPx(mvPathAt(w.pts,w.tr,k/steps),W,H);k?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1]);}g.stroke();g.lineWidth=1;
+  w.pts.forEach((p,i)=>{const q=mvToPx(p,W,H);g.beginPath();g.arc(q[0],q[1],i===mvP?8:6,0,7);g.fillStyle=i===mvP?blue:amb;g.fill();g.fillStyle='#000';g.font='bold 10px system-ui,sans-serif';g.textAlign='center';g.fillText(i+1,q[0],q[1]+3.5);g.textAlign='left';});
+  // where each head is now
+  if(w.pts.length)MO.heads.forEach((h,hi)=>{const q=mvToPx(mvHeadXY(h,MW.heads[hi],c,mvPathAt(w.pts,w.tr,mvPhase(w,h.k,el))),W,H);g.beginPath();g.arc(q[0],q[1],5,0,7);g.fillStyle=mvHue(hi,n,1);g.fill();if(n<=8){g.fillStyle=dim;g.font='10px system-ui,sans-serif';g.fillText(h.label||('#'+(hi+1)),q[0]+7,q[1]-6);}});
+ }else{// a value graph: x = where in the cycle, y = value
+  g.strokeStyle=line;for(let k=0;k<=4;k++){const y=mvGy(k*MVX/4,H);g.beginPath();g.moveTo(30,y);g.lineTo(W-10,y);g.stroke();g.fillStyle=dim;g.fillText(String(Math.round(k*255/4)),2,y+4);}
+  for(let k=0;k<=4;k++){const x=mvGx(k*MVX/4,W);g.beginPath();g.moveTo(x,12);g.lineTo(x,H-18);g.stroke();g.fillStyle=dim;g.textAlign=k?k===4?'right':'center':'left';g.fillText(k*25+'%',x,H-4);g.textAlign='left';}
+  const S=mvSorted(w.pts);if(S.length){g.strokeStyle=amb;g.lineWidth=2.2;g.beginPath();for(let k=0;k<=240;k++){const x=k/240*MVX,px=mvGx(x,W),py=mvGy(mvValAt(S,w.tr,x),H);k?g.lineTo(px,py):g.moveTo(px,py);}g.stroke();g.lineWidth=1;}
+  w.pts.forEach((p,i)=>{const px=mvGx(p[0],W),py=mvGy(p[1],H);g.beginPath();g.arc(px,py,i===mvP?8:6,0,7);g.fillStyle=i===mvP?blue:amb;g.fill();});
+  const n=MO.heads.length;MO.heads.forEach((h,hi)=>{const u=mvPhase(w,h.k,el),x=mvGx((u-Math.floor(u))*MVX,W);g.strokeStyle=mvHue(hi,n,hi?.35:.9);g.beginPath();g.moveTo(x,12);g.lineTo(x,H-18);g.stroke();});}}
+function mvAnim(on){if(on&&!mvRaf){const f=()=>{mvRaf=0;if(!MO||lastTab!=='move')return;mvDraw();mvRaf=requestAnimationFrame(f);};mvRaf=requestAnimationFrame(f);}if(!on&&mvRaf){cancelAnimationFrame(mvRaf);mvRaf=0;}}
+// ---- the page
+function renderMove(){if(!MO)return;const ro=MO.readonly;$('mvtitle').textContent=MO.name;
+ const np=MO.heads.filter(h=>!h.addr).length;
+ $('mvinfo').innerHTML=(MO.used.length?'On '+MO.used.map(esc).join(' &middot; '):'Not on a live button')+' &middot; '+MO.heads.length+' head'+(MO.heads.length===1?'':'s');
+ const w=[];if(ro)w.push('SX Studio doesn&rsquo;t change this movement: '+esc(ro)+'. ShowXpress still opens and edits it as before.');
+ $('mvnote').style.display=!ro&&MO.aim?'':'none';if(!ro&&MO.aim)$('mvnote').innerHTML=('<b>Aim Movers looks after this movement</b> ('+(MO.aim==='room'?'Room':'Dance Floor')+'): it sets where each head points and how big the shape is, so those are changed in the Aim Movers tab. The shape you draw here is kept as you draw it the next time Aim Movers saves.');
+ if(!ro&&np)w.push(np+' head'+(np===1?' isn&rsquo;t':'s aren&rsquo;t')+' patched in the show (no DMX address), so '+(np===1?'it doesn&rsquo;t':'they don&rsquo;t')+' show on the lights.');
+ const wb=$('mvwarn');wb.style.display=w.length?'block':'none';wb.innerHTML=w.join('<br><br>');
+ $('mvedit').style.display=ro?'none':'';if(ro){updMove();return;}
+ mvSecsDraw();mvSideDraw();mvHeadsDraw();updMove();mvDraw();}
+function mvSecsDraw(){const o0=JSON.parse(MW0).secs;$('mvsecs').innerHTML=MO.secs.map((o,i)=>{const w=MW.secs[i],b=JSON.stringify(w)!==JSON.stringify(o0[i]);
+  return `<div class="sst${i===mvS?' on':''}${b?' chg':''}${w.sel?'':' off'}" data-ms="${i}">${esc(mvSecName(o.name))}<small>${w.sel?'plays':'off'}${w.pts.length?' &middot; '+w.pts.length+' pt':''}</small></div>`;}).join('');
+ $('mvsecs').querySelectorAll('[data-ms]').forEach(e=>e.onclick=()=>{mvS=+e.dataset.ms;mvP=-1;$('mvcv').dataset.kind=MO.secs[mvS].name===MV_PT?'pt':'val';renderMove();});
+ $('mvcv').dataset.kind=MO.secs[mvS]&&MO.secs[mvS].name===MV_PT?'pt':'val';}
+function mvSideDraw(){const o=MO.secs[mvS],w=MW.secs[mvS],pt=o.name===MV_PT,lk=!!o.locked;
+ $('mvsech').textContent=mvSecName(o.name);
+ $('mvsel').checked=!!w.sel;$('mvsel').disabled=!o.has.includes('Selected');$('mvtr').value=String(w.tr);$('mvtr').disabled=!o.has.includes('Transition');
+ const act=document.activeElement;if(act!==$('mvdur'))$('mvdur').value=mvSecs(w.dur);if(act!==$('mvshift'))$('mvshift').value=String(w.shift);
+ $('mvdur').disabled=!o.has.includes('Duration');$('mvshift').disabled=!o.has.includes('Shift');
+ $('mvlock').style.display=lk?'block':'none';$('mvcvw').style.display=lk?'none':'';$('mvtools').style.display=lk||!pt?'none':'';$('mvfit').style.display=pt?'':'none';
+ $('mvcvhint').innerHTML=pt?'Drag a point to move it &middot; drag empty space to move the whole shape &middot; double-click to add a point &middot; Delete removes the selected one':'Drag a point &middot; double-click to add one &middot; Delete removes the selected one. Left to right = once round the cycle, bottom to top = value 0&ndash;255';
+ const p=mvP>=0?w.pts[mvP]:null;$('mvpt').style.display=p&&!lk?'':'none';
+ if(p){$('mvptn').textContent='Point '+(mvP+1);$('mvpxl').textContent=pt?'Pan':'At %';$('mvpyl').textContent=pt?'Tilt':'Value';
+  if(act!==$('mvpx'))$('mvpx').value=pt?p[0]:(p[0]/MVX*100).toFixed(1).replace(/\.0$/,'');if(act!==$('mvpy'))$('mvpy').value=pt?p[1]:(p[1]>>8);
+  $('mvpx').max=pt?MVX:100;$('mvpy').max=pt?MVX:255;$('mvpdel').disabled=w.pts.length<2;}}
+function mvHeadsDraw(){const own=!!MO.aim,o0=JSON.parse(MW0).heads;
+ $('mvhcnt').textContent=own?'aim and size are set by Aim Movers':'aim = where it points, as 16-bit pan / tilt steps · zoom = size of its shape';
+ $('mvhl').innerHTML='<table><tr><th>Head</th><th>DMX</th><th>Aim pan</th><th>Aim tilt</th><th>Zoom pan</th><th>Zoom tilt</th><th></th></tr>'+MO.heads.map((h,i)=>{const w=MW.heads[i];
+  const f=(p,key,mn,mx)=>!h.has.includes(key)?'<span class="sub">&mdash;</span>':own?String(w[p]):`<input class="num${w[p]!==o0[i][p]?' chg':''}" type="number" data-mh="${i}" data-mp="${p}" min="${mn}" max="${mx}" step="1" value="${w[p]}">`;
+  const tg=(+h.rp?'<span class="tag">reverse pan</span>':'')+(+h.rt?'<span class="tag">reverse tilt</span>':'');
+  return `<tr><td><b>${esc(h.label||h.name)}</b><small class="sub" style="display:block;margin:0">${esc(h.model||'')}</small></td><td>${h.addr||'<span class="tag amber">not patched</span>'}</td><td>${f('op','OffsetPan',-65535,65535)}</td><td>${f('ot','OffsetTilt',-65535,65535)}</td><td>${f('zp','ZoomPan',-99,900)}</td><td>${f('zt','ZoomTilt',-99,900)}</td><td>${tg}</td></tr>`;}).join('')+'</table>';
+ $('mvhl').querySelectorAll('[data-mh]').forEach(e=>e.onchange=()=>{const i=+e.dataset.mh,p=e.dataset.mp,lim=p[0]==='o'?[-65535,65535]:[-99,900];let v=Math.round(+e.value);if(!isFinite(v))v=0;v=Math.max(lim[0],Math.min(lim[1],v));
+  mvSnap();MW.heads[i][p]=v;renderMove();});}
+function updMove(){const ok=!!(MO&&!MO.readonly),d=mvDirty();
+ $('mvsave').disabled=!ok||!d;$('mvundo').disabled=!ok||!d;$('mvstep').disabled=!ok||!MVH.length;
+ if(MO)stateTag('mvstate',d);
+ $('mvhint').innerHTML=!MO?'Open a movement to change it.':MO.readonly?'This movement can only be changed in ShowXpress.':sxHint('save')??(d?esc(mvWhat())+'. Only that is changed in the file.':'Matches the show.');
+ mvPush();}
+// ---- editing
+function mvSet(fn){mvSnap();fn(MW.secs[mvS]);renderMove();}
+function mvHit(px,py){const {W,H}=mvCanvas(),w=MW.secs[mvS],pt=MO.secs[mvS].name===MV_PT;let best=-1,bd=13*13;
+ w.pts.forEach((p,i)=>{const q=pt?mvToPx(p,W,H):[mvGx(p[0],W),mvGy(p[1],H)],d=(q[0]-px)**2+(q[1]-py)**2;if(d<=bd){bd=d;best=i;}});return best;}
+function mvEvXY(e){const r=$('mvcv').getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top];}
+function mvDown(e){if(!MO||MO.readonly||MO.secs[mvS].locked||e.button>0)return;const [x,y]=mvEvXY(e),i=mvHit(x,y),w=MW.secs[mvS];
+ $('mvcv').setPointerCapture(e.pointerId);mvDrag={i,x,y,moved:false,start:w.pts.map(p=>p.slice()),snap:JSON.stringify(MW)};if(i>=0){mvP=i;mvSideDraw();}e.preventDefault();}
+function mvMove(e){if(!mvDrag)return;const [x,y]=mvEvXY(e),{W,H}=mvCanvas(),w=MW.secs[mvS],pt=MO.secs[mvS].name===MV_PT;
+ if(!mvDrag.moved&&Math.abs(x-mvDrag.x)+Math.abs(y-mvDrag.y)<3)return;mvDrag.moved=true;
+ if(mvDrag.i>=0){const p=w.pts[mvDrag.i];if(pt){const q=mvFromPx(x,y,W,H);p[0]=mvClamp(q[0]);p[1]=mvClamp(q[1]);}else{p[0]=mvClamp(mvGxInv(x,W));p[1]=mvClamp(Math.round(mvGyInv(y,H)/256)*256);}}
+ else if(pt){const a=mvFromPx(mvDrag.x,mvDrag.y,W,H),b=mvFromPx(x,y,W,H),s=mvDrag.start;let dx=b[0]-a[0],dy=b[1]-a[1];
+  const x0=Math.min(...s.map(p=>p[0])),x1=Math.max(...s.map(p=>p[0])),y0=Math.min(...s.map(p=>p[1])),y1=Math.max(...s.map(p=>p[1]));
+  dx=Math.max(-x0,Math.min(MVX-x1,dx));dy=Math.max(-y0,Math.min(MVX-y1,dy));w.pts=s.map(p=>[mvClamp(p[0]+dx),mvClamp(p[1]+dy)]);}
+ mvSideDraw();mvDraw();mvPush();}
+function mvUp(){if(!mvDrag)return;const d=mvDrag;mvDrag=null;if(d.moved){MVH.push(d.snap);if(MVH.length>200)MVH.shift();renderMove();}else if(d.i<0&&mvP>=0){mvP=-1;mvSideDraw();mvDraw();}}
+function mvDbl(e){if(!MO||MO.readonly||MO.secs[mvS].locked)return;const [x,y]=mvEvXY(e),{W,H}=mvCanvas(),w=MW.secs[mvS],pt=MO.secs[mvS].name===MV_PT;if(mvHit(x,y)>=0||w.pts.length>=256)return;
+ mvSnap();if(pt){const q=mvFromPx(x,y,W,H),np=[mvClamp(q[0]),mvClamp(q[1])];let at=w.pts.length,bd=1e18;const n=w.pts.length;
+  // into the side of the shape nearest to where you clicked
+  for(let i=0;i<n;i++){const a=w.pts[i],b=w.pts[(i+1)%n],dx=b[0]-a[0],dy=b[1]-a[1],l=dx*dx+dy*dy,t=l?Math.max(0,Math.min(1,((np[0]-a[0])*dx+(np[1]-a[1])*dy)/l)):0,d=(a[0]+t*dx-np[0])**2+(a[1]+t*dy-np[1])**2;if(d<bd){bd=d;at=i+1;}}
+  w.pts.splice(at,0,np);mvP=at;}
+ else{w.pts.push([mvClamp(mvGxInv(x,W)),mvClamp(Math.round(mvGyInv(y,H)/256)*256)]);mvP=w.pts.length-1;}
+ renderMove();}
+function mvDelPt(){const w=MW.secs[mvS];if(mvP<0||w.pts.length<2||MO.secs[mvS].locked)return;mvSnap();w.pts.splice(mvP,1);mvP=Math.min(mvP,w.pts.length-1);renderMove();}
+function mvShape(fn){const w=MW.secs[mvS];if(!w.pts.length)return;mvSnap();const c=mvCentre(w.pts);w.pts=fn(w.pts,c).map(p=>[mvClamp(p[0]),mvClamp(p[1])]);renderMove();}
+// ---- on the lights: the movement as it is on this page, straight to the DMX interface (like the Scene Editor's
+// preview). A movement on its own only moves the heads - "Light it with" adds a scene underneath (its first step).
+function mvPush(){if(!MVP||!MVP.on||!MO||MO.readonly)return;const fr=Object.assign({},mvLite&&mvLite.f===$('mvlite').value?mvLite.v:{},mvFrame(mvNow()));
+ for(const ch in MVP.sent){if(!(ch in fr)&&MVP.sent[ch]!==0){MVP.sent[ch]=0;MVP.pend.set(ch,'b:'+ch+':0');}}
+ for(const ch in fr){if(MVP.sent[ch]!==fr[ch]){MVP.sent[ch]=fr[ch];MVP.pend.set(ch,'b:'+ch+':'+fr[ch]);}}
+ mvKick();}
+function mvKick(){if(!MVP||MVP.tm||MVP.fl)return;const d=40-(Date.now()-MVP.last);if(d>0)MVP.tm=setTimeout(()=>{if(MVP){MVP.tm=0;mvFlush();}},d);else mvFlush();}
+async function mvFlush(){if(!MVP||!MVP.on||MVP.fl)return;let l=((MVP.z?'z ':'')+[...MVP.pend.values()].join(' ')).trim();if(!l){if(!MVP.ka)return;l='k';}
+ const me=MVP;MVP.z=false;MVP.ka=false;MVP.pend.clear();MVP.fl=true;MVP.last=Date.now();let r;try{r=await api('/api/live/out',{l});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}
+ if(MVP!==me||!MVP.on)return;MVP.fl=false;
+ if(!r.ok){const reo=MVP.reo;await mvPvStop(false);showResult({ok:false,error:(r.error||'The DMX output stopped.')+(reo?' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.':'')},'clprev');return;}
+ if(MVP.pend.size)mvKick();}
+function mvPvUi(){const on=!!MVP;$('mvpv').classList.toggle('on',on);$('mvpvsub').style.display=on?'none':'';$('mvpvgo').style.display=on?'none':'';$('mvpvgo').disabled=!MO||!!MO.readonly;$('mvpvstop').style.display=on?'':'none';$('mvpvreow').style.display=on?'':'none';
+ const t=$('mvpvif');t.style.display=on?'':'none';if(on){t.className='tag '+(MVP.test?'red':'blue');t.textContent=MVP.test?'TEST - no real output':'Output: '+MVP.iface;}}
+async function mvPvGo(){if(MVP||SEP||LKP||LV||CP||!MO||MO.readonly)return;
+ const c=await sxCloseLive('Close ShowXpress to see the movement on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show on the lights','clprev');
+ if(!c.go)return;
+ const r=await lvStart('floor',true);
+ if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(c.reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'clprev');return;}
+ MVP={on:true,sent:{},pend:new Map(),z:true,ka:false,fl:false,tm:0,last:0,reo:c.reo,test:!!r.test,iface:r.iface};
+ MVP.kat=setInterval(()=>{if(MVP&&MVP.on&&Date.now()-MVP.last>1000){MVP.ka=true;mvKick();}},1000);
+ MVP.pt=setInterval(()=>{if(MVP)mvPush();},40);
+ $('mvpvreo').checked=c.reo;mvPvUi();mvLiteLoad();mvPush();}
+async function mvPvStop(reo){if(!MVP)return;clearInterval(MVP.kat);clearInterval(MVP.pt);if(MVP.tm)clearTimeout(MVP.tm);MVP.on=false;MVP=null;mvPvUi();
+ busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)await sxLaunch();}
+async function mvLiteList(){if(!MLS)MLS=await getJ('/api/scenes');const sel=$('mvlite'),cur=sel.value||(()=>{try{return localStorage.getItem('sxh_mvlite')||'';}catch(e){return '';}})();
+ sel.innerHTML='<option value="">nothing (only moves the heads)</option>'+(MLS&&MLS.ok?mvArr(MLS.scenes):[]).map(s=>`<option value="${esc(s.file)}">${esc(s.name)}</option>`).join('');
+ sel.value=[...sel.options].some(o=>o.value===cur)?cur:'';}
+async function mvLiteLoad(){const f=$('mvlite').value;try{localStorage.setItem('sxh_mvlite',f);}catch(e){}
+ if(!f){mvLite=null;mvPush();return;}if(mvLite&&mvLite.f===f)return;
+ const r=await getJ('/api/scene?f='+encodeURIComponent(f));if(!r.ok||$('mvlite').value!==f){if(!r.ok)showErr('mverr',r);return;}
+ const by={};mvArr(r.heads).forEach(h=>by[h.id]=h);const v={},st=mvArr(r.steps)[0];
+ if(st)mvArr(st.fx).forEach(x=>{const h=by[x.id];if(!h||!h.addr)return;mvArr(x.ch).forEach(c=>{const ch=h.addr+(+c[0]);if(ch>=1&&ch<=8192)v[ch]=Math.max(0,Math.min(255,+c[2]||0));});});
+ mvLite={f,v};mvPush();}
+// ---- earlier versions (backups kept by move_edit.ps1, outside the show folder)
+async function mvBackups(){if(!MO){$('mvbk').style.display='none';return;}const f=MO.file,r=await getJ('/api/move/backups?f='+encodeURIComponent(f));if(!MO||MO.file!==f)return;
+ const b=(r.ok&&mvArr(r.backups))||[];$('mvbk').style.display=b.length?'':'none';
+ $('mvbkl').innerHTML=b.map(x=>'<div class="sc"><div class="nm">'+esc(String(x.at).replace('T',' '))+'<small>'+esc(x.what)+'</small></div><div></div><div class="st"><button class="mini" data-bk="'+esc(x.id)+'"'+(sxOpen?' disabled':'')+'>Revert to this</button></div></div>').join('');
+ $('mvbkl').querySelectorAll('[data-bk]').forEach(e=>e.onclick=()=>mvRevert(e.dataset.bk,false));}
+async function mvRevert(id,force){if(!MO)return;const f=MO.file;
+ if(!force&&!await ask('Put this version back?','<b>'+esc(MO.name)+'</b> goes back to how it was before that save.'+(mvDirty()?' Your changes that are not saved yet are lost.':'')+' The movement as it is now is kept as a backup too, so this can be undone.','Revert'))return;
+ busy(true,'Reverting…');let r;try{r=await api('/api/move/revert',{f,id,force:!!force});}catch(e){r={ok:false,error:'Lost connection.'};}busy(false);
+ if(r.ok&&r.conflict){if(await ask('The movement changed since','<b>'+esc(MO.name)+'</b> was changed after that save (in ShowXpress or here). Revert anyway? The movement as it is now is kept as a backup.','Revert anyway'))return mvRevert(id,true);return;}
+ if(r.ok){ML=null;await mvOpen(f,true);}showResult(r,'moverev');}
+// ---- wiring
+$('mvq').oninput=renderMoves;
+$('mvback').onclick=async()=>{if(!await mvLeaveOk())return;await mvPvStop(MVP?MVP.reo:false);MO=null;MW=null;if(!ML)loadMoves();else renderMoves();};
+$('mvrefresh').onclick=async()=>{if(MO){if(mvDirty()&&!await ask('Reload the movement?','Your changes that are not saved yet will be lost.','Reload'))return;mvOpen(MO.file,true);}else loadMoves();};
+$('mvundo').onclick=()=>{if(!MO)return;mvReset();mvP=-1;renderMove();};
+$('mvstep').onclick=mvStepBack;
+$('mvsave').onclick=()=>{if(!MO||!mvDirty())return;const f=MO.file;saveTo('/api/move/save',mvBody(),'Saving the movement…',async()=>{ML=null;await mvOpen(f,true);},'move');};
+$('mvsel').onchange=()=>mvSet(w=>w.sel=$('mvsel').checked?1:0);
+$('mvtr').onchange=()=>mvSet(w=>w.tr=+$('mvtr').value);
+$('mvdur').onchange=()=>{let v=Math.round(parseFloat($('mvdur').value)*10);if(!isFinite(v))v=MW.secs[mvS].dur;v=Math.max(1,Math.min(360000,v));mvSet(w=>w.dur=v);$('mvdur').value=mvSecs(v);};
+$('mvshift').onchange=()=>{let v=parseFloat($('mvshift').value);if(!isFinite(v))v=MW.secs[mvS].shift;v=Math.round(Math.max(0,Math.min(100,v))*100)/100;mvSet(w=>w.shift=v);$('mvshift').value=String(v);};
+$('mvpx').onchange=$('mvpy').onchange=()=>{const w=MW.secs[mvS],p=w.pts[mvP];if(!p)return;const pt=MO.secs[mvS].name===MV_PT;let x=parseFloat($('mvpx').value),y=parseFloat($('mvpy').value);
+ if(!isFinite(x))x=pt?p[0]:p[0]/MVX*100;if(!isFinite(y))y=pt?p[1]:p[1]>>8;mvSnap();
+ if(pt){p[0]=mvClamp(x);p[1]=mvClamp(y);}else{p[0]=mvClamp(Math.max(0,Math.min(100,x))/100*MVX);p[1]=mvClamp(Math.max(0,Math.min(255,Math.round(y)))*256);}renderMove();};
+$('mvpdel').onclick=mvDelPt;
+$('mvbig').onclick=()=>mvShape((P,c)=>P.map(p=>[c[0]+(p[0]-c[0])*1.1,c[1]+(p[1]-c[1])*1.1]));
+$('mvsmall').onclick=()=>mvShape((P,c)=>P.map(p=>[c[0]+(p[0]-c[0])/1.1,c[1]+(p[1]-c[1])/1.1]));
+$('mvflipx').onclick=()=>mvShape((P,c)=>P.map(p=>[2*c[0]-p[0],p[1]]));
+$('mvflipy').onclick=()=>mvShape((P,c)=>P.map(p=>[p[0],2*c[1]-p[1]]));
+$('mvrev').onclick=()=>{mvShape(P=>[P[0]].concat(P.slice(1).reverse()));mvP=-1;mvSideDraw();};
+$('mvcentre').onclick=()=>mvShape((P,c)=>P.map(p=>[p[0]+MVX/2-c[0],p[1]+MVX/2-c[1]]));
+$('mvfit').onclick=()=>{mvFit();mvDraw();};$('mvwhole').onclick=()=>{mvView={x:0,y:0,s:MVX};mvDraw();};
+$('mvhold').onclick=()=>{if(mvHold){mvT0=Date.now()-mvHoldT;mvHold=false;}else{mvHoldT=Date.now()-mvT0;mvHold=true;}$('mvhold').innerHTML=mvHold?'&#9654; Play':'&#10074;&#10074; Pause';};
+$('mvsync').onclick=()=>{mvT0=Date.now();mvHoldT=0;};
+const mvc=$('mvcv');mvc.addEventListener('pointerdown',mvDown);mvc.addEventListener('pointermove',mvMove);mvc.addEventListener('pointerup',mvUp);mvc.addEventListener('pointercancel',mvUp);mvc.addEventListener('dblclick',mvDbl);
+document.addEventListener('keydown',e=>{if(lastTab!=='move'||!MO||MO.readonly)return;const t=e.target&&e.target.tagName;if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA'||$('modal').style.display==='flex')return;
+ if((e.key==='Delete'||e.key==='Backspace')&&mvP>=0){e.preventDefault();mvDelPt();}
+ else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();mvStepBack();}});
+window.addEventListener('resize',()=>{if(MO&&lastTab==='move')mvDraw();});
+$('mvpvgo').onclick=mvPvGo;$('mvpvstop').onclick=()=>mvPvStop($('mvpvreo').checked);
+$('mvlite').onchange=mvLiteLoad;
+
+// ---------------- One-click Looks (looks.ps1, phase 4, user 2026-11-24): a NEW scene from a template - contrast pairs, a
+// colour chase, a strobe or a prism fan - for the heads picked. The steps are worked out here, so the look can be seen on
+// the lights before it is made; looks.ps1 checks them and writes the new file. No scene the show has and no live button
+// is ever changed (the live board stays ShowXpress's own: the user puts the look on a button there, or on one of the SX
+// Player's own pages). Each look sets only what it is about (a colour look: colour, dimmer, shutter; the prism fan: the
+// beam, no colour), so looks can be played together, like the user's own CONTRAST ALL + PRISM FAN.
+let LK=null,lkT='contrast',LKP=null,lkCur=null,lkMade=null,lkNameSet=false,lkRaf=0,lkT0=Date.now(),lkDots={},lkLastAt=-1,lkLastL=null;
+const LK_COLS=[['White','#ffffff'],['Red','#ff0000'],['Orange','#ff7a00'],['Amber','#ffb000'],['Yellow','#ffe600'],['Green','#00e040'],['Cyan','#00e5ff'],['Blue','#0030ff'],['Purple','#8a2be2'],['Magenta','#ff00c8'],['Pink','#ff6fae'],['UV','#6a00ff']];
+// colour-wheel slot names (from the fixtures' own definitions) -> about how they look
+const LK_SLOT={white:'#ffffff',red:'#ff0000',orange:'#ff7a00',yellow:'#ffe600',dark_yellow:'#d4a000',amber:'#ffb000',green:'#00e040',light_green:'#80ff80',pastel_sky_blue:'#80d0ff',sky_blue:'#80d0ff',light_blue:'#80d0ff',cyan:'#00e5ff',blue:'#0030ff',dark_blue:'#0010a0',purple:'#8a2be2',magenta:'#ff00c8',pink:'#ff6fae',lavender:'#c0a0ff',uv:'#6a00ff',cto:'#ffb070',natural_white:'#fff0dc',cold_white:'#e6f2ff',warm_white:'#ffe0b0'};
+const LK_DEF={contrast:{pairs:[['Red','Blue'],['Green','Magenta'],['Yellow','Purple'],['Cyan','Pink']],split:'alt',swap:true,hold:1,fade:false},
+ chase:{cols:['Red','Orange','Yellow','Green','Cyan','Blue','Purple','Magenta'],pp:true,spread:false,hold:0.5,fade:false},
+ strobe:{col:'White',mode:'beat',on:0.05,off:0.05},
+ prism:{p:[{m:'l',s:77},{m:'l',s:29}],zoom:80,focus:128}};
+let LKO=(()=>{let o={};try{o=JSON.parse(localStorage.getItem('sxh_looks')||'{}')||{};}catch(e){}const r={on:o.on||{}};
+ for(const k in LK_DEF)r[k]=Object.assign(JSON.parse(JSON.stringify(LK_DEF[k])),o[k]||{});return r;})();
+function lkKeep(){try{localStorage.setItem('sxh_looks',JSON.stringify(LKO));}catch(e){}}
+const lkHex=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+const lkColHex=n=>(LK_COLS.find(c=>c[0]===n)||LK_COLS[0])[1];
+const lkByte=v=>Math.max(0,Math.min(255,Math.round(+v||0)));
+const lkLabel=m=>String(m).replace(/\s*\(\d+\s*ch\)\s*$/i,'').replace(/_?CH\d+$/i,'').replace(/_/g,' ').trim()||String(m);
+const lkSec=t=>(Math.round(t*100)/100)+' s';
+async function loadLooks(){$('lkerr').style.display='none';const r=await getJ('/api/looks');
+ if(!r||!r.ok){LK=null;$('lkw').style.display='none';showErr('lkerr',r||{ok:false,error:'Could not read the show.'});return;}
+ r.byId={};const gs=[];(r.heads||[]).forEach(h=>{r.byId[h.id]=h;let g=gs.find(x=>x.model===h.model);if(!g)gs.push(g={model:h.model,label:lkLabel(h.model),c:r.models[h.model],heads:[]});h.gi=g.heads.length;g.heads.push(h);});
+ r.groups=gs;r.scenes=r.scenes||[];r.skipped=r.skipped||[];LK=r;$('lkw').style.display='';lkTplDraw();lkOptsDraw();lkUpdate();lkDoneDraw();}
+// which lights a template can use, and which it starts with (the user's beat strobe left the Ovation out)
+const lkHasRgb=c=>['red','green','blue','white'].some(k=>c.rgb&&c.rgb[k]&&c.rgb[k].length);
+const lkCan=(c,t)=>!!c&&(t==='prism'?c.prisms.length>0:(c.wheel>=0||lkHasRgb(c)));
+const lkDefOn=(g,t)=>t==='prism'||!(t==='strobe'?/ovation/i:/ovation|oppsk|blinder/i).test(g.model);
+function lkOn(g){const m=LKO.on[lkT]||{};return lkCan(g.c,lkT)&&(g.model in m?!!m[g.model]:lkDefOn(g,lkT));}
+function lkHeads(){const hs=[];if(LK)LK.groups.forEach(g=>{if(lkOn(g))g.heads.forEach(h=>hs.push({h:h,c:g.c,gi:h.gi,n:g.heads.length}));});return hs;}
+// a colour on one head: the nearest slot of its colour wheel, or red/green/blue (+ white / amber / UV LEDs for those)
+function lkWheel(c,name){const n=name.toLowerCase(),w=lkHex(lkColHex(name));let best=null,bd=1e9;
+ for(const s of c.slots){const k=String(s.n).toLowerCase().replace(/\s+/g,'_'),hx=LK_SLOT[k];if(!hx)continue;if(k===n)return {v:s.v,hx:hx};
+  const q=lkHex(hx),d=(q[0]-w[0])**2+(q[1]-w[1])**2+(q[2]-w[2])**2;if(d<bd){bd=d;best={v:s.v,hx:hx};}}
+ return best||{v:c.slots[0].v,hx:'#ffffff'};}
+function lkRgb(c,name){const o={},has=k=>c.rgb[k]&&c.rgb[k].length;let [r,g,b]=lkHex(lkColHex(name)),w=0,a=0,u=0;
+ if(name==='White'&&has('white')){r=g=b=0;w=255;}else if(name==='Amber'&&has('amber')){r=g=b=0;a=255;}else if(name==='UV'&&has('uv')){r=g=b=0;u=255;}
+ const set=(k,v)=>(c.rgb[k]||[]).forEach(ix=>o[ix]=v);set('red',r);set('green',g);set('blue',b);set('white',w);set('amber',a);set('uv',u);return o;}
+function lkColCh(c,name,on,fade){const out=[],f=fade?1:0;let hx=lkColHex(name);
+ if(c.wheel>=0){const s=lkWheel(c,name);out.push([c.wheel,s.v,0]);hx=s.hx;}   // a wheel never fades (it would spin through the slots)
+ else{const v=lkRgb(c,name);for(const ix in v)out.push([+ix,on||c.dim>=0?v[ix]:0,f]);}
+ if(c.dim>=0)out.push([c.dim,on?255:0,c.wheel<0?f:0]);
+ if(c.shut)out.push([c.shut.ix,on?c.shut.open:c.shut.closed,0]);
+ (c.kill||[]).forEach(k=>{if(!out.some(x=>x[0]===k[0]))out.push([k[0],k[1],0]);});   // built-in strobe / effect programs off
+ return {ch:out,hx:on?hx:null};}
+function lkPrismCh(c,o){const out=[];(c.gobos||[]).forEach(ix=>out.push([ix,0,0]));
+ c.prisms.forEach((p,j)=>{const q=o.p[Math.min(j,o.p.length-1)]||{m:'off'};let v=0;
+  if(q.m==='still')v=p.on;else if(q.m==='l'||q.m==='r'){const r=q.m==='l'?p.l:p.r;v=r?Math.round(r[0]+(r[1]-r[0])*Math.max(0,Math.min(100,+q.s||0))/100):p.on;}
+  out.push([p.ix,v,0]);});
+ if(c.focus>=0)out.push([c.focus,lkByte(o.focus),0]);if(c.zoom>=0)out.push([c.zoom,lkByte(o.zoom),0]);if(c.frost>=0&&!out.some(x=>x[0]===c.frost))out.push([c.frost,0,0]);
+ if(c.dim>=0)out.push([c.dim,255,0]);if(c.shut)out.push([c.shut.ix,c.shut.open,0]);
+ return {ch:out,hx:'#e8ecff'};}
+function lkBuild(){const o=LKO[lkT],hs=lkHeads(),steps=[];if(!hs.length)return {steps:steps,err:'Pick the lights for the look (HEADS).'};
+ const st=(len,fn)=>{const s={len:Math.max(1,Math.min(360000,Math.round(len))),f:{},show:{}};hs.forEach(x=>{const r=fn(x);s.f[x.h.id]=r.ch;s.show[x.h.id]=r.hx;});steps.push(s);};
+ const hold=v=>Math.round(Math.max(0.01,Math.min(3600,+v||1))*100);
+ if(lkT==='contrast'){const ps=(o.pairs||[]).filter(p=>p&&p[0]&&p[1]);if(!ps.length)return {steps:steps,err:'Add a pair of colours.'};
+  const side=x=>o.split==='half'?(x.gi<Math.ceil(x.n/2)?0:1):o.split==='type'?(x.c.pan?0:1):x.gi%2;
+  ps.forEach(p=>(o.swap?[0,1]:[0]).forEach(sw=>st(hold(o.hold),x=>lkColCh(x.c,p[(side(x)+sw)%2],true,o.fade))));}
+ else if(lkT==='chase'){const cs=(o.cols||[]).filter(Boolean);if(cs.length<2)return {steps:steps,err:'Pick at least 2 colours.'};
+  const seq=cs.map((_,i)=>i);if(o.pp&&cs.length>2)for(let i=cs.length-2;i>0;i--)seq.push(i);   // 1..n..2: no jump from the last colour back to the first
+  seq.forEach((_,k)=>st(hold(o.hold),x=>lkColCh(x.c,cs[seq[(k+(o.spread?x.gi:0))%seq.length]],true,o.fade)));}
+ else if(lkT==='strobe'){const cn=o.col||'White';
+  if(o.mode==='beat'){st(8,x=>lkColCh(x.c,cn,true,false));st(6000,x=>lkColCh(x.c,cn,false,false));}   // like the user's BEAT STROBE WHITE
+  else{st(hold(o.on),x=>lkColCh(x.c,cn,true,false));st(hold(o.off),x=>lkColCh(x.c,cn,false,false));}}
+ else st(500,x=>lkPrismCh(x.c,o));
+ return {steps:steps,err:'',beat:lkT==='strobe'&&o.mode==='beat',prism:lkT==='prism'};}
+function lkAutoName(){const o=LKO[lkT],up=x=>String(x).toUpperCase();let b;
+ if(lkT==='contrast'){const p=(o.pairs||[]).filter(x=>x&&x[0]&&x[1]);b=p.length===1?'CONTRAST '+up(p[0][0])+' '+up(p[0][1]):'CONTRAST PAIRS';}
+ else if(lkT==='chase')b=o.spread?'RAINBOW COLOR CHASE':'COLOR CHASE';
+ else if(lkT==='strobe')b=up(o.col||'White')+(o.mode==='beat'?' BEAT STROBE':' STROBE');
+ else b='PRISM FAN';
+ let n=b,i=2;while(lkHas(n))n=b+' '+(i++);return n;}
+function lkName(){return $('lkname').value.replace(/[\\/:*?"<>|\x00-\x1f]/g,'').replace(/\s+/g,' ').trim().replace(/\.scex$/i,'').replace(/[. ]+$/,'').slice(0,100);}
+const lkHas=n=>!!LK&&LK.scenes.some(s=>String(s).toLowerCase()===(n+'.scex').toLowerCase());
+function lkNameChk(){const n=lkName(),bad=!n||lkHas(n),e=lkCur&&lkCur.err;
+ $('lknamehint').innerHTML=!n?'<span style="color:var(--amber)">Give it a name.</span>':lkHas(n)?'<span style="color:var(--amber)">There&rsquo;s already a scene called that &mdash; pick another name.</span>':'a new file: scenes/'+esc(n)+'.scex';
+ $('lkmake').disabled=!LK||bad||!lkCur||!!e;$('lkhint').innerHTML=!LK?'':e?'<span style="color:var(--amber)">'+esc(e)+'</span>':bad?'':'Makes a <b>new</b> scene &mdash; nothing else in the show changes.';}
+function lkTplDraw(){document.querySelectorAll('#lktpl [data-lt]').forEach(b=>b.classList.toggle('on',b.dataset.lt===lkT));}
+function lkGroupsDraw(){$('lkgroups').innerHTML=LK.groups.map((g,i)=>{const can=lkCan(g.c,lkT),on=lkOn(g);
+  return '<button class="chip lkgc'+(on?' on':'')+'" data-gi="'+i+'"'+(can?'':' disabled title="This look doesn&rsquo;t use these lights"')+'>'+(on?'&#10003; ':'')+esc(g.label)+' <small>&times;'+g.heads.length+'</small></button>';}).join('')+
+  (LK.skipped.length?'<p class="sub" style="margin:6px 0 0;font-size:12px">Not used (a group of several heads, or no fixture definition): '+LK.skipped.map(esc).join(', ')+'</p>':'');}
+function lkVisDraw(){const v=$('lkvis'),gs=LK.groups.filter(lkOn);lkDots={};lkLastL=null;
+ if(!gs.length){v.innerHTML='<p class="sub" style="margin:0">No lights picked.</p>';return;}
+ v.innerHTML=gs.map(g=>'<div class="lkrow"><small>'+esc(g.label)+'</small><div>'+g.heads.map(h=>'<i data-lh="'+esc(h.id)+'" title="'+esc(h.name)+'"></i>').join('')+'</div></div>').join('');
+ v.querySelectorAll('[data-lh]').forEach(e=>lkDots[e.dataset.lh]=e);}
+function lkAt(L,now){const n=L.steps.length,ms=L.steps.map(s=>s.len*10);let p=now-lkT0;
+ p=L.beat?p%500:p%ms.reduce((a,b)=>a+b,0);   // a beat look is shown at 120 BPM
+ let at=0;while(at<n-1&&p>=ms[at]){p-=ms[at];at++;}return {at:at,frac:Math.min(1,p/ms[at])};}
+function lkTick(){const L=lkCur;if(!L||!L.steps.length)return;const at=lkAt(L,Date.now()).at;if(at===lkLastAt&&L===lkLastL)return;lkLastAt=at;lkLastL=L;const s=L.steps[at];
+ for(const id in lkDots){const hx=s.show[id],e=lkDots[id];e.style.background=hx||'';e.style.boxShadow=hx?'0 0 12px '+hx:'';e.classList.toggle('pr',!!L.prism);}}
+function lkAnim(on){if(on&&!lkRaf){const f=()=>{lkRaf=0;if(!LK||lastTab!=='look')return;lkTick();lkRaf=requestAnimationFrame(f);};lkRaf=requestAnimationFrame(f);}}
+function lkUpdate(){if(!LK)return;lkCur=lkBuild();const L=lkCur,n=L.steps.length,tot=L.steps.reduce((a,s)=>a+s.len,0)/100,hs=lkHeads();
+ $('lkhcnt').textContent=hs.length+' head'+(hs.length===1?'':'s');
+ $('lkinfo').textContent=L.err?'':L.beat?'one flash, then dark till the next beat (shown at 120 BPM)':n===1?'one look that holds':n+' steps, '+lkSec(tot)+' round';
+ if(!lkNameSet)$('lkname').value=lkAutoName();lkNameChk();lkGroupsDraw();lkVisDraw();lkTick();if(LKP)lkPush();}
+// ---- the options of each template
+const lkCSel=(k)=>'<select data-k="'+k+'">'+LK_COLS.map(c=>'<option>'+c[0]+'</option>').join('')+'</select>';
+const lkSw=n=>'<i class="lksw" style="background:'+lkColHex(n)+'"></i>';
+const lkNum=(k,min,max,step)=>'<span><input class="num" type="number" min="'+min+'" max="'+max+'" step="'+step+'" data-k="'+k+'"> s</span>';
+function lkGet(o,k){const a=k.split('.');if(a[0]==='pair')return (o.pairs[+a[1]]||[])[+a[2]];if(a[0]==='pm')return (o.p[+a[1]]||{}).m||'off';if(a[0]==='ps')return (o.p[+a[1]]||{}).s;return o[k];}
+function lkSet(o,k,v){const a=k.split('.');if(a[0]==='pair'){if(o.pairs[+a[1]])o.pairs[+a[1]][+a[2]]=v;return;}
+ if(a[0]==='pm'||a[0]==='ps'){while(o.p.length<=+a[1])o.p.push({m:'off',s:50});if(a[0]==='pm')o.p[+a[1]].m=v;else o.p[+a[1]].s=+v;return;}o[k]=v;}
+function lkOptsDraw(){const o=LKO[lkT],b=$('lkopts');let h='';
+ if(lkT==='contrast'){
+  h='<div class="gh"><h3>COLOUR PAIRS</h3><span class="cnt">one colour on half the heads, the other on the rest</span></div>'+
+   o.pairs.map((p,i)=>'<div class="lkpair">'+lkSw(p[0])+lkCSel('pair.'+i+'.0')+'<span class="sub" style="margin:0">with</span>'+lkSw(p[1])+lkCSel('pair.'+i+'.1')+(o.pairs.length>1?'<button class="mini" data-lka="delpair" data-i="'+i+'" title="Take this pair out">&times;</button>':'')+'</div>').join('')+
+   (o.pairs.length<8?'<div><button class="mini" data-lka="addpair">+ Add a pair</button></div>':'')+
+   '<label class="mvf"><span>Split the heads</span><select data-k="split"><option value="alt">Every other head</option><option value="half">First half / second half</option><option value="type">Movers / the other lights</option></select></label>'+
+   '<label class="mvf"><span>Swap the two colours each step</span><input type="checkbox" data-k="swap"></label>'+
+   '<label class="mvf"><span>Each step</span>'+lkNum('hold',0.05,3600,0.05)+'</label>'+
+   '<label class="mvf"><span>Fade between steps (LED lights)</span><input type="checkbox" data-k="fade"></label>';}
+ else if(lkT==='chase'){
+  h='<div class="gh"><h3>COLOURS</h3><span class="cnt">in the order you tick them</span></div><div class="lkchips">'+LK_COLS.map(c=>{const i=o.cols.indexOf(c[0]);
+    return '<button class="lkcc'+(i>=0?' on':'')+'" data-lka="col" data-c="'+c[0]+'">'+lkSw(c[0])+c[0]+(i>=0?'<b>'+(i+1)+'</b>':'')+'</button>';}).join('')+'</div>'+
+   '<div style="display:flex;gap:6px"><button class="mini" data-lka="clear">Clear</button><button class="mini" data-lka="rainbow">Rainbow</button></div>'+
+   '<label class="mvf"><span>Back and forth (the colour wheel never jumps far)</span><input type="checkbox" data-k="pp"></label>'+
+   '<label class="mvf"><span>Spread over the heads (a rainbow that moves)</span><input type="checkbox" data-k="spread"></label>'+
+   '<label class="mvf"><span>Each colour</span>'+lkNum('hold',0.05,3600,0.05)+'</label>'+
+   '<label class="mvf"><span>Fade between colours (LED lights)</span><input type="checkbox" data-k="fade"></label>';}
+ else if(lkT==='strobe'){
+  h='<div class="gh"><h3>COLOUR</h3></div><div class="lkchips">'+LK_COLS.map(c=>'<button class="lkcc'+(c[0]===o.col?' on':'')+'" data-lka="scol" data-c="'+c[0]+'">'+lkSw(c[0])+c[0]+'</button>').join('')+'</div>'+
+   '<label class="mvf"><span>Strobe</span><select data-k="mode"><option value="beat">One flash each beat</option><option value="steady">Steady on / off</option></select></label>'+
+   (o.mode==='beat'?'<p class="sub" style="margin:0;font-size:12.5px">One short flash, then dark. Set its button to <b>BPM</b> with <b>flash</b> (&ldquo;run from step 1&rdquo;) in ShowXpress &mdash; or put it on an SX Player page from here, which does that for you &mdash; and it flashes on every beat.</p>':
+    '<label class="mvf"><span>On for</span>'+lkNum('on',0.01,10,0.01)+'</label><label class="mvf"><span>Off for</span>'+lkNum('off',0.01,10,0.01)+'</label>');}
+ else{const g=LK.groups.find(x=>lkOn(x))||LK.groups.find(x=>x.c&&x.c.prisms.length),nm=g?g.c.prisms.map(p=>p.name):[];
+  h='<div class="gh"><h3>PRISMS</h3><span class="cnt">no colour of its own &mdash; play it with a colour look</span></div>'+
+   (nm.length?nm.slice(0,2).map((n,j)=>{const m=lkGet(o,'pm.'+j);return '<div class="lkpr"><b>'+esc(n)+'</b><select data-k="pm.'+j+'"><option value="off">Off</option><option value="still">In, still</option><option value="l">Spin left</option><option value="r">Spin right</option></select>'+
+     (m==='l'||m==='r'?'<input type="range" min="0" max="100" data-k="ps.'+j+'"><span class="sub" style="margin:0;min-width:24px" data-pv="'+j+'">'+esc(lkGet(o,'ps.'+j))+'</span>':'')+'</div>';}).join(''):'<p class="sub" style="margin:0">None of the show&rsquo;s lights has a prism.</p>')+
+   '<label class="mvf"><span>Zoom</span><input type="range" min="0" max="255" data-k="zoom"></label><label class="mvf"><span>Focus</span><input type="range" min="0" max="255" data-k="focus"></label>'+
+   '<p class="sub" style="margin:0;font-size:12.5px">Spin speed: try it on the lights &mdash; each fixture counts it its own way. The gobos are set open and frost off.</p>';}
+ b.innerHTML=h;b.querySelectorAll('[data-k]').forEach(e=>{const v=lkGet(o,e.dataset.k);if(e.type==='checkbox')e.checked=!!v;else if(v!=null)e.value=v;});}
+$('lkopts').addEventListener('input',e=>{const t=e.target;if(!t.dataset||!t.dataset.k||t.tagName==='SELECT'||t.type==='checkbox')return;
+ lkSet(LKO[lkT],t.dataset.k,t.value===''?'':+t.value);if(t.dataset.k.startsWith('ps.')){const s=$('lkopts').querySelector('[data-pv="'+t.dataset.k.slice(3)+'"]');if(s)s.textContent=t.value;}
+ lkKeep();lkUpdate();});
+$('lkopts').addEventListener('change',e=>{const t=e.target;if(!t.dataset||!t.dataset.k)return;
+ if(t.type==='checkbox')lkSet(LKO[lkT],t.dataset.k,t.checked);else if(t.tagName==='SELECT')lkSet(LKO[lkT],t.dataset.k,t.value);else return;
+ lkKeep();if(t.tagName==='SELECT')lkOptsDraw();lkUpdate();});
+$('lkopts').addEventListener('click',e=>{const b=e.target.closest('[data-lka]');if(!b)return;const o=LKO[lkT],a=b.dataset.lka,u=LK_COLS.map(c=>c[0]);
+ if(a==='addpair')o.pairs.push([u[(o.pairs.length*3+1)%u.length],u[(o.pairs.length*3+7)%u.length]]);
+ else if(a==='delpair')o.pairs.splice(+b.dataset.i,1);
+ else if(a==='col'){const i=o.cols.indexOf(b.dataset.c);if(i>=0)o.cols.splice(i,1);else o.cols.push(b.dataset.c);}
+ else if(a==='clear')o.cols=[];else if(a==='rainbow')o.cols=LK_DEF.chase.cols.slice();
+ else if(a==='scol')o.col=b.dataset.c;
+ lkKeep();lkOptsDraw();lkUpdate();});
+$('lktpl').onclick=e=>{const b=e.target.closest('[data-lt]');if(!b||b.dataset.lt===lkT)return;lkT=b.dataset.lt;lkNameSet=false;lkT0=Date.now();lkTplDraw();lkOptsDraw();lkUpdate();};
+$('lkgroups').onclick=e=>{const b=e.target.closest('[data-gi]');if(!b||b.disabled)return;const g=LK.groups[+b.dataset.gi],m=LKO.on[lkT]=LKO.on[lkT]||{};m[g.model]=!lkOn(g);lkKeep();if(lkT==='prism')lkOptsDraw();lkUpdate();};
+$('lkname').oninput=()=>{lkNameSet=!!$('lkname').value.trim();lkNameChk();};
+$('lkrefresh').onclick=()=>{LK=null;loadLooks();};
+// ---- on the lights (the same raw DMX output as the editors' previews: one at a time)
+function lkFrame(){const L=lkCur,out={};if(!L||!L.steps.length)return out;const q=lkAt(L,Date.now()),s=L.steps[q.at],p=L.steps[(q.at-1+L.steps.length)%L.steps.length];
+ for(const id in s.f){const h=LK.byId[id];if(!h||!h.addr)continue;const pv={};(p.f[id]||[]).forEach(c=>pv[c[0]]=c[1]);
+  for(const c of s.f[id]){const ch=h.addr+c[0];if(ch<1||ch>8192)continue;let v=c[1];if(c[2]&&L.steps.length>1&&c[0] in pv)v=pv[c[0]]+(v-pv[c[0]])*q.frac;out[ch]=lkByte(v);}}
+ return out;}
+function lkPush(){if(!LKP||!LKP.on)return;const fr=lkFrame();
+ for(const ch in LKP.sent){if(!(ch in fr)&&LKP.sent[ch]!==0){LKP.sent[ch]=0;LKP.pend.set(ch,'b:'+ch+':0');}}
+ for(const ch in fr){if(LKP.sent[ch]!==fr[ch]){LKP.sent[ch]=fr[ch];LKP.pend.set(ch,'b:'+ch+':'+fr[ch]);}}
+ lkKick();}
+function lkKick(){if(!LKP||LKP.tm||LKP.fl)return;const d=30-(Date.now()-LKP.last);if(d>0)LKP.tm=setTimeout(()=>{if(LKP){LKP.tm=0;lkFlush();}},d);else lkFlush();}
+async function lkFlush(){if(!LKP||!LKP.on||LKP.fl)return;let l=((LKP.z?'z ':'')+[...LKP.pend.values()].join(' ')).trim();if(!l){if(!LKP.ka)return;l='k';}
+ const me=LKP;LKP.z=false;LKP.ka=false;LKP.pend.clear();LKP.fl=true;LKP.last=Date.now();let r;try{r=await api('/api/live/out',{l:l});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}
+ if(LKP!==me||!LKP.on)return;LKP.fl=false;
+ if(!r.ok){const reo=LKP.reo;await lkPvStop(false);showResult({ok:false,error:(r.error||'The DMX output stopped.')+(reo?' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.':'')},'clprev');return;}
+ if(LKP.pend.size)lkKick();}
+function lkPvUi(){const on=!!LKP;$('lkpv').classList.toggle('on',on);$('lkpvsub').style.display=on?'none':'';$('lkpvgo').style.display=on?'none':'';$('lkpvstop').style.display=on?'':'none';$('lkpvreow').style.display=on?'':'none';
+ const t=$('lkpvif');t.style.display=on?'':'none';if(on){t.className='tag '+(LKP.test?'red':'blue');t.textContent=LKP.test?'TEST - no real output':'Output: '+LKP.iface;}}
+async function lkPvGo(){if(LKP||SEP||MVP||LV||CP||!LK)return;
+ const c=await sxCloseLive('Close ShowXpress to see the look on the lights?','Only one program can use the DMX interface, so ShowXpress closes while you preview. <b>Save your show first</b> if you changed anything &mdash; if ShowXpress asks, answer it there.<br><br>It can open again when you stop.','Close and preview','Show on the lights','clprev');
+ if(!c.go)return;
+ const r=await lvStart('floor',true);
+ if(!r.ok){try{await api('/api/live/stop',{});}catch(e){}if(c.reo)r.error=(r.error||'')+' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';showResult(r,'clprev');return;}
+ LKP={on:true,sent:{},pend:new Map(),z:true,ka:false,fl:false,tm:0,last:0,reo:c.reo,test:!!r.test,iface:r.iface};
+ LKP.kat=setInterval(()=>{if(LKP&&LKP.on&&Date.now()-LKP.last>1000){LKP.ka=true;lkKick();}},1000);
+ LKP.pt=setInterval(lkPush,40);$('lkpvreo').checked=c.reo;lkPvUi();lkPush();}
+async function lkPvStop(reo){if(!LKP)return;clearInterval(LKP.kat);clearInterval(LKP.pt);if(LKP.tm)clearTimeout(LKP.tm);LKP.on=false;LKP=null;lkPvUi();
+ busy(true,'Stopping the DMX output…');try{await api('/api/live/stop',{});}catch(e){}busy(false);if(reo)await sxLaunch();}
+$('lkpvgo').onclick=lkPvGo;$('lkpvstop').onclick=()=>lkPvStop($('lkpvreo').checked);
+// ---- make it, then: open it in the Scene Editor, or put it on one of the SX Player's own pages (settings only)
+$('lkmake').onclick=async()=>{const L=lkCur,n=lkName();if(!LK||!L||L.err||!n||lkHas(n))return;
+ busy(true,'Making the scene…');let r;try{r=await api('/api/looks/make',{name:n+'.scex',steps:L.steps.map(s=>({len:s.len,f:s.f}))});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}busy(false);
+ if(r.ok){LK.scenes.push(n+'.scex');lkMade={file:n+'.scex',name:n,beat:!!L.beat};SL=null;MLS=null;if(LB&&LB.files)LB.files.push(n+'.scex');lkNameSet=false;lkUpdate();lkDoneDraw();}
+ showResult(r,'look');};
+function lkDoneDraw(){const m=lkMade,c=$('lkdone');if(!m){c.style.display='none';return;}c.style.display='';const cu=lbLay().custom;
+ c.innerHTML='<h2>&#10003; Made: '+esc(m.name)+'</h2><p class="sub">A new scene in the show. To play it, add a button for it on ShowXpress&rsquo;s live board (if ShowXpress is open, open the show again so it lists the new scene), or put it on one of the SX Player&rsquo;s own pages here'+(m.beat?' &mdash; it gets <b>BPM + flash</b>, so it flashes on every beat':'')+'.</p>'+
+  '<div class="row" style="gap:8px;flex-wrap:wrap"><select id="lkpg" style="width:auto;max-width:240px">'+cu.map(p=>'<option value="'+esc(p.id)+'">'+esc(p.name)+'</option>').join('')+'<option value="">+ a new page: LOOKS</option></select>'+
+  '<button id="lkaddpg">Put it on this SX Player page</button><button id="lkedit">Change it in the Scene Editor</button></div><div class="sub" id="lkpgmsg" style="margin:8px 0 0"></div>';
+ $('lkedit').onclick=async()=>{setTab('scene');await seOpen(m.file);};
+ $('lkaddpg').onclick=async()=>{const lay=lbLay(),msg=$('lkpgmsg');let id=$('lkpg').value,p=lay.custom.find(x=>x.id===id);
+  if(!p){if(lay.custom.length>=40){msg.innerHTML='<span style="color:var(--amber)">The player already has 40 pages of its own &mdash; pick one of them.</span>';return;}
+   id=lbNextPage(lay);p={id:id,name:'LOOKS',swap:false,buttons:[]};lay.custom.push(p);if(lay.pages.length)lay.pages.push(id);}
+  p.buttons=p.buttons||[];if(p.buttons.length>=64){msg.innerHTML='<span style="color:var(--amber)">That page is full (64 buttons).</span>';return;}
+  p.buttons.push({id:lbNextBtn(p),title:m.name.slice(0,40),file:m.file,fader:0,bpm:m.beat,flash:m.beat,beats:1,color:-1});
+  let r;try{r=await api('/api/settings/set',{playerLayout:lay});}catch(e){r={ok:false};}
+  if(!r.ok){msg.innerHTML='<span style="color:var(--amber)">It wasn&rsquo;t saved &mdash; try again.</span>';return;}
+  SET=r.settings;if(LB)renderLab();lkDoneDraw();$('lkpgmsg').innerHTML='&#10003; On the SX Player page <b>'+esc(p.name)+'</b>. <a href="#" id="lkgolab">Open the SX Player</a>';
+  $('lkgolab').onclick=e=>{e.preventDefault();setTab('lab');};};}
 
 // ---------------- PHONE / iPAD: pairing (on the phone) and the Phone & iPad card (on the computer)
 function phUnpaired(msg){const off=/turned off/.test(msg||'');
@@ -3283,6 +3878,33 @@ try {
           $r = Invoke-Engine "-Action Revert -Scene `"$f`" -Backup $i$(if ($body.force) { ' -Force' })" $sceneEngine
           $cj = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{"conflict"' } | Select-Object -Last 1 }
           if ($cj) { Send-Json $ctx @{ ok = $true; conflict = $true; out = '' } } else { Send-Json $ctx $r }
+        }
+        '/api/moves'   { Send-EngineJson $ctx (Invoke-Engine '-Action List' $moveEngine) }
+        '/api/move'    {
+          $f = "$($req.QueryString['f'])"
+          if ($f -notmatch $moveRx) { Send-Json $ctx @{ ok = $false; error = 'Unknown movement.' }; break }
+          Send-EngineJson $ctx (Invoke-Engine "-Action Open -Move `"$f`"" $moveEngine)
+        }
+        '/api/move/backups' {
+          $f = "$($req.QueryString['f'])"
+          if ($f -notmatch $moveRx) { Send-Json $ctx @{ ok = $false; error = 'Unknown movement.' }; break }
+          Send-EngineJson $ctx (Invoke-Engine "-Action Backups -Move `"$f`"" $moveEngine)
+        }
+        '/api/move/revert' {
+          $f = "$($body.f)"; $i = "$($body.id)"
+          if ($f -notmatch $moveRx -or $i -notmatch '^\d{8}-\d{6}-\d{3}$') { Send-Json $ctx @{ ok = $false; error = 'Unknown backup.'; out = '' }; break }
+          if (Test-SxOpen) { Send-Json $ctx @{ ok = $false; error = 'ShowXpress is open. Close it (save first), then press Revert again.'; out = '' }; break }
+          $r = Invoke-Engine "-Action Revert -Move `"$f`" -Backup $i$(if ($body.force) { ' -Force' })" $moveEngine
+          $cj = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{"conflict"' } | Select-Object -Last 1 }
+          if ($cj) { Send-Json $ctx @{ ok = $true; conflict = $true; out = '' } } else { Send-Json $ctx (Update-MoveScenes $f $r) }
+        }
+        '/api/looks'   { Send-EngineJson $ctx (Invoke-Engine '-Action Rig' $looksEngine) }
+        '/api/looks/make' {
+          # ONE-CLICK LOOKS: a NEW scene file - looks.ps1 checks every step and never overwrites a scene (live.ini untouched)
+          if ("$($body.name)" -notmatch $sceneRx) { Send-Json $ctx @{ ok = $false; error = 'Give the look a name.'; out = '' }; break }
+          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_look_' + [guid]::NewGuid().ToString('N') + '.json')
+          [IO.File]::WriteAllText($cf, $raw, (New-Object Text.UTF8Encoding($false)))
+          try { Send-Json $ctx (Invoke-Engine "-Action Make -ChangesFile `"$cf`"" $looksEngine) } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
         }
         '/api/pre'     { Send-EngineJson $ctx (Invoke-Engine '-Action Check' $preEngine) }
         default        { Send-Text $ctx 404 'text/plain' 'not found' }

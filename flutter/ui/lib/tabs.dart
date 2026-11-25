@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'screens/home/home_screen.dart';
+import 'screens/move/move_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
 import 'theme.dart';
@@ -46,7 +47,7 @@ const tabs = [
   TabDef('apc', 'APC mini', TabGroup.rig, 'Pads and their lights', _todo),
   TabDef('speed', 'Speed Faders', TabGroup.rig, 'Which master fader each button follows', SpeedScreen.new),
   TabDef('scene', 'Scene Editor', TabGroup.edit, 'Edit step scenes', _todo),
-  TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', _todo),
+  TabDef('move', 'Movement Editor', TabGroup.edit, 'Edit generator movements', MoveScreen.new),
   TabDef('look', 'Looks', TabGroup.edit, 'Make color looks for the whole rig', _todo),
   TabDef('health', 'Health Check', TabGroup.edit, 'Find problems in the show', _todo),
 ];

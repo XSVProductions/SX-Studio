@@ -193,15 +193,18 @@ MovePt fromPx(MoveCanvasModel m, Offset at, Size s) {
 }
 
 class _Painter extends CustomPainter {
-  _Painter(this.m);
+  _Painter(this.m) : light = Sx.isLight;
 
   final MoveCanvasModel m;
 
-  void _text(Canvas c, String t, Offset at, {Color color = Sx.dim, double size = 11, FontWeight weight = FontWeight.w400, TextAlign align = TextAlign.left}) {
+  /// The theme it was painted in, so a theme switch repaints.
+  final bool light;
+
+  void _text(Canvas c, String t, Offset at, {Color? color, double size = 11, FontWeight weight = FontWeight.w400, TextAlign align = TextAlign.left}) {
     final tp = TextPainter(
       text: TextSpan(
         text: t,
-        style: TextStyle(color: color, fontSize: size, fontWeight: weight, fontFamily: Sx.body),
+        style: TextStyle(color: color ?? Sx.dim, fontSize: size, fontWeight: weight, fontFamily: Sx.body),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -227,6 +230,25 @@ class _Painter extends CustomPainter {
     return path;
   }
 
+  /// An axis name with a small arrow after it, pointing the way the value grows.
+  void _axis(Canvas c, String t, Offset at) {
+    _text(c, t, at);
+    final x = at.dx + (t.length * 6.0) + 4, y = at.dy;
+    final p = Paint()
+      ..color = Sx.dim
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+    c.drawPath(
+      Path()
+        ..moveTo(x, y)
+        ..lineTo(x + 10, y)
+        ..moveTo(x + 6, y - 3)
+        ..lineTo(x + 10, y)
+        ..lineTo(x + 6, y + 3),
+      p,
+    );
+  }
+
   @override
   void paint(Canvas c, Size size) {
     final w = m.state.secs[m.sec], s = m.doc.secs[m.sec];
@@ -246,11 +268,11 @@ class _Painter extends CustomPainter {
         if (x >= 0 && x <= size.width) c.drawLine(Offset(x, 0), Offset(x, size.height), grid);
         if (y >= 0 && y <= size.height) c.drawLine(Offset(0, y), Offset(size.width, y), grid);
       }
-      _text(c, 'pan →', Offset(size.width - 44, size.height - 10));
+      _axis(c, 'pan', Offset(size.width - 44, size.height - 10));
       c.save();
       c.translate(12, 46);
       c.rotate(math.pi / 2);
-      _text(c, 'tilt →', Offset.zero);
+      _axis(c, 'tilt', Offset.zero);
       c.restore();
       final steps = math.max(48, w.pts.length * 24);
       final path = [for (var k = 0; k <= steps; k++) movePathAt(w.pts, w.tr, k / steps)];
@@ -268,7 +290,7 @@ class _Painter extends CustomPainter {
       for (final (i, p) in w.pts.indexed) {
         final q = shapePx(v, (p.$1.toDouble(), p.$2.toDouble()), size);
         c.drawCircle(q, i == m.point ? 8 : 6, Paint()..color = i == m.point ? Sx.blue : Sx.accent);
-        _text(c, '${i + 1}', q, color: Sx.bg, size: 10, weight: FontWeight.w700, align: TextAlign.center);
+        _text(c, '${i + 1}', q, color: Sx.onPrimary, size: 10, weight: FontWeight.w700, align: TextAlign.center);
       }
       // Where each head is at [m.at].
       if (w.pts.isNotEmpty) {
@@ -316,5 +338,11 @@ class _Painter extends CustomPainter {
 
   @override
   bool shouldRepaint(_Painter old) =>
-      old.m.state != m.state || old.m.sec != m.sec || old.m.point != m.point || old.m.view != m.view || old.m.at != m.at || !identical(old.m.doc, m.doc);
+      old.light != light ||
+      old.m.state != m.state ||
+      old.m.sec != m.sec ||
+      old.m.point != m.point ||
+      old.m.view != m.view ||
+      old.m.at != m.at ||
+      !identical(old.m.doc, m.doc);
 }

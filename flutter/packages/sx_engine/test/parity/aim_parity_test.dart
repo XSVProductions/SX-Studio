@@ -76,6 +76,11 @@ void main() {
   final movers = showMovers(real);
   final a140 = movers.firstWhere((m) => m.is140), b140 = movers.where((m) => m.is140).elementAt(2), a251 = movers.firstWhere((m) => !m.is140);
   final pairs = trussPartners(real, movers);
+  // two dance floor movements of this show (not the checks)
+  final shapes = aimPreview(
+    real,
+    AimMode.floor,
+  ).targets.where((t) => !t.startsWith('DF CHECK')).take(2).map((t) => 'Editor/Generator/projects/$t.gpj').toList();
 
   // tonight's aims: two 140s with a center, one with a corner too, and a 251
   final aims = {
@@ -168,6 +173,22 @@ void main() {
       options: _opts,
       dart: (env) => aimApply(env, AimMode.floor, size: '120 90'),
     );
+    // A stale state file (an older copy brought back by a Drive import, or
+    // one restored by hand) makes both tools resize the already resized
+    // shapes again: 120% of 120%. Kept as the old behavior.
+    parityTest(
+      'floor 120 over a stale state file compounds',
+      script: 'df_aim.ps1',
+      args: _args('Apply', AimMode.floor, {'NoPrompt': true, 'Size': '120'}),
+      setup: (env) {
+        final state = File(env.path('df_aim_state.json'));
+        final old = state.readAsBytesSync();
+        aimApply(env, AimMode.floor, size: '120');
+        state.writeAsBytesSync(old);
+      },
+      options: _opts,
+      dart: (env) => aimApply(env, AimMode.floor, size: '120'),
+    );
     parityTest(
       'floor resize from 120 to 80 starts from the original shapes',
       script: 'df_aim.ps1',
@@ -224,8 +245,8 @@ void main() {
       script: 'df_aim.ps1',
       args: _args('Apply', AimMode.floor, {'NoPrompt': true, 'Size': '110'}),
       setup: (env) {
-        _edit(env, 'Editor/Generator/projects/251 DANCE.gpj', (t) => _dragShape(t, 700, -300, firstOnly: true));
-        _edit(env, 'Editor/Generator/projects/ZIG ZAG.gpj', (t) => _dragShape(t, 1500, 900));
+        _edit(env, shapes[0], (t) => _dragShape(t, 700, -300, firstOnly: true));
+        _edit(env, shapes[1], (t) => _dragShape(t, 1500, 900));
         _edit(env, 'Editor/Generator/projects/GALAXY SPIRAL.gpj', (t) => _dragShape(t, -800, 400, firstOnly: true));
       },
       options: _opts,

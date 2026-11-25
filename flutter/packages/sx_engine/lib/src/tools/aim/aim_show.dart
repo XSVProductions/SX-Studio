@@ -428,8 +428,8 @@ class AimShow {
           // should match the heads SX Studio reverses, else it was changed in Generator
           final fl = flip.heads[id];
           final on = fl != null && (rv[1]!.toLowerCase() == 'pan' ? fl.pan : fl.tilt);
-          if ((rv[2] != '0') != on)
-            warn.add('$f : fixture $id has Reverse${rv[1]} ${on ? 'OFF but SX Studio reverses that head' : 'on'} - check that head by eye');
+          final state = on ? 'OFF but SX Studio reverses that head' : 'on';
+          if ((rv[2] != '0') != on) warn.add('$f : fixture $id has Reverse${rv[1]} $state - check that head by eye');
         }
         if (offPan.hasMatch(ln)) nw = 'OffsetPan = ${hf.op}';
         if (offTilt.hasMatch(ln)) nw = 'OffsetTilt = ${hf.ot}';

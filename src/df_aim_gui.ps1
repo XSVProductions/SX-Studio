@@ -2307,8 +2307,8 @@ function renderApc(){if(!A)return;
  else $('apside').innerHTML=`<h3>Move a pad</h3><p class="sub" style="margin:0 0 8px">Tap a pad to see what it plays, then tap where it should go &mdash; or drag it there. Right-click a pad to take it off. A blue dot = moved, not saved yet.</p>${apMsg?'<p class="sub" style="color:var(--amber)">'+apMsg+'</p>':''}<div class="kv"><span>Pads used</span><b>${used} of 64</b><span>Free</span><b>${free.join(', ')||'none'}</b></div>`;
  $('apfaders').innerHTML=(A.faders||[]).map(f=>`<div class="fd"><b>Fader ${f.n}</b><span>CC ${f.cc} &rarr; </span>${esc(f.caption||'?')} speed</div>`).join('');
  const iss=[];
- for(let n=0;n<64;n++){const ps=padsAt(n);if(ps.length>1)iss.push(['error',rc(n)+' plays '+ps.length+' buttons',ps.map(p=>p.title+' ('+p.pageName+')').join(', ')+' &mdash; one press fires all of them. Tap the pad (again to pick the next one) and move one away.','']);}
- A.pads.filter(p=>!p.sceneOk&&apN[p.sec]>=0).forEach(p=>iss.push(['error',p.title+': scene file missing','Plays '+p.scene+', which isn\'t in the show any more.','']));
+ for(let n=0;n<64;n++){const ps=padsAt(n);if(ps.length>1)iss.push(['error',rc(n)+' plays '+ps.length+' buttons',ps.map(p=>esc(p.title+' ('+p.pageName+')')).join(', ')+' &mdash; one press fires all of them. Tap the pad (again to pick the next one) and move one away.','']);}
+ A.pads.filter(p=>!p.sceneOk&&apN[p.sec]>=0).forEach(p=>iss.push(['error',p.title+': scene file missing','Plays '+esc(p.scene)+', which isn\'t in the show any more.','']));
  A.pads.filter(p=>!onGrid(p)&&apN[p.sec]!==-1).forEach(p=>iss.push(['warn',p.title+' ('+p.pageName+') is mapped outside the pads',(p.type===0?'Note ':'MIDI type '+p.type+', number ')+apN[p.sec]+' &mdash; a round button or track button.',p.type===0?`<button class="mini" data-pick="${esc(p.sec)}">Move to a pad</button> <button class="mini" data-del="${esc(p.sec)}">Take off</button>`:`<button class="mini" data-del="${esc(p.sec)}">Take off</button>`]));
  A.pads.filter(p=>apN[p.sec]===-1).forEach(p=>iss.push(['info',p.title+' ('+p.pageName+') will be taken off the pads','Not saved yet.',`<button class="mini" data-back="${esc(p.sec)}">Put back</button>`]));
  $('apissues').innerHTML=iss.length?iss.map(i=>`<div class="iss ${i[0]}"><div class="ic">${i[0]==='error'?'!':i[0]==='warn'?'?':'i'}</div><div class="grow"><b>${esc(i[1])}</b><div class="d">${i[2]}</div></div><div class="act">${i[3]}</div></div>`).join(''):'<p style="color:var(--green);margin:4px 0">&#10003; Every pad plays one button and every scene exists.</p>';
@@ -2511,7 +2511,7 @@ function renderRt(){if(!RT)return;
  stateTag('rtstate',rtDirty());$('foot').textContent='Show: '+RT.show+(RT.saved?' · Rig Test last saved '+RT.saved.replace('T',' '):'');updRt();}
 function rtOpen(k){rtSlot=k;const s=RT.slots.find(x=>x.key===k),cur=rtA[k];$('rtpt').textContent=s.towerName+' tower — '+s.side+' mover';
  const where=id=>{const e=Object.entries(rtA).find(([kk,v])=>v===id&&kk!==k&&rtUsed(kk));if(!e)return'';const o=RT.slots.find(x=>x.key===e[0]);return 'now '+o.towerName.toLowerCase()+' '+o.side;};
- const grid=fl=>`<div class="pick">${RT.heads.filter(h=>h.flash===fl).map(h=>`<div data-pk="${h.id}" class="${h.id===cur?'cur':''}">${lookHtml(h)}#${h.num}<small>${esc(h.look)}</small><small>${esc(where(h.id))||'&nbsp;'}</small></div>`).join('')}</div>`;
+ const grid=fl=>`<div class="pick">${RT.heads.filter(h=>h.flash===fl).map(h=>`<div data-pk="${esc(h.id)}" class="${h.id===cur?'cur':''}">${lookHtml(h)}#${h.num}<small>${esc(h.look)}</small><small>${esc(where(h.id))||'&nbsp;'}</small></div>`).join('')}</div>`;
  $('rtpb').innerHTML='<div class="gh"><h3>SOLID</h3></div>'+grid(false)+'<div class="gh"><h3>FLASHING</h3></div>'+grid(true);
  document.querySelectorAll('[data-pk]').forEach(e=>e.onclick=()=>{const id=e.dataset.pk;for(const kk of Object.keys(rtA))if(rtA[kk]===id)delete rtA[kk];rtA[k]=id;$('rtpick').style.display='none';renderRt();});
  $('rtpick').style.display='flex';}
@@ -2763,7 +2763,7 @@ function renderColor(){if(!CL)return;if(showErr('clerr',CL)){$('clstate').style.
  const k=$('clknob');if(clHex){const [h,s]=hex2hsv(clHex),a=h*Math.PI/180;k.style.display='block';k.style.left=(100+Math.sin(a)*s*100)+'px';k.style.top=(100-Math.cos(a)*s*100)+'px';k.style.background='#'+clHex;}else k.style.display='none';
  $('clval').value=clV;$('clwheel').style.filter='brightness('+Math.max(.25,clV/100)+')';
  if(document.activeElement!==$('clhex'))$('clhex').value=clHex?'#'+clHex:'';$('clpick').value='#'+(clHex||'ffffff');
- const big=$('clbig');big.style.background=clHex?'#'+clHex:'repeating-linear-gradient(45deg,#1d212a 0 10px,#171a21 10px 20px)';big.innerHTML='<span>'+(clHex?'#'+clHex:'pick a colour')+'</span>';
+ const big=$('clbig');big.style.background=clHex?'#'+clHex:'repeating-linear-gradient(45deg,#1d212a 0 10px,#171a21 10px 20px)';big.innerHTML='<span>'+esc(clHex?'#'+clHex:'pick a colour')+'</span>';
  const n1=clHex&&nearest(CL.wheel140,clHex),n2=clHex&&nearest(CL.wheel251,clHex),sw=e=>e?`<span class="sw" style="background:#${e.hex}"></span>${esc(e.name)}`:'&mdash;',wa=CL.washes||[];
  $('clmap').innerHTML=`<span>140 movers</span><b>${sw(n1)}</b><span>251 movers</span><b>${sw(n2)}</b><span>Uplights</span><b>${clHex?'<span class="sw" style="background:#'+clHex+'"></span>exact colour':'&mdash;'}${wa.length?'<br><small style="color:var(--dim)">'+esc(wa.join(', '))+'</small>':' &middot; <span style="color:var(--amber)">none found</span>'}</b>`+
   (CL.hex?`<span>Saved</span><b><span class="sw" style="background:#${CL.hex}"></span>#${CL.hex}${CL.name?' '+esc(CL.name):''}${CL.saved?' &middot; '+fmtT(CL.saved):''}</b>`:'');

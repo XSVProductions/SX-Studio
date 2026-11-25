@@ -99,8 +99,9 @@ class ScreenBody extends StatelessWidget {
   }
 }
 
-/// The strip at the bottom of a screen, the old app's `.bar`: a hint on the
-/// left, buttons on the right.
+/// The bar under a screen with its hint and buttons, the old app's `.bar`.
+/// On a phone the hint gets its own line and the buttons share the row under
+/// it, as the old phone rule did.
 class SaveBar extends StatelessWidget {
   const SaveBar({super.key, required this.hint, this.actions = const []});
 
@@ -108,26 +109,49 @@ class SaveBar extends StatelessWidget {
   final List<Widget> actions;
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: Sx.bg,
-      border: Border(top: BorderSide(color: Sx.line)),
-    ),
-    padding: EdgeInsets.symmetric(horizontal: sxGutter(context), vertical: 14),
-    child: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: Sx.contentWidth),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(hint, style: TextStyle(color: Sx.dim, fontSize: 13)),
-            ),
-            for (final a in actions) Padding(padding: const EdgeInsets.only(left: 12), child: a),
-          ],
-        ),
+  Widget build(BuildContext context) {
+    final phone = MediaQuery.sizeOf(context).width <= 640;
+    final text = Text(
+      hint,
+      style: TextStyle(color: Sx.dim, fontSize: phone ? 12 : 13),
+    );
+    return Container(
+      decoration: BoxDecoration(
+        color: Sx.bg,
+        border: Border(top: BorderSide(color: Sx.line)),
       ),
-    ),
-  );
+      padding: phone ? const EdgeInsets.all(10) : EdgeInsets.symmetric(horizontal: sxGutter(context), vertical: 14),
+      child: phone
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hint.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: actions.isEmpty ? 0 : 8),
+                    child: text,
+                  ),
+                if (actions.isNotEmpty)
+                  Row(
+                    children: [
+                      for (final (i, a) in actions.indexed) ...[if (i > 0) const SizedBox(width: 8), Expanded(child: a)],
+                    ],
+                  ),
+              ],
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: Sx.contentWidth),
+                child: Row(
+                  children: [
+                    Expanded(child: text),
+                    for (final a in actions) Padding(padding: const EdgeInsets.only(left: 12), child: a),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
 }
 
 /// A red box with a problem in it, the old app's `.warnbox`. Renders nothing

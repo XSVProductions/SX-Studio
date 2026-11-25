@@ -55,6 +55,21 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  final _fileRequests = <String, String>{};
+
+  /// Shows [id] and asks its screen to open [file], as the SX Player's
+  /// "Edit scene" does. The screen picks it up with [takeFile].
+  void openFile(String id, String file) {
+    _fileRequests[id] = file;
+    tab = id;
+    notifyListeners();
+  }
+
+  /// The file another screen asked tab [id] to open, once. A screen that
+  /// opens files calls this from `didChangeDependencies` after
+  /// `AppScope.of(context)`, so it also sees a request made while it is alive.
+  String? takeFile(String id) => _fileRequests.remove(id);
+
   void setDirty(String id, bool dirty) {
     if (dirty ? dirtyTabs.add(id) : dirtyTabs.remove(id)) notifyListeners();
   }

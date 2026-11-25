@@ -583,5 +583,50 @@ void main() {
       expect(r, contains("NOTE  Tonight's Rig had trimmed this scene"));
       expect(s.open('CHASE.scex').trimmed, isFalse);
     });
+
+    test('Through the engine, backups go to the engine\'s settings folder', () async {
+      final settings = p.join(s.tmp.path, 'cfg');
+      final engine = Engine(
+        EngineConfig(port: 0, token: 't', showPath: s.root, settingsDir: settings),
+        sx: _ClosedSx(),
+      );
+      await engine.start();
+      final client = SxClient(Uri.parse('http://127.0.0.1:${engine.port}'), token: 't');
+      try {
+        final o = await client.scene('CHASE.scex');
+        final r = await client.sceneSave(
+          SceneChanges(
+            scene: 'CHASE.scex',
+            sha: o.sha,
+            steps: [
+              SceneStepChange(src: 0, set: [_set('11', 15, v: 1)]),
+              const SceneStepChange(src: 1),
+              const SceneStepChange(src: 2),
+            ],
+            addch: const [],
+            delch: const [],
+          ),
+        );
+        expect(r.ok, isTrue, reason: r.error);
+        final kept = Directory(p.join(settings, 'scene_backups', p.basename(s.root), 'CHASE.scex')).listSync();
+        expect(kept, hasLength(2), reason: 'the scene as it was, and what the save did');
+        expect((await client.sceneBackups('CHASE.scex')).backups, hasLength(1));
+      } finally {
+        client.close();
+        await engine.stop();
+      }
+    });
   });
+}
+
+/// ShowXpress, never open.
+class _ClosedSx implements SxApp {
+  @override
+  bool get running => false;
+
+  @override
+  Future<ToolResult> launch() async => const ToolResult(ok: true);
+
+  @override
+  Future<ToolResult> close({bool force = false}) async => const ToolResult(ok: true);
 }

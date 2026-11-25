@@ -22,6 +22,7 @@ function Get-Int($v, $def = -1) { if ("$v" -match '^-?\d+$') { [int]$v } else { 
 if ($Action -eq 'Preview') {
   $pads = @(foreach ($b in $info.Buttons) {
     $k = $b.Keys; if (-not $k.ContainsKey('trigger_midi_note')) { continue }
+    if ((Get-Int $k['trigger_midi_device'] 0) -ne 0) { continue }   # on another controller (e.g. the APC40), not the APC mini
     [pscustomobject]@{
       sec = $b.Sec; page = $b.Page; pageName = $b.PageName; title = $b.Title; scene = $b.Name; sceneOk = [bool](Get-ScenePath $root $b.Name)
       note = (Get-Int $k['trigger_midi_note']); type = (Get-Int $k['trigger_midi_type'] 0); channel = (Get-Int $k['trigger_midi_channel'] 1); device = (Get-Int $k['trigger_midi_device'] 0)
@@ -30,6 +31,7 @@ if ($Action -eq 'Preview') {
     } })
   $faders = @(foreach ($key in @($info.Live.Keys | Where-Object { $_ -match '^fader(\d+)_midi_note$' } | Sort-Object { [int]($_ -replace '\D', '') })) {
     $n = [int]($key -replace '\D', ''); $mf = $n - 1
+    if ((Get-Int $info.Live["fader${n}_midi_device"] 0) -ne 0) { continue }   # a fader on another controller
     [pscustomobject]@{ n = $n; cc = (Get-Int $info.Live[$key]); type = (Get-Int $info.Live["fader${n}_midi_type"]); channel = (Get-Int $info.Live["fader${n}_midi_channel"])
                        caption = $(if ($mf -lt $info.Faders.Count) { $info.Faders[$mf].caption } else { '' }) } })
   [pscustomobject]@{ ok = $true; show = $root; pads = $pads; faders = $faders; buttons = $info.Buttons.Count } | ConvertTo-Json -Depth 5 -Compress
@@ -46,6 +48,7 @@ foreach ($c in $changes) {
   $b = $bySec["$($c.sec)"]
   if (-not $b -or $b.Title -ne "$($c.title)") { throw "The show changed since this page was loaded ($($c.title)). Press Refresh and try again. NOTHING was changed." }
   if (-not $b.Keys.ContainsKey('trigger_midi_note')) { throw "$($b.Title) isn't on a pad. NOTHING was changed." }
+  if ((Get-Int $b.Keys['trigger_midi_device'] 0) -ne 0) { throw "$($b.Title) is on another MIDI controller, not the APC mini. NOTHING was changed." }
   $n = [int]$c.note
   if ($n -ne -1 -and ($n -lt 0 -or $n -gt 63)) { throw "Pad note $n is not on the 8x8 grid. NOTHING was changed." }
   if ($n -ne -1 -and (Get-Int $b.Keys['trigger_midi_type'] 0) -ne 0) { throw "$($b.Title) is mapped to a MIDI controller, not a note - it can only be removed. NOTHING was changed." }
@@ -63,7 +66,7 @@ $final = @{}
 foreach ($b in $info.Buttons) {
   if (-not $b.Keys.ContainsKey('trigger_midi_note')) { continue }
   $n = if ($touched.ContainsKey($b.Sec)) { $touched[$b.Sec] } else { Get-Int $b.Keys['trigger_midi_note'] }
-  if ($n -lt 0 -or $n -gt 63 -or (Get-Int $b.Keys['trigger_midi_type'] 0) -ne 0) { continue }
+  if ($n -lt 0 -or $n -gt 63 -or (Get-Int $b.Keys['trigger_midi_type'] 0) -ne 0 -or (Get-Int $b.Keys['trigger_midi_device'] 0) -ne 0) { continue }
   if ($final.ContainsKey($n) -and ($touched.ContainsKey($b.Sec) -or $touched.ContainsKey($final[$n].Sec))) {
     throw "Two buttons would be on the same pad ($($final[$n].Title) and $($b.Title)). NOTHING was changed."
   }

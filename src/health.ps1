@@ -150,11 +150,12 @@ foreach ($b in $info.Buttons) {
   }
 }
 
-# ---- APC mini / MIDI
+# ---- APC mini / MIDI. Only the APC mini's (MIDI device 0): buttons and faders on another controller (the APC40,
+#      device 1...) aren't pads, so they're not checked against the 8x8 grid
 $byNote = @{}; $taken = @{}
-foreach ($b in $info.Buttons) { $k = $b.Keys; if ((Get-Int $k['trigger_midi_type'] 0) -eq 0) { $n = Get-Int $k['trigger_midi_note']; if ($n -ge 0 -and $n -le 63) { $taken[$n] = $true } } }
+foreach ($b in $info.Buttons) { $k = $b.Keys; if ((Get-Int $k['trigger_midi_device'] 0) -eq 0 -and (Get-Int $k['trigger_midi_type'] 0) -eq 0) { $n = Get-Int $k['trigger_midi_note']; if ($n -ge 0 -and $n -le 63) { $taken[$n] = $true } } }
 foreach ($b in $info.Buttons) {
-  $k = $b.Keys; if (-not $k.ContainsKey('trigger_midi_note')) { continue }
+  $k = $b.Keys; if (-not $k.ContainsKey('trigger_midi_note') -or (Get-Int $k['trigger_midi_device'] 0) -ne 0) { continue }
   $n = Get-Int $k['trigger_midi_note']; $t = Get-Int $k['trigger_midi_type'] 0
   if ($t -ne 0 -or $n -lt 0 -or $n -gt 63) {
     $ops = @($k.Keys | Where-Object { $_ -match '^trigger_midi(out)?_' } | Sort-Object | ForEach-Object { New-IniOp $b.Sec $_ $null })
@@ -188,8 +189,8 @@ foreach ($key in @($byNote.Keys | Sort-Object)) {
   else { Add-Issue 'error' 'midi' "Pad $(Get-Pad $n) plays $($bs.Count) buttons" $d "There's no free pad left - take one off in the APC mini tab." }
 }
 $ccs = @{}
-foreach ($kk in @($info.Live.Keys | Where-Object { $_ -match '^fader(\d+)_midi_note$' })) { $cc = $info.Live[$kk]; if (-not $ccs.ContainsKey($cc)) { $ccs[$cc] = @() }; $ccs[$cc] += ($kk -replace '_midi_note', '') }
-foreach ($cc in $ccs.Keys) { if (@($ccs[$cc]).Count -gt 1) { Add-Issue 'warn' 'midi' "Faders share CC $cc" "$($ccs[$cc] -join ', ') move together." "Learn the MIDI of one of the faders again in ShowXpress." } }
+foreach ($kk in @($info.Live.Keys | Where-Object { $_ -match '^fader(\d+)_midi_note$' })) { $cc = "$($info.Live[($kk -replace '_note$', '_device')])/$($info.Live[$kk])"; if (-not $ccs.ContainsKey($cc)) { $ccs[$cc] = @() }; $ccs[$cc] += ($kk -replace '_midi_note', '') }
+foreach ($cc in $ccs.Keys) { if (@($ccs[$cc]).Count -gt 1) { Add-Issue 'warn' 'midi' "Faders share CC $(($cc -split '/')[-1])" "$($ccs[$cc] -join ', ') move together." "Learn the MIDI of one of the faders again in ShowXpress." } }
 
 # ---- keyboard keys / layout
 $keys = @{}

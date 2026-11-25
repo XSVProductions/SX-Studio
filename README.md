@@ -87,6 +87,8 @@ The flash order follows the original 16-head skip order, with any 251s spread in
 
 **APC mini / Speed Faders:** make your changes, then press **Save**. Only the pad notes or the `masterspeedfader` setting in `live.ini` change.
 
+**A second MIDI controller (e.g. an APC40 mk2):** add it in ShowXpress as a *new* line in the MIDI settings and leave the APC mini as the first line. The APC mini is MIDI device 0; buttons and faders learned on the other controller are left alone by the APC mini tab, the Health Check and the SX Player. A button has one MIDI trigger, so learning a button on the APC40 takes it off its APC mini pad.
+
 **Health Check**
 1. Close ShowXpress and go to the **Health Check** tab. Each problem shows a **Fix:** line with the recommended fix.
 2. Where there's a button next to it, press it to apply that fix.

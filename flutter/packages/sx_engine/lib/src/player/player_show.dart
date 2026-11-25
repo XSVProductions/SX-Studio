@@ -35,7 +35,8 @@ int loadPlayerBoard(PlayerCore core, ShowEnv env) {
   core.clearBoard();
   for (final f in info.faders) {
     final n = f.k + 1;
-    final ty = _int(info.live['fader${n}_midi_type'], -1);
+    // A fader on another controller gets no CC: the player only listens to the APC mini (MIDI device 0).
+    final ty = _int(info.live['fader${n}_midi_device'], 0) != 0 ? -1 : _int(info.live['fader${n}_midi_type'], -1);
     core.addFader(f.k, f.type == '1', _int(info.live['fader${n}_midi_channel'], 1), ty == 1 ? _int(info.live['fader${n}_midi_note'], -1) : -1);
   }
   final swap = <int>{};
@@ -47,8 +48,9 @@ int loadPlayerBoard(PlayerCore core, ShowEnv env) {
   for (final b in info.buttons) {
     final k = b.keys;
     final path = scenePath(env, b.name) ?? '';
-    final note = _int(k['trigger_midi_type'], -1) == 0 ? _int(k['trigger_midi_note'], -1) : -1;
-    final onote = _int(k['trigger_midiout_type'], -1) == 0 ? _int(k['trigger_midiout_note'], -1) : -1;
+    // Only the APC mini's pads (MIDI device 0). A button on another controller (the APC40) isn't on a pad here.
+    final note = _int(k['trigger_midi_type'], -1) == 0 && _int(k['trigger_midi_device'], 0) == 0 ? _int(k['trigger_midi_note'], -1) : -1;
+    final onote = _int(k['trigger_midiout_type'], -1) == 0 && _int(k['trigger_midiout_device'], 0) == 0 ? _int(k['trigger_midiout_note'], -1) : -1;
     core.addButton(
       b.sec,
       path,
@@ -195,6 +197,8 @@ Json _listButton(ShowEnv env, LiveButton b) {
   final steps = kind == 'scex' ? RegExp(r'<Step[ >]').allMatches(readText(path!)).length : 0;
   final color = k['color'] ?? '';
   final pad = k['trigger_midi_note'] ?? '';
+  // A pad only on the APC mini, MIDI device 0 (or no device written).
+  final onApcMini = RegExp(r'^0?$').hasMatch(k['trigger_midi_device'] ?? '');
   return {
     'sec': b.sec,
     'title': _title(b),
@@ -210,6 +214,6 @@ Json _listButton(ShowEnv env, LiveButton b) {
     'key': k['trigger_keyboard'] ?? '',
     'flash': psEq(k['bpm_trigger'] ?? '', 'flash_mode'),
     'beats': _beats(k['beats']),
-    'pad': _digitsRx.hasMatch(pad) ? int.parse(pad) : -1,
+    'pad': _digitsRx.hasMatch(pad) && onApcMini ? int.parse(pad) : -1,
   };
 }

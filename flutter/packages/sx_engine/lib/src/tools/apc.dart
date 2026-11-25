@@ -7,7 +7,8 @@ import '../show/show_env.dart';
 // APC MINI: which live button each APC mini mk2 pad plays, and moving,
 // swapping and clearing pad mappings. Pads: bottom row = notes 0-7, top row =
 // 56-63. A move changes the trigger note and the light (midiout) note
-// together, so the pad colours move with it. Only live.ini changes.
+// together, so the pad colours move with it. Only live.ini changes. Only MIDI
+// device 0 is the APC mini: buttons and faders on another controller are left alone.
 //
 // Port of `apc.ps1`.
 
@@ -22,7 +23,8 @@ ApcPreview apcPreview(ShowEnv env) {
   final info = LiveInfo.read(env);
   final pads = [
     for (final b in info.buttons)
-      if (b.keys.containsKey('trigger_midi_note'))
+      // A button on another controller (device 1 and up, the APC40) isn't an APC mini pad.
+      if (b.keys.containsKey('trigger_midi_note') && iniInt(b.keys['trigger_midi_device'], 0) == 0)
         ApcPad(
           sec: b.sec,
           page: b.page,
@@ -46,18 +48,20 @@ ApcPreview apcPreview(ShowEnv env) {
   final keys = psSorted<String>(info.live.keys.where(faderKey.hasMatch), [num]);
   final faders = [
     for (final k in keys)
-      () {
-        final n = num(k), mf = n - 1;
-        // PowerShell reads index -1 as the last fader, so fader0 shows the last caption.
-        final i = mf < 0 ? info.faders.length + mf : mf;
-        return ApcFader(
-          n: n,
-          cc: iniInt(info.live[k]),
-          type: iniInt(info.live['fader${n}_midi_type']),
-          channel: iniInt(info.live['fader${n}_midi_channel']),
-          caption: mf < info.faders.length && i >= 0 ? info.faders[i].caption : '',
-        );
-      }(),
+      // A fader on another controller is left out.
+      if (iniInt(info.live['fader${num(k)}_midi_device'], 0) == 0)
+        () {
+          final n = num(k), mf = n - 1;
+          // PowerShell reads index -1 as the last fader, so fader0 shows the last caption.
+          final i = mf < 0 ? info.faders.length + mf : mf;
+          return ApcFader(
+            n: n,
+            cc: iniInt(info.live[k]),
+            type: iniInt(info.live['fader${n}_midi_type']),
+            channel: iniInt(info.live['fader${n}_midi_channel']),
+            caption: mf < info.faders.length && i >= 0 ? info.faders[i].caption : '',
+          );
+        }(),
   ];
   return ApcPreview(show: env.root, pads: pads, faders: faders, buttons: info.buttons.length);
 }
@@ -80,6 +84,9 @@ String apcApply(ShowEnv env, List<ApcChange> changes) {
       throw ToolError('The show changed since this page was loaded (${c.title}). Press Refresh and try again. NOTHING was changed.');
     }
     if (!b.keys.containsKey('trigger_midi_note')) throw ToolError("${b.title} isn't on a pad. NOTHING was changed.");
+    if (iniInt(b.keys['trigger_midi_device'], 0) != 0) {
+      throw ToolError('${b.title} is on another MIDI controller, not the APC mini. NOTHING was changed.');
+    }
     final n = c.note;
     if (n != -1 && (n < 0 || n > 63)) throw ToolError('Pad note $n is not on the 8x8 grid. NOTHING was changed.');
     if (n != -1 && iniInt(b.keys['trigger_midi_type'], 0) != 0) {
@@ -98,7 +105,7 @@ String apcApply(ShowEnv env, List<ApcChange> changes) {
   for (final b in info.buttons) {
     if (!b.keys.containsKey('trigger_midi_note')) continue;
     final n = touched[b.sec] ?? iniInt(b.keys['trigger_midi_note']);
-    if (n < 0 || n > 63 || iniInt(b.keys['trigger_midi_type'], 0) != 0) continue;
+    if (n < 0 || n > 63 || iniInt(b.keys['trigger_midi_type'], 0) != 0 || iniInt(b.keys['trigger_midi_device'], 0) != 0) continue;
     final there = finalPads[n];
     if (there != null && (touched.containsKey(b.sec) || touched.containsKey(there.sec))) {
       throw ToolError('Two buttons would be on the same pad (${there.title} and ${b.title}). NOTHING was changed.');

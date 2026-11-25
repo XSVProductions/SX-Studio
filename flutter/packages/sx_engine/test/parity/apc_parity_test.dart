@@ -24,6 +24,34 @@ final sortedLines = ParityOptions(rewriteText: (t) => (t.split('\n')..sort()).jo
 void main() {
   parityTest('preview', script: 'apc.ps1', args: {'Action': 'Preview'}, dart: apcPreview);
 
+  // MIDI device 0 is the APC mini. A button or fader on device 1 is on another controller (the APC40).
+  void toDevice1(ShowEnv env, String sec) {
+    LiveIni.read(env)
+      ..setKey(sec, 'trigger_midi_device', '1')
+      ..save();
+  }
+
+  if (paritySkip == null) {
+    final first = apcPreview(ShowEnv(realShowPath!));
+    parityTest(
+      'preview leaves out a button and a fader on another controller',
+      script: 'apc.ps1',
+      args: {'Action': 'Preview'},
+      setup: (env) {
+        toDevice1(env, first.pads.first.sec);
+        LiveIni.read(env)
+          ..setKey('live', 'fader${first.faders.first.n}_midi_device', '1')
+          ..save();
+      },
+      dart: (env) {
+        final p = apcPreview(env);
+        expect(p.pads.map((x) => x.sec), isNot(contains(first.pads.first.sec)));
+        expect(p.faders.map((x) => x.n), isNot(contains(first.faders.first.n)));
+        return p;
+      },
+    );
+  }
+
   group('apply', () {
     if (paritySkip != null) return;
     final p = apcPreview(ShowEnv(realShowPath!));
@@ -56,6 +84,9 @@ void main() {
           ..save();
       },
     );
+
+    apcCase('a button on another controller does not hold its pad', () => [move(a, b.note)], setup: (env) => toDevice1(env, b.sec));
+    apcCase('refuses a button on another controller', () => [move(a, a.note)], setup: (env) => toDevice1(env, a.sec));
 
     apcCase('refuses an empty list', () => []);
     apcCase('refuses when the title no longer matches', () => [ApcChange(sec: a.sec, title: 'NOT THE TITLE', note: a.note)]);

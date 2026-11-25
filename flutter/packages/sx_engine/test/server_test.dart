@@ -87,7 +87,7 @@ void main() {
   test('a call without the token is refused', () async {
     final stranger = SxClient(client.base, token: 'guess');
     addTearDown(stranger.close);
-    await expectLater(stranger.speed(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 401)));
+    await expectLater(stranger.speed(), throwsA(isA<ApiException>().having((e) => e.status, 'status', 403)));
   });
 
   test('a save cannot be sent as a GET', () async {

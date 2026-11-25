@@ -97,7 +97,7 @@ void main() {
 
       final start = life.lastRequest;
       await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(await get('/api/settings'), 401);
+      expect(await get('/api/settings'), 403);
       expect(life.lastRequest, start);
       expect(await get('/api/settings', key: 't'), 200);
       expect(life.lastRequest.isAfter(start), isTrue);

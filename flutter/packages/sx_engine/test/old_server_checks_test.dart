@@ -59,6 +59,7 @@ void main() {
     );
     await engine.start();
     laptop = SxClient(Uri.parse('http://127.0.0.1:${engine.port}'), token: 'secret');
+    engine.phones.setOn(true);
     engine.phones.newPin();
     phoneKey = engine.phones.pair(engine.phones.pin);
     await engine.setPhoneListener(true);
@@ -111,13 +112,13 @@ void main() {
 
     test('a phone without a good key is told to pair again', () async {
       final (code, text) = await _post(engine.phonePort!, '/api/speed/apply', {'changes': []}, token: 'wrong');
-      expect(code, 401);
+      expect(code, 403);
       expect(jsonDecode(text), containsPair('error', 'Pair this phone again.'));
     });
 
     test('the laptop with a wrong token is sent to the icon', () async {
       final (code, text) = await _post(engine.port, '/api/speed/apply', {'changes': []}, token: 'wrong');
-      expect(code, 401);
+      expect(code, 403);
       expect(jsonDecode(text), containsPair('error', 'Open SX Studio from its icon.'));
     });
 

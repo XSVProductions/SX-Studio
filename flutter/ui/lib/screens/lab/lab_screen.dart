@@ -36,9 +36,30 @@ class LabScreen extends StatefulWidget {
   State<LabScreen> createState() => _LabScreenState();
 }
 
-/// A tap the screen already shows, waiting for a status that agrees, or
-/// for [until] to pass.
-typedef _Pending = ({bool on, DateTime until});
+/// A tap the screen already shows before the engine confirms it.
+///
+/// It goes when a status agrees. When the engine disagrees, the second
+/// status polled after the command was answered wins: the player rewrites
+/// its status file five times a second, so the first one can be older than
+/// the command.
+class _Pending {
+  _Pending(this.on);
+
+  final bool on;
+
+  /// The last poll started when the command was answered, or null before.
+  int? ackPoll;
+
+  /// Statuses seen from polls started after that.
+  var seen = 0;
+
+  /// Whether this status settles it: agrees, or is the second one after the answer.
+  bool settledBy(bool actual, int poll) {
+    if (actual == on) return true;
+    if (ackPoll case final a? when poll > a) seen++;
+    return seen >= 2;
+  }
+}
 
 class _LabScreenState extends State<LabScreen> {
   late final AppState _app = AppScope.read(context);
@@ -70,6 +91,9 @@ class _LabScreenState extends State<LabScreen> {
 
   Timer? _poll;
   var _visible = false;
+
+  /// Counts polls, so a tap can tell which statuses came after its answer.
+  var _pollSeq = 0;
 
   final _live = LabLive();
   final _bpmInput = TextEditingController();
@@ -180,6 +204,7 @@ class _LabScreenState extends State<LabScreen> {
     if (!_visible || widget.fixture != null) return;
     final g = _gen;
     final was = _running;
+    final seq = ++_pollSeq;
     LabStatus? r;
     try {
       r = await _client.labStatus();
@@ -198,7 +223,7 @@ class _LabScreenState extends State<LabScreen> {
         if (was && _ev == before) _err = (text: 'The player stopped. SX Studio lost it.', color: _amber);
         setState(() {});
       }
-      _draw();
+      _draw(poll: seq);
     }
     if (_poll == null) _schedule(Duration(milliseconds: _running ? 400 : 2000));
   }
@@ -224,13 +249,18 @@ class _LabScreenState extends State<LabScreen> {
 
   /// Puts the latest status on screen (drawLab). Only the notifiers whose
   /// value changed rebuild anything.
-  void _draw() {
+  ///
+  /// [poll] is the poll whose status this is, or null for a redraw.
+  void _draw({int? poll}) {
     final b = _board;
     if (b == null || !mounted) return;
     final st = _running ? _st : null;
     final on = {for (final p in st?.on ?? const <LabPlay>[]) p.slot: p};
     final now = DateTime.now();
-    _pending.removeWhere((sec, p) => now.isAfter(p.until) || on.containsKey(sec) == p.on);
+    if (poll != null && st != null) {
+      _pending.removeWhere((sec, p) => p.settledBy(on.containsKey(sec), poll));
+      if (_boPending?.settledBy(st.bo, poll) ?? false) _boPending = null;
+    }
     for (final page in placedPages(b, _lay, arranging: true)) {
       var playing = 0;
       for (final t in page.tiles) {
@@ -243,7 +273,6 @@ class _LabScreenState extends State<LabScreen> {
       _live.pageOn(page.page.id).value = page.collapsed ? playing : 0;
     }
 
-    if (_boPending case final p? when now.isAfter(p.until) || st?.bo == p.on) _boPending = null;
     _live.bo.value = _boPending?.on ?? st?.bo ?? false;
 
     if (st != null) {
@@ -357,22 +386,20 @@ class _LabScreenState extends State<LabScreen> {
     return r;
   }
 
-  /// Shows [secs] as on or off straight away, then sends [c]. The next
-  /// statuses confirm it; if the engine disagrees for 0.7 s after it
-  /// answered, the status wins.
+  /// Shows [secs] as on or off straight away, then sends [c]. See [_Pending].
   Future<void> _optimistic(Map<String, bool> secs, LabCmd c) async {
-    final soon = DateTime.now().add(const Duration(seconds: 3));
-    _pending.addAll({for (final e in secs.entries) e.key: (on: e.value, until: soon)});
+    final mine = {for (final e in secs.entries) e.key: _Pending(e.value)};
+    _pending.addAll(mine);
     _draw();
     await _cmd(
       c,
       settle: (r) {
-        final until = DateTime.now().add(const Duration(milliseconds: 700));
-        for (final s in secs.keys) {
-          if (!r.ok) {
+        for (final MapEntry(key: s, value: p) in mine.entries) {
+          if (!identical(_pending[s], p)) continue;
+          if (r.ok) {
+            p.ackPoll = _pollSeq;
+          } else {
             _pending.remove(s);
-          } else if (_pending[s] case final p?) {
-            _pending[s] = (on: p.on, until: until);
           }
         }
       },
@@ -410,10 +437,19 @@ class _LabScreenState extends State<LabScreen> {
   }, LabCmd.allOff);
 
   void _blackout() {
-    final want = !_live.bo.value;
-    _boPending = (on: want, until: DateTime.now().add(const Duration(seconds: 2)));
-    _live.bo.value = want;
-    _cmd(LabCmd.blackout(want), settle: (r) => _boPending = r.ok ? (on: want, until: DateTime.now().add(const Duration(milliseconds: 700))) : null);
+    final p = _boPending = _Pending(!_live.bo.value);
+    _live.bo.value = p.on;
+    _cmd(
+      LabCmd.blackout(p.on),
+      settle: (r) {
+        if (!identical(_boPending, p)) return;
+        if (r.ok) {
+          p.ackPoll = _pollSeq;
+        } else {
+          _boPending = null;
+        }
+      },
+    );
   }
 
   /// A fader moved. Sends at most one value per fader every 60 ms, the latest.
@@ -955,7 +991,9 @@ class _LabScreenState extends State<LabScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Checkbox(value: _reopen, onChanged: (v) => setState(() => _reopen = v ?? false)),
-                    const Text('Open ShowXpress again when I stop', style: TextStyle(color: Sx.dim, fontSize: 13)),
+                    const Flexible(
+                      child: Text('Open ShowXpress again when I stop', style: TextStyle(color: Sx.dim, fontSize: 13)),
+                    ),
                   ],
                 ),
               ),
@@ -1043,7 +1081,8 @@ class _LabScreenState extends State<LabScreen> {
     return SxCard(
       child: LayoutBuilder(
         builder: (context, box) {
-          final cols = math.max(1, ((box.maxWidth + 8) / (140 + 8)).floor());
+          // As many 160 px tiles as fit, but two on a phone.
+          final cols = math.max(box.maxWidth >= 2 * 130 + 8 ? 2 : 1, ((box.maxWidth + 8) / (160 + 8)).floor());
           final w = math.min(230.0, (box.maxWidth - 8 * (cols - 1)) / cols);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,

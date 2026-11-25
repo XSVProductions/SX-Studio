@@ -370,7 +370,7 @@ class FadersCard extends StatelessWidget {
         if (fs.isEmpty) const Text('The show has no speed faders.', style: Sx.sub),
         LayoutBuilder(
           builder: (context, box) {
-            final cols = ((box.maxWidth + 22) / (200 + 22)).floor().clamp(1, fs.isEmpty ? 1 : fs.length);
+            final cols = ((box.maxWidth + 22) / (130 + 22)).floor().clamp(1, fs.isEmpty ? 1 : fs.length);
             final w = (box.maxWidth - 22 * (cols - 1)) / cols;
             return Wrap(
               spacing: 22,

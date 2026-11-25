@@ -9,9 +9,14 @@ import 'dmx_output.dart';
 import 'efk_dmx.dart';
 
 /// DMX on the Mac, through the `sxh_dmx` helper the old app ships
-/// (`repo/mac/dmx/main.swift`). Chauvet's Mac driver is Intel only and has to
-/// be loaded on a program's main thread, which neither PowerShell nor a Dart
-/// isolate can promise, hence a separate small program.
+/// (`repo/mac/dmx/main.swift`). Chauvet's Mac driver has to be loaded on a
+/// program's main thread, which neither PowerShell nor a Dart isolate can
+/// promise, hence a separate small program.
+///
+/// ShowXpress comes as an Intel download and an Apple Silicon one, each with
+/// a driver for that chip only. The helper holds both kinds of code and
+/// [open] runs the kind the installed driver is. The old helper was Intel
+/// only, so it could not load the Apple Silicon driver.
 ///
 /// The helper speaks `dmx_out.ps1`'s stdin protocol: it keeps its own frame
 /// and sends it 40 times a second. [send] passes only the channels that
@@ -26,7 +31,10 @@ class HelperDmx implements DmxOutput {
   static Future<HelperDmx> open({required String helper, required String driverDir}) async {
     if (driverDir.isEmpty) throw DmxError('ShowXpress was not found in Applications, so its interface driver was not found either.');
     if (!File(helper).existsSync()) throw DmxError('The live aim part of SX Studio is missing - install SX Studio again.');
-    final proc = await Process.start(helper, ['--dir', driverDir]);
+    final args = [helper, '--dir', driverDir];
+    final proc = intelOnly(File(p.join(driverDir, 'efk_hardware.dylib')))
+        ? await Process.start('/usr/bin/arch', ['-x86_64', ...args])
+        : await Process.start(args.first, args.sublist(1));
     final err = proc.stderr.transform(utf8.decoder).join();
     final lines = StreamIterator(proc.stdout.transform(utf8.decoder).transform(const LineSplitter()));
     final String line;
@@ -91,6 +99,38 @@ class HelperDmx implements DmxOutput {
 
 Future<void> _drain(StreamIterator<String> lines) async {
   while (await lines.moveNext()) {}
+}
+
+/// True when the Mac program or library [f] holds Intel code and no Apple
+/// Silicon code. False when it can't be read or isn't one.
+bool intelOnly(File f) {
+  const intel = 0x01000007, arm = 0x0100000C;
+  final Uint8List head;
+  try {
+    final r = f.openSync();
+    try {
+      head = r.readSync(1024);
+    } finally {
+      r.closeSync();
+    }
+  } on FileSystemException {
+    return false;
+  }
+  if (head.length < 8) return false;
+  final d = ByteData.sublistView(head);
+  final cpus = <int>[];
+  switch (d.getUint32(0)) {
+    // a file for several chips: a count, then 20 bytes for each
+    case 0xCAFEBABE:
+      final n = d.getUint32(4);
+      for (var at = 8; cpus.length < n && at + 4 <= head.length; at += 20) {
+        cpus.add(d.getUint32(at));
+      }
+    // a file for one 64-bit chip
+    case 0xCFFAEDFE:
+      cpus.add(d.getUint32(4, Endian.little));
+  }
+  return cpus.contains(intel) && !cpus.contains(arm);
 }
 
 /// Where the helper sits: next to the app's own program, inside the app

@@ -20,8 +20,12 @@ mkdir -p "$B/payload" "$B/scripts"
 ditto "$ROOT/ui/build/macos/Build/Products/Release/SX Studio.app" "$APP"
 # the page phones and tablets load from the laptop
 ditto "$ROOT/ui/build/web" "$APP/Contents/Resources/web"
-# live output's DMX tool: ShowXpress's Mac driver is Intel only, so this tool is too (Rosetta on Apple Silicon)
-xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/packaging/mac/dmx/main.swift" -o "$APP/Contents/MacOS/sxh_dmx"
+# live output's DMX tool, for both chips: ShowXpress's driver is Intel or Apple Silicon depending on the download,
+# and the app runs the half that matches it (helper_dmx.dart)
+xcrun swiftc -O -target x86_64-apple-macos10.15 "$ROOT/packaging/mac/dmx/main.swift" -o "$B/sxh_dmx_x86_64"
+xcrun swiftc -O -target arm64-apple-macos11 "$ROOT/packaging/mac/dmx/main.swift" -o "$B/sxh_dmx_arm64"
+lipo -create "$B/sxh_dmx_x86_64" "$B/sxh_dmx_arm64" -output "$APP/Contents/MacOS/sxh_dmx"
+rm -f "$B/sxh_dmx_x86_64" "$B/sxh_dmx_arm64"
 chmod 755 "$APP/Contents/MacOS/sxh_dmx"
 
 # ad-hoc signature (Apple Silicon only runs signed code). The app changed after Flutter signed it, so sign again.

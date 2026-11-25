@@ -45,4 +45,45 @@ void main() {
       throwsA(isA<DmxError>().having((e) => e.message, 'message', dmxNotFound)),
     );
   });
+
+  test('tells an Intel-only driver from one with Apple Silicon code', () {
+    File lib(List<int> bytes) => File('${tmp.path}/efk_hardware.dylib')..writeAsBytesSync(bytes);
+    const intel = [0xCF, 0xFA, 0xED, 0xFE, 0x07, 0x00, 0x00, 0x01];
+    const arm = [0xCF, 0xFA, 0xED, 0xFE, 0x0C, 0x00, 0x00, 0x01];
+    List<int> both(List<List<int>> cpus) => [
+      0xCA,
+      0xFE,
+      0xBA,
+      0xBE,
+      0,
+      0,
+      0,
+      cpus.length,
+      for (final c in cpus) ...[...c, ...List.filled(16, 0)],
+    ];
+    expect(intelOnly(lib(intel)), isTrue);
+    expect(intelOnly(lib(arm)), isFalse);
+    expect(
+      intelOnly(
+        lib(
+          both([
+            [1, 0, 0, 7],
+          ]),
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      intelOnly(
+        lib(
+          both([
+            [1, 0, 0, 7],
+            [1, 0, 0, 0x0C],
+          ]),
+        ),
+      ),
+      isFalse,
+    );
+    expect(intelOnly(File('${tmp.path}/none.dylib')), isFalse);
+  });
 }

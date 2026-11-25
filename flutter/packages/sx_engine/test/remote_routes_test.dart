@@ -108,6 +108,15 @@ void main() {
     expect(hold.on, isTrue);
   });
 
+  test('live counts as PowerShell does: any non-empty, non-zero value holds', () async {
+    final hold = engine.liveHold;
+    for (final (v, held) in [(1, true), ('yes', true), (0, false), ('', false), (null, false)]) {
+      hold.clear();
+      await client.run('/api/sx/close', {'live': v});
+      expect(hold.on, held, reason: 'live: $v');
+    }
+  });
+
   test('the hold wears off after 180 seconds and ends when cleared', () {
     var now = DateTime(2026);
     final hold = LiveHold(now: () => now)..start();

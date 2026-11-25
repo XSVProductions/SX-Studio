@@ -169,7 +169,12 @@ Future<SxClient> boot() async {
   _addEventListener('beforeunload', stopLive.toJS);
   _addEventListener('pagehide', stopLive.toJS);
 
-  if (key.isNotEmpty && await _keyWorks(SxClient(client.base, token: key))) return client;
+  var off = false;
+  if (key.isNotEmpty) {
+    final (:works, :turnedOff) = await _keyWorks(SxClient(client.base, token: key));
+    if (works) return client;
+    off = turnedOff;
+  }
 
   // The pairing screen comes before the app, so it picks this device's
   // theme itself, the same way main does.
@@ -190,6 +195,7 @@ Future<SxClient> boot() async {
       home: PairScreen(
         client: SxClient(client.base, token: ''),
         onPaired: paired.complete,
+        off: off,
       ),
     ),
   );
@@ -198,19 +204,20 @@ Future<SxClient> boot() async {
   return client;
 }
 
-/// False when the laptop refuses the key. Asked with a plain client, so a
+/// [works] is false when the laptop refuses the key, and [turnedOff] says
+/// it refused because phone access is turned off. Asked with a plain client, so a
 /// refused key shows the pairing screen without a reload. A key that is no
 /// good any more is forgotten; with phone access turned off it is kept. A
 /// laptop that can't be reached right now is the app's "trying again"
 /// strip, not a pairing problem.
-Future<bool> _keyWorks(SxClient client) async {
+Future<({bool works, bool turnedOff})> _keyWorks(SxClient client) async {
   try {
     await client.settings();
-    return true;
+    return (works: true, turnedOff: false);
   } on ApiException catch (e) {
     final status = e.status ?? 0;
     if (_keyRefused(status, e.message)) _forget();
-    return status != 401 && status != 403;
+    return (works: status != 401 && status != 403, turnedOff: e.message.contains('turned off'));
   }
 }
 

@@ -188,6 +188,29 @@ void main() {
       return paired;
     }
 
+    testWidgets('with phone access turned off the pair screen says so, until a code is tried', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: sxTheme(),
+          home: PairScreen(
+            client: SxClient(
+              Uri.parse('http://laptop:47322'),
+              token: '',
+              client: MockClient((r) async => http.Response(jsonEncode({'ok': false, 'error': 'That code is not right.'}), 200)),
+            ),
+            onPaired: (_) {},
+            off: true,
+          ),
+        ),
+      );
+      const off = 'Phone access is turned off on the laptop (Settings, Phone & iPad).';
+      expect(find.text(off), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '123456');
+      await tester.pumpAndSettle();
+      expect(find.text(off), findsNothing);
+      expect(find.text('That code is not right.'), findsOneWidget);
+    });
+
     testWidgets('six digits pair the phone', (tester) async {
       String? sent;
       final paired = await pumpPair(tester, (r) async {

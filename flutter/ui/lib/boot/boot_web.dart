@@ -119,3 +119,6 @@ Future<bool> _keyWorks(SxClient client) async {
     return e.status != 401;
   }
 }
+
+/// Nothing to stop: the engine is the laptop, and it keeps running.
+Future<void> shutdown() async {}

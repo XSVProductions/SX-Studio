@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -5,6 +7,8 @@ import '../../app_state.dart';
 import '../../tabs.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../settings/settings_model.dart';
+import '../settings/update_card.dart';
 
 /// What a tile's small tag means, which sets its color.
 enum _Kind { step, live, tool }
@@ -47,50 +51,61 @@ const List<(String, List<_TileDef>)> _sections = [
 ];
 
 /// The start screen: the brand banner, then a tile per tab in the order a gig
-/// night runs.
+/// night runs. A tab hidden in Settings loses its tile, and a section with no
+/// tiles left goes too.
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context) => ScreenBody(
+  Widget build(BuildContext context) {
+    final m = SettingsModel.of(AppScope.of(context));
+    return ListenableBuilder(listenable: m, builder: (context, _) => _body(m));
+  }
+
+  Widget _body(SettingsModel m) => ScreenBody(
     bar: const SaveBar(hint: 'Pick a tab above to start. Nothing in the show changes until you save in a tab.'),
     children: [
       const _Hero(),
-      for (final (title, tiles) in _sections)
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
-              child: Text(title.toUpperCase(), style: Sx.label.copyWith(letterSpacing: 1.6, fontWeight: FontWeight.w600)),
-            ),
-            LayoutBuilder(
-              builder: (context, box) {
-                // Rows of equal-height tiles, four across, or two on a narrow screen.
-                final columns = box.maxWidth > 820 ? 4 : 2;
-                return Column(
-                  children: [
-                    for (var i = 0; i < tiles.length; i += columns)
-                      Padding(
-                        padding: EdgeInsets.only(top: i == 0 ? 0 : 10),
-                        child: IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var c = 0; c < columns; c++) ...[
-                                if (c > 0) const SizedBox(width: 10),
-                                Expanded(child: i + c < tiles.length ? _Tile(tiles[i + c]) : const SizedBox.shrink()),
+      for (final (title, all) in _sections)
+        if ([
+              for (final t in all)
+                if (t.id == 'settings' || !m.settings.tabHidden.contains(t.id)) t,
+            ]
+            case final tiles when tiles.isNotEmpty)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(2, 0, 2, 10),
+                child: Text(title.toUpperCase(), style: Sx.label.copyWith(letterSpacing: 1.6, fontWeight: FontWeight.w600)),
+              ),
+              LayoutBuilder(
+                builder: (context, box) {
+                  // Rows of equal-height tiles, four across, or two on a narrow screen.
+                  final columns = box.maxWidth > 820 ? 4 : 2;
+                  return Column(
+                    children: [
+                      for (var i = 0; i < tiles.length; i += columns)
+                        Padding(
+                          padding: EdgeInsets.only(top: i == 0 ? 0 : 10),
+                          child: IntrinsicHeight(
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                for (var c = 0; c < columns; c++) ...[
+                                  if (c > 0) const SizedBox(width: 10),
+                                  Expanded(child: i + c < tiles.length ? _Tile(tiles[i + c]) : const SizedBox.shrink()),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
-                      ),
-                  ],
-                );
-              },
-            ),
-          ],
-        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
     ],
   );
 }
@@ -141,17 +156,23 @@ class _Hero extends StatelessWidget {
                     Image.asset('assets/img/sx_logo.png', height: small ? 104 : 150, filterQuality: FilterQuality.medium),
                     SizedBox(width: small ? 16 : 26),
                     const Expanded(
-                      child: Text(
-                        'LIGHTING CONTROL FOR SHOWXPRESS',
-                        style: TextStyle(fontSize: 12, letterSpacing: 3, fontWeight: FontWeight.w600, color: Color(0xFFA3E635)),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'LIGHTING CONTROL FOR SHOWXPRESS',
+                            style: TextStyle(fontSize: 12, letterSpacing: 3, fontWeight: FontWeight.w600, color: Color(0xFFA3E635)),
+                          ),
+                          SizedBox(height: 6),
+                          UpdateLine(color: Color(0xFF8B93A3)),
+                        ],
                       ),
                     ),
                     if (!small)
                       ConstrainedBox(
                         constraints: const BoxConstraints(maxHeight: 74, maxWidth: 300),
-                        child: const _Screen(
-                          child: Image(image: AssetImage('assets/img/brand.png'), filterQuality: FilterQuality.medium),
-                        ),
+                        child: const _Screen(child: _Brand()),
                       ),
                   ],
                 ),
@@ -225,6 +246,37 @@ class _RenderScreen extends RenderProxyBox {
   }
 }
 
+/// The banner's image on the right: the user's own `brand.png` from the
+/// settings folder when there is one, otherwise the built-in one.
+class _Brand extends StatefulWidget {
+  const _Brand();
+
+  @override
+  State<_Brand> createState() => _BrandState();
+}
+
+class _BrandState extends State<_Brand> {
+  Uint8List? _own;
+
+  @override
+  void initState() {
+    super.initState();
+    AppScope.read(context).client.bytes('/brand.png').then((b) {
+      if (b != null && mounted) setState(() => _own = b);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final builtIn = Image.asset('assets/img/brand.png', filterQuality: FilterQuality.medium);
+    // a file that isn't a picture falls back to the built-in one
+    return switch (_own) {
+      final own? => Image.memory(own, filterQuality: FilterQuality.medium, errorBuilder: (_, _, _) => builtIn),
+      null => builtIn,
+    };
+  }
+}
+
 class _Tile extends StatefulWidget {
   const _Tile(this.def);
 
@@ -240,7 +292,7 @@ class _TileState extends State<_Tile> {
   @override
   Widget build(BuildContext context) {
     final def = widget.def;
-    final name = def.id == 'settings' ? 'Settings' : tabs.firstWhere((t) => t.id == def.id).name;
+    final name = def.id == 'settings' ? 'Settings' : SettingsModel.of(AppScope.read(context)).nameOf(tabs.firstWhere((t) => t.id == def.id));
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: InkWell(

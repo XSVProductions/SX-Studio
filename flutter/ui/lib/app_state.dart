@@ -38,6 +38,15 @@ class AppState extends ChangeNotifier {
 
   bool get sxOpen => status?.open ?? false;
 
+  /// Goes up each time the queue finished its saves. The show files changed,
+  /// so every screen's copy is stale (the old page's `reloadAll`). Screens
+  /// follow it with [ShowWatcher].
+  int queueRuns = 0;
+
+  /// Goes up each time ShowXpress goes from open to closed. It may have
+  /// saved the show on the way out.
+  int sxCloses = 0;
+
   /// Dark, light, or the same as this device (`ThemeMode.system`). Each
   /// device keeps its own choice, as the old app kept it in the browser.
   ThemeMode themeMode;
@@ -81,8 +90,14 @@ class AppState extends ChangeNotifier {
     if (_polling) return;
     _polling = true;
     try {
-      status = await client.status();
+      final was = status, now = await client.status();
+      status = now;
       connected = true;
+      if (was != null) {
+        if (was.open && !now.open) sxCloses++;
+        final at = now.queue.done?['at'];
+        if (at != null && at != was.queue.done?['at']) queueRuns++;
+      }
     } on ApiException {
       connected = false;
     } finally {

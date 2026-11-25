@@ -376,3 +376,32 @@ Future<void> showReport(BuildContext context, String title, String report, {Stri
     actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
   ),
 );
+
+/// For a screen that shows show files: says when its copy went stale. The
+/// old page's poll did this for every tab (`reloadAll`, and the reloads
+/// after `was&&!sxOpen`).
+mixin ShowWatcher<T extends StatefulWidget> on State<T> {
+  int? _runs, _closes;
+
+  /// The queue just saved into the show. Read everything again. Edits that
+  /// were waiting in the queue are saved now.
+  void onQueueRan();
+
+  /// ShowXpress just closed. Read again, unless the screen holds unsaved
+  /// edits.
+  void onSxClosed() {}
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final app = AppScope.of(context);
+    final (runs, closes) = (_runs, _closes);
+    _runs = app.queueRuns;
+    _closes = app.sxCloses;
+    if (runs != null && runs != app.queueRuns) {
+      onQueueRan();
+    } else if (closes != null && closes != app.sxCloses) {
+      onSxClosed();
+    }
+  }
+}

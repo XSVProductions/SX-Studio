@@ -58,3 +58,7 @@ List<T> psSorted<T>(Iterable<T> items, List<Comparable Function(T)> keys) {
   mergeSort(list, compare: cmp);
   return list;
 }
+
+/// `yyyy-MM-ddTHH:mm:ss` in local time: .NET's `ToString('s')`, which the old
+/// tools use for the times they save. It never follows the machine's culture.
+String sortableTime(DateTime t) => t.toIso8601String().substring(0, 19);

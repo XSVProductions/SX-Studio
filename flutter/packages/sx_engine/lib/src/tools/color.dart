@@ -244,11 +244,6 @@ String _sceneText(List<_Fixture> fixtures, List<(int, String, int)> Function(_Fi
   return sb.toString();
 }
 
-String _two(int n) => n.toString().padLeft(2, '0');
-
-/// .NET's `ToString('s')`: `yyyy-MM-ddTHH:mm:ss`, the same on every machine.
-String sortableTime(DateTime t) => '${t.year.toString().padLeft(4, '0')}-${_two(t.month)}-${_two(t.day)}T${_two(t.hour)}:${_two(t.minute)}:${_two(t.second)}';
-
 /// Writes [files] in order, each through [writeTextSafely]. When one fails,
 /// the files already written are put back as they were, and the error goes on.
 void writeAllOrNothing(List<({String path, String text, bool bom})> files) {

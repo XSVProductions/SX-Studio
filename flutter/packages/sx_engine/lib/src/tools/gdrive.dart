@@ -6,6 +6,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../show/show_env.dart';
 import '../show/text_files.dart';
+import '../ps_compat.dart';
 
 // SYNC TO / IMPORT FROM GOOGLE DRIVE: the show's copy in Google Drive > AWAAZ >
 // Lighting > <show folder name>, in the Google Drive app's own folder on this
@@ -72,9 +73,6 @@ class DriveFound {
   final String override;
   final bool appFound;
 }
-
-/// `yyyy-MM-ddTHH:mm:ss`, PowerShell's `ToString('s')`.
-String _sortable(DateTime t) => t.toIso8601String().substring(0, 19);
 
 String get _home => Platform.environment[Platform.isWindows ? 'USERPROFILE' : 'HOME'] ?? '.';
 
@@ -171,7 +169,7 @@ DriveInfo drivePreview(ShowEnv env, DrivePlaces at) {
     target: at.dest,
     last: _readKey(env.path(syncStateFile), 'synced'),
     srcFound: sf,
-    srcTime: sf ? _sortable(File(srcLive).lastModifiedSync()) : '',
+    srcTime: sf ? sortableTime(File(srcLive).lastModifiedSync()) : '',
     lastImport: _readKey(env.path(importStateFile), 'imported'),
     my: at.my,
     override: at.override,
@@ -283,7 +281,7 @@ String driveSync(ShowEnv env, DrivePlaces at) {
       for (final e in left.entries) e.key: {'size': e.value.size, 'time': e.value.time},
     },
   });
-  _writeState(env.path(syncStateFile), {'synced': _sortable(env.now()), 'target': dest});
+  _writeState(env.path(syncStateFile), {'synced': sortableTime(env.now()), 'target': dest});
   return [
     '  Google Drive folder: $dest',
     '  CHANGED  $copied file(s) copied, $same already up to date',
@@ -361,7 +359,7 @@ String driveImport(ShowEnv env, DrivePlaces at) {
     if (had) Directory(p.join(bk, bName)).renameSync(root);
     throw ToolError("Couldn't put the new show in place - the old show was put back, NOTHING was changed. ${e.message}");
   }
-  _writeState(env.path(importStateFile), {'imported': _sortable(t), 'from': dest, 'backup': bName});
+  _writeState(env.path(importStateFile), {'imported': sortableTime(t), 'from': dest, 'backup': bName});
   // keep the newest 3 backups
   final prefix = '$showName before import '.toLowerCase();
   final olds = [

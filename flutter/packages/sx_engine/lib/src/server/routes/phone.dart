@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:sx_api/sx_api.dart';
 
 import '../engine.dart';
+import '../../ps_compat.dart';
 import '../phone.dart';
 
 /// The Phone & iPad card. Laptop only. Pairing itself

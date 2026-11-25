@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
 import '../show/text_files.dart';
+import '../ps_compat.dart';
 
 // PHONE / iPAD: a phone on the same Wi-Fi opens the laptop's network port
 // (47322) and gets the same app. It is let in once with a 6-digit code shown
@@ -57,9 +58,6 @@ bool _sameBytes(List<int> a, List<int> b) {
 
 /// Compares two strings in time that depends only on their length.
 bool sameSecret(String a, String b) => _sameBytes(utf8.encode(a), utf8.encode(b));
-
-/// `yyyy-MM-ddTHH:mm:ss`, PowerShell's `ToString('s')`.
-String sortableTime(DateTime t) => t.toIso8601String().substring(0, 19);
 
 /// A short name for a phone from its browser's User-Agent.
 String phoneName(String userAgent) {

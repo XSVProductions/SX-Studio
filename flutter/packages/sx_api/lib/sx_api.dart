@@ -7,7 +7,6 @@ export 'src/json.dart';
 export 'src/lab.dart';
 export 'src/looks.dart';
 export 'src/gdrive.dart';
-export 'src/json.dart';
 export 'src/phone.dart';
 export 'src/settings.dart';
 export 'src/speed.dart';

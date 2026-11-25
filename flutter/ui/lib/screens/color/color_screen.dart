@@ -7,6 +7,7 @@ import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'color_wheel.dart';
+import 'on_the_lights.dart';
 
 /// Quick picks: decor colors couples ask for.
 const colorPresets = [
@@ -18,6 +19,64 @@ const colorPresets = [
 
 /// A color from the show or the one picked: data, not a theme color.
 Color hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
+
+/// The uplight channels for [hex] as `(index, value)`: what TONIGHTS COLOR
+/// UPLIGHT will hold, worked out the page's way (JavaScript rounding) for the
+/// preview on the lights. Port of `clWash` and `clUpVals`.
+List<(int, int)> uplightValues(String hex, List<String> chs) {
+  final c = [for (var i = 0; i < 6; i += 2) int.parse(hex.substring(i, i + 2), radix: 16)];
+  final mx = c.reduce(math.max), mn = c.reduce(math.min);
+  final v = {'dimmer': mx, 'red': 0, 'green': 0, 'blue': 0, 'white': 0};
+  if (mx > 0) {
+    if (!chs.contains('white')) {
+      v['red'] = jsRound(c[0] * 255 / mx);
+      v['green'] = jsRound(c[1] * 255 / mx);
+      v['blue'] = jsRound(c[2] * 255 / mx);
+    } else if (mx == mn) {
+      v['white'] = 255;
+    } else {
+      final k = 1 / (mx - mn), w = mn / mx;
+      v['red'] = jsRound(255 * (c[0] - mn) * k);
+      v['green'] = jsRound(255 * (c[1] - mn) * k);
+      v['blue'] = jsRound(255 * math.pow((c[2] - mn) * k, 1 - 0.85 * w));
+      v['white'] = jsRound(255 * (1 - math.pow(1 - w, 1.8)));
+    }
+  }
+  final zero = RegExp(r'^(dimmer|red|green|blue|white|amber|uv|strobe.*|.*macro.*|.*effect.*)$');
+  return [
+    for (final (i, n) in chs.indexed)
+      if (v[n] case final x?) (i, x) else if (zero.hasMatch(n)) (i, 0),
+  ];
+}
+
+/// What Tonight's Color sends to the lights: movers on the dance-floor center
+/// with their aim look and the nearest wheel color, uplights in the color.
+/// Nothing picked leaves the movers dark and the uplights at 0. Port of `cpPush`.
+LiveFrame colorFrame(ColorPreview d, List<LiveHead> heads, String hex) {
+  final on = hex.isNotEmpty;
+  final n140 = on ? nearestWheel(d.wheel140, hex) : null, n251 = on ? nearestWheel(d.wheel251, hex) : null;
+  final f = <String, String>{};
+  for (final h in heads) {
+    f['p${h.addr}'] = 's:${h.addr}:${h.addr + 1}:${h.c.$1}';
+    f['p${h.addr + 2}'] = 's:${h.addr + 2}:${h.addr + 3}:${h.c.$2}';
+    final n = h.is140 ? n140 : n251;
+    for (final (i, v) in h.look) {
+      final x = i == 5
+          ? n?.value ?? 0
+          : !on && (i == h.dimI || i == h.shutI)
+          ? 0
+          : v;
+      f['b${h.addr + i}'] = 'b:${h.addr + i}:$x';
+    }
+  }
+  for (final w in d.washFix) {
+    final vs = on ? uplightValues(hex, w.chs) : [for (var i = 0; i < w.chs.length; i++) (i, 0)];
+    for (final (i, v) in vs) {
+      f['b${w.addr + i}'] = 'b:${w.addr + i}:${v.clamp(0, 255)}';
+    }
+  }
+  return f;
+}
 
 /// "today at 7:11 AM", or "Mon, Nov 23 7:11 AM", from the saved `yyyy-MM-ddTHH:mm:ss`.
 String savedWhen(String saved, DateTime now) {
@@ -39,7 +98,7 @@ class ColorScreen extends StatefulWidget {
   State<ColorScreen> createState() => _ColorScreenState();
 }
 
-class _ColorScreenState extends State<ColorScreen> {
+class _ColorScreenState extends State<ColorScreen> with ShowWatcher {
   ColorPreview? _data;
   var _error = '';
 
@@ -52,20 +111,27 @@ class _ColorScreenState extends State<ColorScreen> {
   final _hexField = TextEditingController();
   final _hexFocus = FocusNode();
 
+  /// The color on the real lights while it is picked.
+  late final OnTheLights _lights = OnTheLights(AppScope.read(context), raw: false, frame: () => colorFrame(_data!, _lights.info?.heads ?? const [], _hex));
+
   @override
   void initState() {
     super.initState();
     _hexFocus.addListener(() {
       if (!_hexFocus.hasFocus) _typedHex();
     });
+    _lights.addListener(_relight);
     _load();
   }
+
+  void _relight() => setState(() {});
 
   @override
   void dispose() {
     _name.dispose();
     _hexField.dispose();
     _hexFocus.dispose();
+    _lights.dispose();
     super.dispose();
   }
 
@@ -90,12 +156,58 @@ class _ColorScreenState extends State<ColorScreen> {
     _markDirty();
   }
 
+  /// The queue saved a color into the show: read it again (the old `reloadAll`).
+  @override
+  void onQueueRan() => _load();
+
+  /// ShowXpress closed: read again unless a color is picked and not saved
+  /// (`if(CL&&!clDirty())loadColor()`).
+  @override
+  void onSxClosed() {
+    if (_data != null && !_dirty) _load();
+  }
+
   bool get _dirty {
     final d = _data;
     return d != null && _hex.isNotEmpty && (_hex != d.hex || _name.text.trim() != d.name);
   }
 
-  void _markDirty() => AppScope.read(context).setDirty('color', _dirty);
+  /// After every change: marks the tab and sends the color to the lights when they are on.
+  void _markDirty() {
+    AppScope.read(context).setDirty('color', _dirty);
+    if (_data != null) _lights.push();
+  }
+
+  /// "Show it on the lights". Port of `cpGo`.
+  void _lightsOn() => _lights.go(context, title: 'Close ShowXpress to show the colour on the lights?', again: 'Show it on the lights', onLost: _lightsLost);
+
+  void _lightsLost(String error) {
+    final reo = _lights.reopen;
+    final why = error.startsWith('The DMX output stopped') ? 'the DMX interface was unplugged, or SX Studio lost it.' : error;
+    showReport(context, 'Not on the lights', '', error: 'The preview on the lights stopped: $why${reo ? ' ShowXpress is opening again.' : ''}');
+    if (reo) _launchSx();
+  }
+
+  Future<void> _launchSx() async {
+    final app = AppScope.read(context);
+    try {
+      await app.client.sxLaunch();
+    } on ApiException {
+      // the top bar still offers Launch ShowXpress
+    }
+    await app.refresh();
+  }
+
+  /// Saving needs ShowXpress closed and the interface free: the preview ends
+  /// first, and ShowXpress opens again after when the box was ticked.
+  Future<void> _save() async {
+    final app = AppScope.read(context);
+    final reo = _lights.on && _lights.reopen;
+    await _lights.stop(reopen: false);
+    if (!mounted) return;
+    await runSave(context, () => app.client.colorApply(_hex, _name.text.trim()), after: _load);
+    if (reo) await _launchSx();
+  }
 
   /// Sets the color. Brightness follows it. [name] replaces the name unless [keepName].
   void _pick(String hex, {String name = '', bool keepName = false}) {
@@ -169,10 +281,7 @@ class _ColorScreenState extends State<ColorScreen> {
         hint: _hint(app),
         actions: [
           TextButton(onPressed: dirty ? _undo : null, child: const Text('Undo')),
-          FilledButton(
-            onPressed: dirty ? () => runSave(context, () => app.client.colorApply(_hex, _name.text.trim()), after: _load) : null,
-            child: const Text('Save'),
-          ),
+          FilledButton(onPressed: dirty ? _save : null, child: const Text('Save')),
         ],
       ),
       children: [
@@ -399,9 +508,72 @@ class _ColorScreenState extends State<ColorScreen> {
               ],
             ),
           ),
+        const SizedBox(height: 12),
+        if (!_lights.on)
+          OutlinedButton.icon(
+            onPressed: _lights.busy.isEmpty ? _lightsOn : null,
+            icon: const Icon(Icons.lightbulb_outline, size: 17),
+            label: const Text('Show it on the lights'),
+          )
+        else
+          _LiveBox(_lights),
+        if (_lights.busy.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_lights.busy, style: TextStyle(fontSize: 12.5, color: Sx.amber)),
+          ),
       ],
     );
   }
+}
+
+/// The old `.clpv`: the color is live on the lights, with Stop.
+class _LiveBox extends StatelessWidget {
+  const _LiveBox(this.lights);
+
+  final OnTheLights lights;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    decoration: BoxDecoration(
+      color: Sx.green.withValues(alpha: .07),
+      border: Border.all(color: Sx.green.withValues(alpha: .45)),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: 12.5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        spacing: 8,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: Sx.green,
+                  shape: BoxShape.circle,
+                  boxShadow: [BoxShadow(color: Sx.green, blurRadius: 8)],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Live on the lights',
+                  style: TextStyle(fontWeight: FontWeight.w700, color: Sx.text),
+                ),
+              ),
+              MiniButton('Stop', onPressed: lights.busy.isEmpty ? () => lights.stop(reopen: lights.reopen) : null),
+            ],
+          ),
+          ReopenBox(lights),
+          Text('ShowXpress is closed while this is on. Movers go to the dance-floor center on their nearest wheel colour.', style: TextStyle(color: Sx.dim)),
+        ],
+      ),
+    ),
+  );
 }
 
 class _Preset extends StatelessWidget {

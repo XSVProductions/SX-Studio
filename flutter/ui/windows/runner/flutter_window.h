@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -28,6 +30,13 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // "sx/window": tells Dart the window was closed or opened again, and lets
+  // Dart bring up another copy's window (see main.dart and boot_io.dart).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel_;
 };
+
+// The message a second start posts to the running copy's window to show it.
+UINT ShowWindowMessage();
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

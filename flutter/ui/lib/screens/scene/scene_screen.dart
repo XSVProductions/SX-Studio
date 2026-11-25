@@ -54,6 +54,19 @@ class _SceneScreenState extends State<SceneScreen> {
     _loadList();
   }
 
+  /// Another tab asked for a scene (the SX Player's "Edit scene", Looks'
+  /// "Change it in the Scene Editor"). Opens it as the old `seOpen(f)` did:
+  /// unsaved edits to the scene on screen are asked about first.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final f = AppScope.of(context).takeFile(_tab);
+    if (f == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _open(f);
+    });
+  }
+
   @override
   void dispose() {
     _app.removeListener(_onApp);

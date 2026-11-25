@@ -28,7 +28,7 @@ void main() {
         },
       ],
     },
-    '/api/scene': (_) => sceneJson(),
+    '/api/scene': (q) => sceneJson('${q['f']}'),
     '/api/scene/backups': (_) => {'ok': true, 'file': 'TEST SCENE.scex', 'backups': []},
     '/api/scene/save': (_) => {'ok': true, 'out': '  CHANGED  TEST SCENE: 1 value'},
     '/api/live/start': (_) => {'ok': true, 'test': true, 'iface': ''},
@@ -162,6 +162,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('STEPS'), findsOneWidget);
     expect(app.dirtyTabs, contains('scene'));
+    await finish(tester);
+  });
+
+  testWidgets('another tab can ask for a scene', (tester) async {
+    await pumpScreen(tester);
+    app.openFile('scene', 'OTHER.scex');
+    await tester.pumpAndSettle();
+    expect(find.text('OTHER'), findsOneWidget);
+    expect(find.text('STEPS'), findsOneWidget);
+    await finish(tester);
+  });
+
+  testWidgets('asked for another scene with unsaved edits, it asks first', (tester) async {
+    await pumpScreen(tester);
+    await openScene(tester);
+    await tester.tap(find.text('Copy step'));
+    await tester.pump();
+
+    app.openFile('scene', 'OTHER.scex');
+    await tester.pumpAndSettle();
+    expect(find.text('Leave this scene?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('TEST SCENE'), findsOneWidget);
+    expect(app.dirtyTabs, contains('scene'));
+
+    app.openFile('scene', 'OTHER.scex');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Leave it'));
+    await tester.pumpAndSettle();
+    expect(find.text('OTHER'), findsOneWidget);
+    expect(app.dirtyTabs, isEmpty);
     await finish(tester);
   });
 }

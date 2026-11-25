@@ -209,52 +209,53 @@ class _LookScreenState extends State<LookScreen> {
     );
   }
 
-  Widget _templates() => LayoutBuilder(
-    builder: (context, c) {
-      // the old `.lktpl`: four across, two up to 760 px
-      final cols = MediaQuery.sizeOf(context).width > 760 ? 4 : 2;
-      final w = (c.maxWidth - 10 * (cols - 1)) / cols;
-      return Wrap(
-        spacing: 10,
-        runSpacing: 10,
-        children: [
-          for (final t in LookTemplate.values)
-            SizedBox(
-              width: w,
-              child: InkWell(
-                key: Key('look-template-${t.name}'),
-                onTap: t == _t
-                    ? null
-                    : () => _changed(() {
-                        _t = t;
-                        _nameSet = false;
-                      }),
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: t == _t ? Sx.accent.withValues(alpha: .12) : Sx.panel,
-                    border: Border.all(color: t == _t ? Sx.accent : Sx.line),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        t.title,
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Sx.text),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(t.blurb, style: TextStyle(fontSize: 12, color: Sx.dim)),
-                    ],
-                  ),
-                ),
-              ),
+  /// The old `.lktpl` grid: four across, two up to 760 px, each row as tall as its tallest card.
+  Widget _templates() {
+    final cols = MediaQuery.sizeOf(context).width > 760 ? 4 : 2;
+    Widget card(LookTemplate t) => InkWell(
+      key: Key('look-template-${t.name}'),
+      onTap: t == _t
+          ? null
+          : () => _changed(() {
+              _t = t;
+              _nameSet = false;
+            }),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+        decoration: BoxDecoration(
+          color: t == _t ? Sx.accent.withValues(alpha: .12) : Sx.panel,
+          border: Border.all(color: t == _t ? Sx.accent : Sx.line),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              t.title,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Sx.text),
             ),
-        ],
-      );
-    },
-  );
+            const SizedBox(height: 2),
+            Text(t.blurb, style: TextStyle(fontSize: 12, color: Sx.dim)),
+          ],
+        ),
+      ),
+    );
+    const all = LookTemplate.values;
+    return Column(
+      spacing: 10,
+      children: [
+        for (var i = 0; i < all.length; i += cols)
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              spacing: 10,
+              children: [for (final t in all.skip(i).take(cols)) Expanded(child: card(t))],
+            ),
+          ),
+      ],
+    );
+  }
 
   // ---------------------------------------------------------------- options
 

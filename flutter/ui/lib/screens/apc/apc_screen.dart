@@ -22,10 +22,27 @@ class _ApcScreenState extends State<ApcScreen> {
   var _error = '';
   var _loading = true;
 
+  /// Whether the tab was on show at the last rebuild.
+  bool? _shown;
+
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  /// Opening the tab with nothing unsaved reads the pads again, since a Health
+  /// Check fix or another tab may have changed live.ini. The old page did this
+  /// by dropping its copy after a Health fix (`hlAfter`).
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shown = AppScope.of(context).tab == 'apc';
+    if (shown && _shown == false && !_loading && !(_e?.dirty ?? false)) {
+      _loading = true;
+      _load();
+    }
+    _shown = shown;
   }
 
   Future<void> _load() async {

@@ -5,9 +5,10 @@ import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import '../health/issue_row.dart';
+import '../settings/settings_bits.dart' show whenText;
 
-/// Pre-show Check: the show, the gear and the laptop in one look, plus a line
-/// for the Health Check. Checking changes nothing.
+/// Pre-show Check: the show, the gear and the laptop in one look, plus lines
+/// for the Health Check and the Google Drive backup. Checking changes nothing.
 class PreScreen extends StatefulWidget {
   const PreScreen(BuildContext _, {super.key});
 
@@ -43,11 +44,46 @@ PreItem? healthLine(HealthReport? h) {
   return const PreItem(group: 'Show', level: 'ok', title: 'Health Check: no problems in the show');
 }
 
+/// The Google Drive line the old page added last in the list.
+PreItem? driveLine(DriveInfo? g, {DateTime? now}) {
+  if (g == null) return null;
+  if (!g.found) {
+    return const PreItem(
+      group: 'Show',
+      level: 'info',
+      title: 'Google Drive not found on this laptop',
+      detail: "The show can't be backed up to Google Drive > AWAAZ > Lighting.",
+      advice: 'Install Google Drive for desktop and sign in.',
+    );
+  }
+  final n = now ?? DateTime.now(), last = DateTime.tryParse(g.last);
+  if (last != null && last.year == n.year && last.month == n.month && last.day == n.day) {
+    return PreItem(
+      group: 'Show',
+      level: 'ok',
+      title: 'Backed up to Google Drive ${whenText(g.last, now: n)}',
+    );
+  }
+  return PreItem(
+    group: 'Show',
+    level: 'warn',
+    title: g.last.isNotEmpty ? 'Last backed up to Google Drive ${whenText(g.last, now: n)}' : 'Show not backed up to Google Drive yet',
+    detail: 'A copy in Google Drive > AWAAZ > Lighting saves the night if this laptop dies.',
+    advice: 'Close ShowXpress (save first), sync, then open it again.',
+    fix: const PreFix(key: 'gsync', label: 'Sync now'),
+  );
+}
+
 class _PreScreenState extends State<PreScreen> {
   List<PreItem>? _items;
   var _error = '';
   var _loading = true;
   DateTime? _at;
+  DriveInfo? _drive;
+
+  /// Whether the tab was on show at the last rebuild. The old page checked
+  /// again each time the tab was opened.
+  bool? _shown;
 
   @override
   void initState() {
@@ -55,18 +91,31 @@ class _PreScreenState extends State<PreScreen> {
     _load();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final shown = AppScope.of(context).tab == 'pre';
+    if (shown && _shown == false && !_loading) _load();
+    _shown = shown;
+  }
+
   Future<void> _load() async {
     setState(() => _loading = true);
     final client = AppScope.read(context).client;
     try {
-      // The health check is only a line here; if it fails the rest still shows.
+      // Health Check and Google Drive are only a line each; if one fails the rest still shows.
       final health = client.health().then<HealthReport?>((h) => h, onError: (Object _) => null);
+      final drive = client.gdrive().then<DriveInfo?>((g) => g, onError: (Object _) => null);
       final pre = await client.preshow();
       final items = [...pre.items];
       final h = healthLine(await health);
       if (h != null) items.insert(items.length < 2 ? items.length : 2, h);
+      final g = await drive;
+      final d = driveLine(g);
+      if (d != null) items.add(d);
       if (!mounted) return;
       setState(() {
+        _drive = g;
         _items = items;
         _error = '';
         _at = DateTime.now();
@@ -93,10 +142,13 @@ class _PreScreenState extends State<PreScreen> {
     final key = i.fix!.key;
     if (key.startsWith('tab:')) return app.go(key.substring(4));
     if (key == 'launch') return runSave(context, app.client.sxLaunch, quiet: true);
+    if (key == 'gsync') return _sync();
     final ok = await askConfirm(context, i.title, confirmText('', [_ask[key] ?? '']), i.fix!.label);
     if (!ok || !mounted) return;
     await runSave(context, () => app.client.preshowFix(key), after: _load);
   }
+
+  Future<void> _sync() => runSave(context, AppScope.read(context).client.gdriveSync, after: _load);
 
   String _time(DateTime t) => '${t.hour % 12 == 0 ? 12 : t.hour % 12}:${t.minute.toString().padLeft(2, '0')} ${t.hour < 12 ? 'AM' : 'PM'}';
 
@@ -111,7 +163,10 @@ class _PreScreenState extends State<PreScreen> {
     return ScreenBody(
       bar: SaveBar(
         hint: _at == null || items == null ? '' : 'Checked at ${_time(_at!)}. Checking changes nothing; a fix button changes only what it says.',
-        actions: [FilledButton(onPressed: _loading ? null : _load, child: const Text('Check again'))],
+        actions: [
+          FilledButton(onPressed: _loading ? null : _load, child: const Text('Check again')),
+          OutlinedButton(onPressed: _drive?.found ?? false ? _sync : null, child: const Text('Sync to Google Drive')),
+        ],
       ),
       children: [
         SxCard(
@@ -144,7 +199,11 @@ class _PreScreenState extends State<PreScreen> {
                       advice: i.level == 'ok' ? '' : i.advice,
                       actions: [
                         if (i.fix != null && i.level != 'ok')
-                          MiniButton(i.fix!.label, primary: true, onPressed: i.fix!.key == 'launch' && app.sxOpen ? null : () => _fix(i)),
+                          MiniButton(
+                            i.fix!.label,
+                            primary: true,
+                            onPressed: (i.fix!.key == 'launch' || i.fix!.key == 'gsync') && app.sxOpen ? null : () => _fix(i),
+                          ),
                       ],
                     ),
                 ],

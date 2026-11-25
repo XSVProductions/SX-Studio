@@ -8,7 +8,7 @@ Its main tabs:
 
 - **Tonight's Rig:** you tick the heads that are hung tonight, and every chase scene on a live button (CHASE, SKIP AROUND, the BEAT scenes, SKIP FLASH...) drops the steps that would be dark without them. Only whole steps are taken out, and a step that also lights a blinder or uplight is always kept. The full scenes are kept in `rig_state.json` in the show folder, so ticking every head again puts them back exactly.
 - **Aim Movers:** you aim each head at the center of tonight's dancefloor (and, optionally, at one corner) in a single scene. The app writes the per-head offsets and sizes into every dancefloor movement scene, so all the patterns land on the floor. It also keeps the pattern shapes symmetrical.
-- **Skip Flash:** you tap the heads that are set up tonight, and the **SKIP FLASH** scene is rebuilt with only those heads. A head that isn't hung leaves a dark gap in the chase, so leaving it out keeps the flash smooth.
+- **Strobe:** you tap the heads that are set up tonight, and the **SKIP FLASH** scene is rebuilt with only those heads. A head that isn't hung leaves a dark gap in the chase, so leaving it out keeps the flash smooth.
 - **APC mini:** shows the 8x8 pad grid in each pad's own colours, with the scene and page each pad plays and what the four faders do. Tap a pad, then tap another one to move it there (or swap the two). It flags pads that fire two buttons, mappings outside the 64 pads, and pads whose scene is missing.
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
 - **Auto Show:** SX Studio presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
@@ -78,8 +78,8 @@ Pick the decor colour (quick picks, the wheel or a #hex code) and press **Save t
 
 **Pre-show Check** - one list of what to look at before the guests arrive. Where SX Studio can fix it there's a button (never sleep on the charger, USB power saving off, restart for Windows updates, launch ShowXpress, sync to Google Drive, or open the right tab).
 
-**Skip Flash**
-1. Close ShowXpress, open **SX Studio** and go to the **Skip Flash** tab.
+**Strobe**
+1. Close ShowXpress, open **SX Studio** and go to the **Strobe** tab (it used to be called Skip Flash).
 2. Tap the heads you have tonight (amber = in use). **All** / **None** work per model.
 3. Press **Save to SKIP FLASH**.
 
@@ -140,7 +140,7 @@ SX Studio never writes anything while ShowXpress is open. Changes you save while
 
 ## Phone & iPad
 
-SX Studio also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Skip Flash), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so SX Studio has to be open on it.
+SX Studio also runs on your iPhone and iPad over Wi-Fi: rig setup (Rig Test, Tonight's Rig, Strobe), **Aim live with your finger**, Tonight's Color, the Pre-show Check and the Auto Show. All the other tabs work there too. The laptop still does the work, so SX Studio has to be open on it.
 
 1. On the laptop, press **⚙** (top right) and go to **Phone & iPad** and tick **Let my phone and iPad connect**. The first time, Windows asks whether PowerShell may use the network: tick **Private networks** and press **Allow**. On a Mac, allow **pwsh** to accept incoming connections if macOS asks.
 2. On the iPhone or iPad, open **Safari** and go to the address shown there, e.g. `http://DJ-LAPTOP.local:47322`. The `.local` address stays the same at every venue; the number address changes with the network.

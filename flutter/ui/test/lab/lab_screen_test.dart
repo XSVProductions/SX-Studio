@@ -9,8 +9,9 @@ import 'lab_fixture.dart';
 
 TileState tileOf(WidgetTester t, String title) => t.widget<TileView>(find.ancestor(of: find.text(title), matching: find.byType(TileView))).state.value;
 
+/// Presses [yes] in the dialog on top.
 Future<void> confirm(WidgetTester t, String yes) async {
-  await t.tap(find.widgetWithText(FilledButton, yes));
+  await t.tap(find.descendant(of: find.byType(AlertDialog), matching: find.widgetWithText(FilledButton, yes)));
   await t.pump();
 }
 
@@ -24,7 +25,7 @@ void main() {
     expect(find.text('8 steps · BPM flash'), findsOneWidget);
     expect(find.text('scene file missing'), findsOneWidget);
     expect(find.text('[H] movement'), findsOneWidget);
-    expect(find.text('▶ Start the player'), findsOneWidget);
+    expect(find.text('Start the player'), findsOneWidget);
     await h.end();
   });
 
@@ -38,7 +39,7 @@ void main() {
     expect(s.cmds.single, {'cmd': 'press', 'sec': 'page1_button1'});
     expect(tileOf(t, 'RED').on, isTrue);
     expect(find.text('Playing on DMX USB. Tap a button to start or stop it.'), findsOneWidget);
-    expect(find.text('■ Stop the player'), findsOneWidget);
+    expect(find.text('Stop the player'), findsOneWidget);
     expect(find.text('TEMPO'), findsOneWidget);
     await h.end();
   });
@@ -80,8 +81,8 @@ void main() {
         ],
       );
     final h = await pumpLab(t, s);
-    expect(tileOf(t, 'RAINBOW CHASE').text, '▶ step 3 of 8');
-    expect(tileOf(t, 'CIRCLE').text, '▶ moving');
+    expect(tileOf(t, 'RAINBOW CHASE').text, 'step 3 of 8');
+    expect(tileOf(t, 'CIRCLE').text, 'moving');
     await t.tap(find.text('RAINBOW CHASE'));
     await t.pump();
     expect(tileOf(t, 'RAINBOW CHASE').on, isFalse);
@@ -134,11 +135,11 @@ void main() {
     final h = await pumpLab(t, s);
     await t.tap(find.text('Blackout'));
     await t.pump();
-    expect(find.text('● Blackout is ON'), findsOneWidget);
+    expect(find.text('Blackout is ON'), findsOneWidget);
     expect(s.cmds.last, {'cmd': 'bo', 'on': true});
     s.status = playerStatus(bo: true);
     await h.poll();
-    expect(find.text('● Blackout is ON'), findsOneWidget);
+    expect(find.text('Blackout is ON'), findsOneWidget);
     await h.end();
   });
 
@@ -222,7 +223,7 @@ void main() {
     await t.pump(const Duration(milliseconds: 500));
     await t.pump();
     expect(find.text('The player stopped. SX Studio lost it.'), findsOneWidget);
-    expect(find.text('▶ Start the player'), findsOneWidget);
+    expect(find.text('Start the player'), findsOneWidget);
     await h.end();
   });
 
@@ -235,7 +236,7 @@ void main() {
     await t.tap(find.text('RED'));
     await t.pump();
     await t.pump();
-    expect(find.text('▶ Start the player'), findsOneWidget);
+    expect(find.text('Start the player'), findsOneWidget);
     expect(find.text('The SX Player stopped.'), findsWidgets);
     await h.end();
   });
@@ -253,13 +254,13 @@ void main() {
         'test': false,
       };
     final h = await pumpLab(t, s);
-    await t.tap(find.text('⇄ Hand over to ShowXpress'));
+    await t.tap(find.text('Hand over to ShowXpress'));
     await t.pump();
     await confirm(t, 'Hand over');
     await t.pump();
     expect(s.posts.last.$1, '/api/lab/handoff');
     expect(find.text("Handed over: ShowXpress is starting. It will play RED, CIRCLE once it's ready."), findsOneWidget);
-    expect(find.text('▶ Start the player'), findsOneWidget);
+    expect(find.text('Start the player'), findsOneWidget);
     await h.end();
   });
 
@@ -272,7 +273,7 @@ void main() {
         ],
       );
     final h = await pumpLab(t, s);
-    await t.tap(find.text('■ Stop the player'));
+    await t.tap(find.text('Stop the player'));
     await t.pump();
     expect(find.text('Stop the player?'), findsOneWidget);
     await confirm(t, 'Stop the player');
@@ -296,7 +297,7 @@ void main() {
         'carried': ['RED'],
       };
     final h = await pumpLab(t, s);
-    await t.tap(find.text('▶ Start the player'));
+    await t.tap(find.text('Start the player'));
     await t.pump();
     await t.pump();
     expect(find.textContaining('The player carries on with what ShowXpress is playing now: RED.'), findsOneWidget);
@@ -321,12 +322,12 @@ void main() {
         'out': '',
       };
     final h = await pumpLab(t, s);
-    await t.tap(find.text('▶ Start the player'));
+    await t.tap(find.text('Start the player'));
     await t.pump();
     await t.pump();
     expect(find.text("Didn't work"), findsOneWidget);
     expect(find.textContaining('ShowXpress is open - it has to be closed'), findsOneWidget);
-    expect(find.text('▶ Start the player'), findsOneWidget);
+    expect(find.text('Start the player'), findsOneWidget);
     await h.end();
   });
 
@@ -389,7 +390,7 @@ void main() {
     await t.pump();
     await t.pump();
     expect(find.text('RED'), findsNothing);
-    expect(find.text('▶ 1 playing'), findsOneWidget);
+    expect(find.text('1 PLAYING'), findsOneWidget);
     expect(s.posts.last.$1, '/api/settings/set');
     expect((s.layout['collapsed']! as List), ['1']);
     await h.end();
@@ -398,7 +399,7 @@ void main() {
   testWidgets('Arrange: hide a page, move a page, make a player page with copies', (t) async {
     final s = Script();
     final h = await pumpLab(t, s);
-    await t.tap(find.text('⇅ Arrange'));
+    await t.tap(find.text('Arrange'));
     await t.pump();
 
     // Hide SETUP. It stays on screen, marked, while arranging.
@@ -409,7 +410,7 @@ void main() {
     expect(find.text('HIDDEN'), findsOneWidget);
 
     // MOVEMENTS up above COLORS.
-    await t.tap(find.widgetWithText(OutlinedButton, '▲').at(1));
+    await t.tap(find.byIcon(Icons.arrow_drop_up).at(1));
     await t.pump();
     await t.pump();
     expect(s.layout['pages'], ['2', '1', '3']);
@@ -420,7 +421,7 @@ void main() {
     });
 
     // A new page, with a show button and a file no button plays.
-    await t.tap(find.text('+ New page'));
+    await t.tap(find.text('New page'));
     await t.pump();
     await t.enterText(find.byType(TextField).last, '  First <dance>  ');
     await confirm(t, 'Make the page');
@@ -445,7 +446,7 @@ void main() {
     ]);
     expect(s.layout['pages'], ['2', '1', '3', 'x1']);
 
-    await t.tap(find.text('✓ Done'));
+    await t.tap(find.text('Done'));
     await t.pump();
     expect(find.text('SETUP'), findsNothing);
     expect(find.text('FIRST DANCE'), findsOneWidget);

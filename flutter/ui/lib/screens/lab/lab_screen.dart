@@ -155,9 +155,8 @@ class _LabScreenState extends State<LabScreen> {
     }
   }
 
-  static const _amber = Sx.amber;
-  static const _red = Sx.red;
-  static Note _plain(String t) => (text: t, color: Sx.text2);
+  static Note _plain(String t) => (text: t, tone: Tone.dim);
+  static Note _amber(String t) => (text: t, tone: Tone.amber);
 
   // ---- loading and polling
 
@@ -220,7 +219,7 @@ class _LabScreenState extends State<LabScreen> {
       final before = _ev;
       _event(r.event);
       if (was != _running) {
-        if (was && _ev == before) _err = (text: 'The player stopped. SX Studio lost it.', color: _amber);
+        if (was && _ev == before) _err = _amber('The player stopped. SX Studio lost it.');
         setState(() {});
       }
       _draw(poll: seq);
@@ -238,13 +237,16 @@ class _LabScreenState extends State<LabScreen> {
     }
     if (e.n == _ev) return;
     _ev = e.n;
-    final c = switch (e.kind) {
-      LabEventKind.back => Sx.green,
-      LabEventKind.lost || LabEventKind.gone => _red,
-      _ => _amber,
-    };
-    _toast(e.text, c);
-    if (e.kind == LabEventKind.handoff || e.kind == LabEventKind.gone || e.kind == LabEventKind.restart) _err = (text: e.text, color: c);
+    final n = (
+      text: e.text,
+      tone: switch (e.kind) {
+        LabEventKind.back => Tone.green,
+        LabEventKind.lost || LabEventKind.gone => Tone.red,
+        _ => Tone.amber,
+      },
+    );
+    _toast(n);
+    if (e.kind == LabEventKind.handoff || e.kind == LabEventKind.gone || e.kind == LabEventKind.restart) _err = n;
   }
 
   /// Puts the latest status on screen (drawLab). Only the notifiers whose
@@ -268,7 +270,7 @@ class _LabScreenState extends State<LabScreen> {
         final x = on[t.sec];
         final isOn = p?.on ?? x != null;
         if (isOn) playing++;
-        _live.tile(t).value = (on: isOn, text: isOn ? (x == null ? '▶ on' : playText(x)) : t.label);
+        _live.tile(t).value = (on: isOn, text: isOn ? (x == null ? 'on' : playText(x)) : t.label);
       }
       _live.pageOn(page.page.id).value = page.collapsed ? playing : 0;
     }
@@ -283,19 +285,19 @@ class _LabScreenState extends State<LabScreen> {
         if (_live.fader(k).value.$1 != n) _live.fader(k).value = (n, faderText(v));
       }
       _live.midi.value = st.midi.isNotEmpty
-          ? (text: '● ${st.midi} connected. Pads, pad lights and faders work.', color: Sx.green)
+          ? (text: '${st.midi} connected. Pads, pad lights and faders work.', dot: Tone.green, hollow: false)
           : _test
-          ? (text: 'Test copy: no MIDI (the APC is left alone).', color: Sx.dim)
-          : (text: '● No APC mini found. Plug it in, then stop and start the player.', color: _amber);
+          ? (text: 'Test copy: no MIDI (the APC is left alone).', dot: null, hollow: false)
+          : (text: 'No APC mini found. Plug it in, then stop and start the player.', dot: Tone.amber, hollow: false);
       _drawTempo(st, now);
     }
 
     final playErr = st != null && st.err.isNotEmpty ? "Couldn't play ${st.err}" : '';
-    if (playErr.isNotEmpty && playErr != _lastPlayErr) _toast(playErr, _red);
+    if (playErr.isNotEmpty && playErr != _lastPlayErr) _toast((text: playErr, tone: Tone.red));
     _lastPlayErr = playErr;
     _live.lost.value = st?.lost ?? false;
     _live.warn.value = (st?.warn ?? const []).join('\n');
-    _live.msg.value = playErr.isNotEmpty ? (text: playErr, color: _red) : _err;
+    _live.msg.value = playErr.isNotEmpty ? (text: playErr, tone: Tone.red) : _err;
   }
 
   /// The tempo card's part of [_draw] (lbBpmDraw).
@@ -314,16 +316,21 @@ class _LabScreenState extends State<LabScreen> {
     );
     if (!_bpmFocus.hasFocus && _bpmInput.text != bpm) _bpmInput.text = bpm;
     _live.os2l.value = st.os2l.isNotEmpty
-        ? (text: '● VirtualDJ is connected (${st.os2l}). The beat follows the music.', color: Sx.green)
+        ? (text: 'VirtualDJ is connected (${st.os2l}). The beat follows the music.', dot: Tone.green, hollow: false)
         : st.os2lPort != 0
         ? (_test
-              ? (text: 'Test copy: VirtualDJ link on test port ${st.os2lPort} (not announced).', color: Sx.dim)
+              ? (text: 'Test copy: VirtualDJ link on test port ${st.os2lPort} (not announced).', dot: null, hollow: false)
               : (
                   text:
-                      '○ Waiting for VirtualDJ (OS2L, port ${st.os2lPort}). With OS2L on in VirtualDJ it finds SX Studio by itself, on this computer or another one on the same Wi-Fi.',
-                  color: Sx.dim,
+                      'Waiting for VirtualDJ (OS2L, port ${st.os2lPort}). With OS2L on in VirtualDJ it finds SX Studio by itself, on this computer or another one on the same Wi-Fi.',
+                  dot: Tone.dim,
+                  hollow: true,
                 ))
-        : (text: "● VirtualDJ link off${st.os2lErr.isNotEmpty ? ': ${st.os2lErr}.' : " (OS2L is turned off in ShowXpress's settings)."}", color: _amber);
+        : (
+            text: "VirtualDJ link off${st.os2lErr.isNotEmpty ? ': ${st.os2lErr}.' : " (OS2L is turned off in ShowXpress's settings)."}",
+            dot: Tone.amber,
+            hollow: false,
+          );
   }
 
   /// 120 for 120.0, 123.5 for 123.46: JavaScript's `String(Math.round(x*10)/10)`.
@@ -332,7 +339,8 @@ class _LabScreenState extends State<LabScreen> {
     return r == r.truncateToDouble() ? '${r.toInt()}' : '$r';
   }
 
-  void _toast(String text, Color color) {
+  /// The old page's `.lbtoast`, for four seconds.
+  void _toast(Note n) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -342,11 +350,12 @@ class _LabScreenState extends State<LabScreen> {
           duration: const Duration(seconds: 4),
           backgroundColor: Sx.card,
           width: math.min(520, MediaQuery.sizeOf(context).width - 24),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Sx.line2),
+            side: BorderSide(color: Sx.line2),
           ),
-          content: Text(text, style: TextStyle(color: color, fontSize: 13.5)),
+          content: Text(n.text, style: TextStyle(color: n.tone == Tone.dim ? Sx.text : n.tone.color, fontSize: 13.5)),
         ),
       );
   }
@@ -370,8 +379,8 @@ class _LabScreenState extends State<LabScreen> {
     settle?.call(r);
     if (quiet && r.ok) return r;
     if (!r.ok) {
-      _err = (text: r.error, color: _amber);
-      _toast(r.error, _amber);
+      _err = _amber(r.error);
+      _toast(_err!);
       if (r.gone) {
         _gen++;
         _running = false;
@@ -411,8 +420,8 @@ class _LabScreenState extends State<LabScreen> {
     if (_arranging) return;
     _err = null;
     if (t.missing) {
-      _err = (text: '${t.title}: its file is missing.', color: _amber);
-      _toast(_err!.text, _amber);
+      _err = _amber('${t.title}: its file is missing.');
+      _toast(_err!);
       _draw();
       return;
     }
@@ -695,7 +704,7 @@ class _LabScreenState extends State<LabScreen> {
                 ? ". It will play ${r.titles.join(', ')} once it's ready."
                 : '.'}',
           )
-        : (text: "The player stopped, but ShowXpress didn't open: ${r.error} Press Launch ShowXpress at the top.", color: _red);
+        : (text: "The player stopped, but ShowXpress didn't open: ${r.error} Press Launch ShowXpress at the top.", tone: Tone.red);
     setState(() {});
     _draw();
     _pollNow();
@@ -713,13 +722,13 @@ class _LabScreenState extends State<LabScreen> {
       final r = await _client.savePlayerLayout(lay);
       if (!mounted) return;
       if (r == null) {
-        _toast("The layout wasn't saved.", _amber);
+        _toast(_amber("The layout wasn't saved."));
       } else {
         setState(() => _lay = r);
         _draw();
       }
     } on ApiException {
-      _toast("The layout wasn't saved. Lost connection.", _amber);
+      _toast(_amber("The layout wasn't saved. Lost connection."));
     }
   }
 
@@ -751,7 +760,7 @@ class _LabScreenState extends State<LabScreen> {
 
   Future<void> _newPage() async {
     if (_lay.custom.length >= 40) {
-      _toast("That's the most pages the player can have (40).", _amber);
+      _toast(_amber("That's the most pages the player can have (40)."));
       return;
     }
     final f = await askPageForm(context, title: 'New page', yes: 'Make the page');
@@ -780,7 +789,7 @@ class _LabScreenState extends State<LabScreen> {
     if (pick.isEmpty) return;
     final (lay, full) = addToPage(_lay, id, pick);
     await _saveLayout(lay);
-    if (full) _toast("A page holds 64 buttons. The rest weren't added.", _amber);
+    if (full) _toast(_amber("A page holds 64 buttons. The rest weren't added."));
   }
 
   Future<void> _editPage(PlayerPage c) async {
@@ -864,12 +873,15 @@ class _LabScreenState extends State<LabScreen> {
           _boardCard(),
         ],
       ),
+      // The old page's busy veil, without its spinner.
       if (_busy != null)
         Positioned.fill(
           child: ColoredBox(
-            color: const Color(0xB3000000),
+            color: Sx.bg.withValues(alpha: .7),
             child: Center(
-              child: SxCard(child: Text(_busy!, style: const TextStyle(fontSize: 15))),
+              child: SxCard(
+                child: Text(_busy!, style: TextStyle(fontSize: 15, color: Sx.text)),
+              ),
             ),
           ),
         ),
@@ -888,94 +900,105 @@ class _LabScreenState extends State<LabScreen> {
               "A movement only moves what it's set to (usually pan/tilt), so tap a colour scene as well. "
               'While it plays, the APC mini pads and speed faders, the keyboard keys, BPM (tap, type or VirtualDJ) and the Auto Show all work.',
           actions: [
-            OutlinedButton(
-              onPressed: _board == null ? null : () => setState(() => _arranging = !_arranging),
-              style: _arranging
-                  ? OutlinedButton.styleFrom(
-                      foregroundColor: Sx.accent,
-                      side: const BorderSide(color: Sx.accent),
-                    )
-                  : null,
-              child: Text(_arranging ? '✓ Arranging' : '⇅ Arrange'),
+            Tooltip(
+              message: "Order, hide and add pages and buttons (only here, ShowXpress's live screen stays as it is)",
+              child: MiniButton(
+                _arranging ? 'Arranging' : 'Arrange',
+                icon: _arranging ? Icons.check : Icons.swap_vert,
+                on: _arranging,
+                onPressed: _board == null ? null : () => setState(() => _arranging = !_arranging),
+              ),
             ),
           ],
         ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () => setState(() => _gigHelp = !_gigHelp),
-            style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4), foregroundColor: Sx.dim),
-            child: Text(_gigHelp ? '▾ At a gig' : '▸ At a gig'),
+        const SizedBox(height: 8),
+        InkWell(
+          onTap: () => setState(() => _gigHelp = !_gigHelp),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(_gigHelp ? Icons.arrow_drop_down : Icons.arrow_right, size: 18, color: Sx.dim),
+              Text('At a gig', style: TextStyle(fontSize: 13, color: Sx.dim)),
+            ],
           ),
         ),
         if (_gigHelp)
-          const Text(
-            'Hand over to ShowXpress stops the player and opens ShowXpress straight away, and ShowXpress carries on with what was playing '
-            '(starting the player does the same the other way round). If the DMX interface gets unplugged the player waits and carries on '
-            "when it's plugged back in. If the player itself stops, SX Studio starts it again. If someone opens ShowXpress, the player hands over to it. "
-            "The laptop doesn't sleep while the player runs. Scenes, chases and movements were checked against ShowXpress's own DMX output; "
-            "which button wins when two use the same light isn't measured yet.",
-            style: Sx.sub,
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Hand over to ShowXpress stops the player and opens ShowXpress straight away, and ShowXpress carries on with what was playing '
+              '(starting the player does the same the other way round). If the DMX interface gets unplugged the player waits and carries on '
+              "when it's plugged back in. If the player itself stops, SX Studio starts it again. If someone opens ShowXpress, the player hands over to it. "
+              "The laptop doesn't sleep while the player runs. Scenes, chases and movements were checked against ShowXpress's own DMX output; "
+              "which button wins when two use the same light isn't measured yet.",
+              style: Sx.sub,
+            ),
           ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         _controls(),
         _messages(),
       ],
     ),
   );
 
-  static final _big = ButtonStyle(minimumSize: WidgetStateProperty.all(const Size(0, 44)));
-
   Widget _controls() {
+    final busy = _busy != null;
     if (!_running) {
       return Wrap(
         alignment: WrapAlignment.spaceBetween,
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 12,
-        runSpacing: 10,
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          FilledButton(onPressed: _board == null || _busy != null ? null : () => _go(), style: _big, child: const Text('▶ Start the player')),
-          const Text(
-            'or just tap a scene below. The player starts and plays it. ShowXpress closes while the player runs (only one program can use the DMX interface).',
-            style: Sx.sub,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: _board == null || busy ? null : () => _go(),
+                icon: const Icon(Icons.play_arrow, size: 18),
+                label: const Text('Start the player'),
+              ),
+              Text(
+                'or just tap a scene below. The player starts and plays it. ShowXpress closes while the player runs (only one program can use the DMX interface).',
+                style: TextStyle(fontSize: 13, color: Sx.dim),
+              ),
+            ],
           ),
-          OutlinedButton(onPressed: _busy != null ? null : _load, style: _big, child: const Text('Reload the show')),
+          MiniButton('Reload the show', onPressed: busy ? null : _load),
         ],
       );
     }
     return Wrap(
       alignment: WrapAlignment.spaceBetween,
       crossAxisAlignment: WrapCrossAlignment.center,
-      spacing: 12,
-      runSpacing: 10,
+      spacing: 8,
+      runSpacing: 8,
       children: [
         Wrap(
           spacing: 8,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: Text(
-                '● Playing',
-                style: TextStyle(color: Sx.green, fontWeight: FontWeight.w700),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: Sx.tint(Sx.green, radius: 99),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Dot(Tone.green),
+                  Text(
+                    'Playing',
+                    style: TextStyle(color: Sx.green, fontSize: 12.5, fontWeight: FontWeight.w600),
+                  ),
+                ],
               ),
             ),
-            OutlinedButton(onPressed: _releaseAll, style: _big, child: const Text('Release all')),
+            MiniButton('Release all', onPressed: _releaseAll),
             ValueListenableBuilder(
               valueListenable: _live.bo,
-              builder: (context, bo, _) => OutlinedButton(
-                onPressed: _blackout,
-                style: bo
-                    ? OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 44),
-                        foregroundColor: Colors.black,
-                        backgroundColor: Sx.amber,
-                        side: const BorderSide(color: Sx.amber),
-                      )
-                    : _big,
-                child: Text(bo ? '● Blackout is ON' : 'Blackout'),
-              ),
+              builder: (context, bo, _) => MiniButton(bo ? 'Blackout is ON' : 'Blackout', icon: bo ? Icons.circle : null, on: bo, onPressed: _blackout),
             ),
           ],
         ),
@@ -990,8 +1013,13 @@ class _LabScreenState extends State<LabScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Checkbox(value: _reopen, onChanged: (v) => setState(() => _reopen = v ?? false)),
-                    const Flexible(
+                    SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: Checkbox(value: _reopen, onChanged: (v) => setState(() => _reopen = v ?? false)),
+                    ),
+                    const SizedBox(width: 4),
+                    Flexible(
                       child: Text('Open ShowXpress again when I stop', style: TextStyle(color: Sx.dim, fontSize: 13)),
                     ),
                   ],
@@ -999,66 +1027,89 @@ class _LabScreenState extends State<LabScreen> {
               ),
             Tooltip(
               message: 'Stops the player and opens ShowXpress straight away. It carries on with what was playing',
-              child: OutlinedButton(onPressed: _handoff, style: _big, child: const Text('⇄ Hand over to ShowXpress')),
+              child: MiniButton('Hand over to ShowXpress', icon: Icons.swap_horiz, onPressed: _handoff),
             ),
-            FilledButton(onPressed: _stop, style: _big, child: const Text('■ Stop the player')),
+            FilledButton.icon(onPressed: _stop, icon: const Icon(Icons.stop, size: 18), label: const Text('Stop the player')),
           ],
         ),
       ],
     );
   }
 
-  Widget _messages() => Padding(
-    padding: const EdgeInsets.only(top: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ValueListenableBuilder(
-          valueListenable: _live.lost,
-          builder: (context, lost, _) => lost
-              ? const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    "⚠ The DMX interface is unplugged. The lights aren't getting the show. Plug its USB cable back in: the player carries on by itself.",
-                    style: TextStyle(color: Sx.red, fontWeight: FontWeight.w600),
+  Widget _messages() => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      ValueListenableBuilder(
+        valueListenable: _live.lost,
+        builder: (context, lost, _) => !lost
+            ? const SizedBox.shrink()
+            : Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: Icon(Icons.warning_amber_rounded, size: 16, color: Sx.red),
+                        ),
+                      ),
+                      const TextSpan(
+                        text:
+                            "The DMX interface is unplugged. The lights aren't getting the show. Plug its USB cable back in: the player carries on by itself.",
+                      ),
+                    ],
                   ),
-                )
-              : const SizedBox.shrink(),
-        ),
-        ValueListenableBuilder(
-          valueListenable: _live.msg,
-          builder: (context, m, _) => m == null || m.text.isEmpty
-              ? const SizedBox.shrink()
-              : Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(m.text, style: TextStyle(color: m.color, fontSize: 13.5)),
+                  style: TextStyle(color: Sx.red, fontWeight: FontWeight.w600, fontSize: 13),
                 ),
-        ),
-        ValueListenableBuilder(valueListenable: _live.warn, builder: (context, w, _) => w.isEmpty ? const SizedBox.shrink() : _WarnList(w.split('\n'))),
-      ],
-    ),
+              ),
+      ),
+      ValueListenableBuilder(
+        valueListenable: _live.msg,
+        builder: (context, m, _) => m == null || m.text.isEmpty
+            ? const SizedBox.shrink()
+            : Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(m.text, style: TextStyle(color: m.tone.color, fontSize: 13)),
+              ),
+      ),
+      ValueListenableBuilder(valueListenable: _live.warn, builder: (context, w, _) => w.isEmpty ? const SizedBox.shrink() : _WarnList(w.split('\n'))),
+    ],
   );
 
-  Widget _arrangeBar() => SxCard(
+  /// The old page's `.arrbar`.
+  Widget _arrangeBar() => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    decoration: Sx.tint(Sx.accent, radius: 12),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Arrange', style: Sx.title),
-        const SizedBox(height: 4),
-        const Text(
-          'Drag a button to move it inside its page. The arrows move a whole page, and Hide takes a page out of the player. '
-          "New page makes a page that's only in the SX Player, with copies of any of the show's buttons. "
-          'Every change is saved straight away, for this computer, the phone and the iPad. ShowXpress and its live screen stay exactly as they are.',
-          style: Sx.sub,
+        Text.rich(
+          TextSpan(
+            children: [
+              TextSpan(
+                text: 'Arrange  ',
+                style: TextStyle(fontWeight: FontWeight.w700, color: Sx.text),
+              ),
+              const TextSpan(
+                text:
+                    'Drag a button to move it inside its page. The arrows move a whole page, and Hide takes a page out of the player. '
+                    "New page makes a page that's only in the SX Player, with copies of any of the show's buttons. "
+                    'Every change shows and is saved straight away, for this computer, the phone and the iPad. ShowXpress and its live screen stay exactly as they are.',
+              ),
+            ],
+          ),
+          style: TextStyle(fontSize: 13, color: Sx.text2, height: 1.4),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            OutlinedButton(onPressed: _newPage, child: const Text('+ New page')),
-            OutlinedButton(onPressed: _resetLayout, child: const Text("Reset to ShowXpress's order")),
-            FilledButton(onPressed: () => setState(() => _arranging = false), child: const Text('✓ Done')),
+            MiniButton('New page', icon: Icons.add, onPressed: _newPage),
+            MiniButton("Reset to ShowXpress's order", onPressed: _resetLayout),
+            MiniButton('Done', icon: Icons.check, on: true, onPressed: () => setState(() => _arranging = false)),
           ],
         ),
       ],
@@ -1071,7 +1122,7 @@ class _LabScreenState extends State<LabScreen> {
       return SxCard(
         child: Text(
           !_loaded ? 'Loading…' : (_boardError.isEmpty ? 'Could not read the show.' : _boardError),
-          style: Sx.sub.copyWith(color: _loaded ? Sx.red : Sx.dim),
+          style: TextStyle(fontSize: 13, color: _loaded ? Sx.red : Sx.dim),
         ),
       );
     }
@@ -1081,13 +1132,13 @@ class _LabScreenState extends State<LabScreen> {
     return SxCard(
       child: LayoutBuilder(
         builder: (context, box) {
-          // As many 160 px tiles as fit, but two on a phone.
-          final cols = math.max(box.maxWidth >= 2 * 130 + 8 ? 2 : 1, ((box.maxWidth + 8) / (160 + 8)).floor());
+          // `.lbb{flex:1 1 150px;min-width:140px;max-width:230px}` with 8 px gaps.
+          final cols = math.max(box.maxWidth >= 2 * 140 + 8 ? 2 : 1, ((box.maxWidth + 8) / (150 + 8)).floor());
           final w = math.min(230.0, (box.maxWidth - 8 * (cols - 1)) / cols);
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (placed.isEmpty) const Text('No live buttons in the show.', style: Sx.sub),
+              if (placed.isEmpty) Text('No live buttons in the show.', style: Sx.sub),
               for (final (i, p) in placed.indexed) _page(p, w, first: i == 0),
               if (!_arranging && nh > 0)
                 Padding(
@@ -1115,18 +1166,18 @@ class _LabScreenState extends State<LabScreen> {
       children: [
         InkWell(
           onTap: () => _saveLayout(_lay.copyWith(collapsed: toggled(_lay.collapsed, id))),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Tooltip(
-                  message: p.collapsed ? 'Open this page' : 'Collapse this page',
-                  child: Text(p.collapsed ? '▸' : '▾', style: const TextStyle(color: Sx.dim, fontSize: 13)),
-                ),
-                const SizedBox(width: 6),
-                Text(p.page.title.toUpperCase(), style: Sx.label),
-              ],
+          child: Tooltip(
+            message: p.collapsed ? 'Open this page' : 'Collapse this page',
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(p.collapsed ? Icons.arrow_right : Icons.arrow_drop_down, size: 18, color: Sx.dim),
+                  const SizedBox(width: 2),
+                  Text(p.page.title.toUpperCase(), style: Sx.label),
+                ],
+              ),
             ),
           ),
         ),
@@ -1136,44 +1187,56 @@ class _LabScreenState extends State<LabScreen> {
           valueListenable: _live.pageOn(id),
           builder: (context, n, _) => n == 0
               ? const SizedBox.shrink()
-              : Text(
-                  '▶ $n playing',
-                  style: const TextStyle(color: Sx.green, fontWeight: FontWeight.w600, fontSize: 12),
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.play_arrow, size: 13, color: Sx.green),
+                    Text(
+                      '$n PLAYING',
+                      style: Sx.label.copyWith(color: Sx.green, fontWeight: FontWeight.w600, letterSpacing: .5),
+                    ),
+                  ],
                 ),
         ),
         if (_arranging) ...[
-          _Mini('▲', () => _movePage(id, -1), tip: 'Move this page up'),
-          _Mini('▼', () => _movePage(id, 1), tip: 'Move this page down'),
-          _Mini(
-            p.hidden ? 'Unhide' : 'Hide',
-            () => _saveLayout(_lay.copyWith(hidden: toggled(_lay.hidden, id))),
-            tip: p.hidden
+          const SizedBox(width: 2),
+          IconMini(Icons.arrow_drop_up, () => _movePage(id, -1), tip: 'Move this page up'),
+          IconMini(Icons.arrow_drop_down, () => _movePage(id, 1), tip: 'Move this page down'),
+          Tooltip(
+            message: p.hidden
                 ? 'This page is hidden. Press to show it in the player again'
                 : 'Hide this page from the player (it still plays from the APC and the Auto Show)',
-            on: p.hidden,
+            child: MiniButton(
+              p.hidden ? 'Unhide' : 'Hide',
+              icon: p.hidden ? Icons.visibility : null,
+              on: p.hidden,
+              onPressed: () => _saveLayout(_lay.copyWith(hidden: toggled(_lay.hidden, id))),
+            ),
           ),
           if (custom != null) ...[
-            _Mini('+ Buttons', () => _addButtons(id)),
-            _Mini('Settings', () => _editPage(custom)),
-            _Mini('Delete', () => _deletePage(custom)),
+            MiniButton('Buttons', icon: Icons.add, onPressed: () => _addButtons(id)),
+            MiniButton('Settings', onPressed: () => _editPage(custom)),
+            MiniButton('Delete', onPressed: () => _deletePage(custom)),
           ],
         ],
       ],
     );
-    return Opacity(
-      opacity: _arranging && p.hidden ? .45 : 1,
-      child: Padding(
-        padding: EdgeInsets.only(top: first ? 0 : 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            head,
-            const SizedBox(height: 6),
-            if (!p.collapsed) Wrap(spacing: 8, runSpacing: 8, children: [for (final t in tiles) _arranging ? _dragTile(id, t, w, tiles) : _tile(t, w)]),
-            if (!p.collapsed && p.page.custom && tiles.isEmpty)
-              Text(_arranging ? 'No buttons yet. Press + Buttons.' : 'No buttons yet. Press Arrange, then + Buttons.', style: Sx.sub),
-          ],
-        ),
+    final dim = _arranging && p.hidden ? .45 : 1.0;
+    return Padding(
+      padding: EdgeInsets.only(top: first ? 0 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Opacity(opacity: dim, child: head),
+          const SizedBox(height: 6),
+          if (!p.collapsed)
+            Opacity(
+              opacity: dim,
+              child: Wrap(spacing: 8, runSpacing: 8, children: [for (final t in tiles) _arranging ? _dragTile(id, t, w, tiles) : _tile(t, w)]),
+            ),
+          if (!p.collapsed && p.page.custom && tiles.isEmpty)
+            Text(_arranging ? 'No buttons yet. Press Buttons.' : 'No buttons yet. Press Arrange, then Buttons.', style: Sx.sub),
+        ],
       ),
     );
   }
@@ -1199,9 +1262,13 @@ class _LabScreenState extends State<LabScreen> {
         builder: (context, _, _) => Draggable<String>(
           data: t.sec,
           dragAnchorStrategy: pointerDragAnchorStrategy,
+          // `.lbghost`: tilted, under the pointer.
           feedback: Transform.translate(
-            offset: Offset(-w / 2, -TileView.height / 2),
-            child: Material(type: MaterialType.transparency, child: view(delete: false)),
+            offset: Offset(-w / 2, -24),
+            child: Transform.rotate(
+              angle: -.035,
+              child: Material(type: MaterialType.transparency, child: view(delete: false)),
+            ),
           ),
           childWhenDragging: Opacity(opacity: .35, child: view(delete: false)),
           onDragStarted: () {
@@ -1216,6 +1283,7 @@ class _LabScreenState extends State<LabScreen> {
   }
 }
 
+/// A page's tag (`.pgtag`).
 class _Tag extends StatelessWidget {
   const _Tag(this.text);
 
@@ -1228,33 +1296,8 @@ class _Tag extends StatelessWidget {
       border: Border.all(color: Sx.line2),
       borderRadius: BorderRadius.circular(6),
     ),
-    child: Text(text, style: const TextStyle(fontSize: 9.5, letterSpacing: 1, color: Sx.mute)),
+    child: Text(text, style: Sx.label.copyWith(fontSize: 9.5, letterSpacing: 1, color: Sx.mute)),
   );
-}
-
-class _Mini extends StatelessWidget {
-  const _Mini(this.text, this.onPressed, {this.tip, this.on = false});
-
-  final String text;
-  final VoidCallback onPressed;
-  final String? tip;
-  final bool on;
-
-  @override
-  Widget build(BuildContext context) {
-    final b = OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(36, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-        foregroundColor: on ? Sx.accent : Sx.text,
-        side: BorderSide(color: on ? Sx.accent : Sx.line2),
-      ),
-      child: Text(text),
-    );
-    return tip == null ? b : Tooltip(message: tip!, child: b);
-  }
 }
 
 /// "Show check: 3 problems in the show", opening to the list.
@@ -1273,6 +1316,7 @@ class _WarnListState extends State<_WarnList> {
   @override
   Widget build(BuildContext context) {
     final n = widget.lines.length;
+    final style = TextStyle(color: Sx.amber, fontSize: 13);
     return Padding(
       padding: const EdgeInsets.only(top: 6),
       child: Column(
@@ -1280,10 +1324,16 @@ class _WarnListState extends State<_WarnList> {
         children: [
           InkWell(
             onTap: () => setState(() => _open = !_open),
-            child: Text('${_open ? '▾' : '▸'} Show check: $n problem${n > 1 ? 's' : ''} in the show', style: const TextStyle(color: Sx.amber, fontSize: 13.5)),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_open ? Icons.arrow_drop_down : Icons.arrow_right, size: 18, color: Sx.amber),
+                Flexible(child: Text('Show check: $n problem${n > 1 ? 's' : ''} in the show', style: style)),
+              ],
+            ),
           ),
           if (_open)
-            for (final l in widget.lines) Text(l, style: const TextStyle(color: Sx.amber, fontSize: 13)),
+            for (final l in widget.lines) Text(l, style: style),
         ],
       ),
     );

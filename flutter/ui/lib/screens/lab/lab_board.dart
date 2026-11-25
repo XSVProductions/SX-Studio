@@ -158,11 +158,12 @@ String faderText(double v) {
 }
 
 /// What a playing tile says instead of its kind.
+/// The screen puts a play icon in front.
 String playText(LabPlay p) => p.mv
-    ? '▶ moving'
+    ? 'moving'
     : p.of > 1
-    ? '▶ step ${p.step} of ${p.of}'
-    : '▶ on';
+    ? 'step ${p.step} of ${p.of}'
+    : 'on';
 
 /// Text typed into a page or button name, cleaned as the old page does (lbClean).
 String cleanName(String v) {

@@ -11,7 +11,7 @@ Future<bool> askUser(BuildContext context, String title, String text, String yes
         title: Text(title, style: Sx.title),
         content: SizedBox(
           width: 460,
-          child: Text(text, style: const TextStyle(color: Sx.text2, height: 1.4)),
+          child: Text(text, style: TextStyle(color: Sx.text2, height: 1.4)),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
@@ -25,15 +25,15 @@ Future<bool> askUser(BuildContext context, String title, String text, String yes
 Future<void> showFailure(BuildContext context, String error, {String out = ''}) => showDialog<void>(
   context: context,
   builder: (context) => AlertDialog(
-    title: const Text("Didn't work", style: Sx.title),
+    title: Text("Didn't work", style: Sx.title),
     content: SingleChildScrollView(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(error, style: const TextStyle(color: Sx.redText)),
-          const Padding(
-            padding: EdgeInsets.only(top: 8),
+          Text(error, style: TextStyle(color: Sx.redText)),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
             child: Text('Nothing was changed.', style: Sx.sub),
           ),
           if (out.trim().isNotEmpty)
@@ -41,7 +41,7 @@ Future<void> showFailure(BuildContext context, String error, {String out = ''}) 
               padding: const EdgeInsets.only(top: 12),
               child: SelectableText(
                 out,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Sx.dim),
+                style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Sx.dim),
               ),
             ),
         ],
@@ -91,7 +91,7 @@ class _PageFormState extends State<_PageForm> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Name', style: TextStyle(color: Sx.text2)),
+          Text('Name', style: TextStyle(color: Sx.text2)),
           const SizedBox(height: 6),
           TextField(controller: _name, autofocus: true, maxLength: 40, onSubmitted: (_) => _done()),
           CheckboxListTile(
@@ -101,7 +101,7 @@ class _PageFormState extends State<_PageForm> {
             controlAffinity: ListTileControlAffinity.leading,
             title: const Text('One at a time. A button here stops the others on this page (like MOVEMENTS)', style: TextStyle(fontSize: 14)),
           ),
-          const Text("This page is only in the SX Player. ShowXpress and its live screen don't change.", style: Sx.sub),
+          Text("This page is only in the SX Player. ShowXpress and its live screen don't change.", style: Sx.sub),
         ],
       ),
     ),
@@ -149,7 +149,7 @@ class _AddButtonsState extends State<_AddButtons> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Tick the buttons to copy onto this page. A copy plays the same scene with the same speed and BPM settings. It has no APC pad or key of its own.',
               style: Sx.sub,
             ),
@@ -173,7 +173,7 @@ class _AddButtonsState extends State<_AddButtons> {
                     controlAffinity: ListTileControlAffinity.leading,
                     contentPadding: EdgeInsets.zero,
                     title: Text(x.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    subtitle: Text(x.sub, style: const TextStyle(fontSize: 12, color: Sx.dim)),
+                    subtitle: Text(x.sub, style: TextStyle(fontSize: 12, color: Sx.dim)),
                   );
                 },
               ),

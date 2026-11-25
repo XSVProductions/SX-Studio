@@ -5,3 +5,4 @@ export 'src/client.dart';
 export 'src/json.dart';
 export 'src/speed.dart';
 export 'src/status.dart';
+export 'src/scene_edit.dart';

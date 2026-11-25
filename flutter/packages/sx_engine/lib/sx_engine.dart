@@ -16,3 +16,4 @@ export 'src/show/show_env.dart';
 export 'src/show/text_files.dart';
 export 'src/sx/sx_app.dart';
 export 'src/tools/speed.dart';
+export 'src/tools/scene_edit.dart';

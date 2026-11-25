@@ -159,7 +159,7 @@ class _LookScreenState extends State<LookScreen> {
     void say(String text, [String page = '']) => setState(() => _pageMsg = (text: text, page: page));
     PlayerLayout? lay;
     try {
-      lay = await client.playerLayout();
+      lay = (await client.settings()).settings.playerLayout;
     } on ApiException {
       lay = null;
     }
@@ -185,7 +185,11 @@ class _LookScreenState extends State<LookScreen> {
     );
     PlayerLayout? saved;
     try {
-      saved = await client.savePlayerLayout(lay.copyWith(custom: custom, pages: pages));
+      saved = (await client.settingsSet(
+        SettingsChange(
+          playerLayout: lay.copyWith(custom: custom, pages: pages),
+        ),
+      )).playerLayout;
     } on ApiException {
       saved = null;
     }
@@ -200,7 +204,7 @@ class _LookScreenState extends State<LookScreen> {
 
   Future<void> _loadLayout() async {
     try {
-      final l = await AppScope.read(context).client.playerLayout();
+      final l = (await AppScope.read(context).client.settings()).settings.playerLayout;
       if (!mounted) return;
       setState(() {
         _layout = l;

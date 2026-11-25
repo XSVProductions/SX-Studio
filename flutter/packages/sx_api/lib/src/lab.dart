@@ -639,14 +639,4 @@ extension LabApi on SxClient {
 
   /// Stops the player. The lights go out.
   Future<ToolResult> labStop() => run('/api/lab/stop');
-
-  /// The layout from `GET /api/settings`.
-  Future<PlayerLayout> playerLayout() => get('/api/settings', (j) => PlayerLayout.fromJson(j.obj('settings').obj('playerLayout')));
-
-  /// Saves the layout. Returns it as the server cleaned it up, or null when
-  /// the server said no. Throws when the engine can't be reached.
-  Future<PlayerLayout?> savePlayerLayout(PlayerLayout l) async {
-    final r = await run('/api/settings/set', {'playerLayout': l.toJson()});
-    return r.ok ? PlayerLayout.fromJson(r.extra.obj('settings').obj('playerLayout')) : null;
-  }
 }

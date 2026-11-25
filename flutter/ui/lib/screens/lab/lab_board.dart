@@ -88,6 +88,17 @@ LabKind fileKind(String file, List<String> files) {
   return file.toLowerCase().endsWith('.gpj') ? LabKind.gpj : LabKind.scex;
 }
 
+/// The editor tab that opens [file] (lbEditFile): the Movement Editor for a
+/// `.gpj`, the Scene Editor for a `.scex`, none for anything else.
+String? editorTab(String file) {
+  final l = file.toLowerCase();
+  return l.endsWith('.gpj')
+      ? 'move'
+      : l.endsWith('.scex')
+      ? 'scene'
+      : null;
+}
+
 /// A page as the board draws it: a show page or one of the player's own.
 class LabBoardPage {
   const LabBoardPage({required this.id, required this.name, required this.swap, required this.custom, required this.tiles, required this.n});

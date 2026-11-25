@@ -2125,14 +2125,17 @@ async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e
 function reloadAll(){// the queue just changed the show: read everything again (queued edits are now saved)
  // the Scene Editor is reopened only if it has no edits, or only the edits that were queued (SEQ); newer edits stay
  LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE&&(!seDirty()||JSON.stringify(seBody())===SEQ))seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
-async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
+// one failed poll is not enough to say the app has closed: try 5 times, 2 s apart, and keep trying after that
+let pollFail=0;
+async function poll(){try{const r=await api('/api/sx');pollFail=0;$('gone').style.display='';if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
  p.textContent=sxOpen?'ShowXpress open'+(Q&&Q.items.length?' · '+Q.items.length+' waiting':''):'ShowXpress closed ✓';$('sxgo').style.display=sxOpen?'none':'';$('sxstop').style.display=sxOpen?'':'none';
  updBar();updSkip();updRig();updApc();updSpeed();updHealth();updRt();updColor();updGd();updPre();updScene();
  if(was&&!sxOpen){load();if(S&&!dirty())loadSkip();if(R&&!rgDirty())loadRig();if(A&&!apDirty())loadApc();if(SP&&!spDirty())loadSpeed();if(H)loadHealth();if(RT&&!rtDirty())loadRt();if(CL&&!clDirty())loadColor();loadGd();}}
  catch(e){if(e&&e.message==='not paired')return;if(UPD){$('busyt').textContent='Update installed — opening the new version…';return;}
-  if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
+  if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}
+  if(++pollFail<5){setTimeout(poll,2000);return;}$('gone').style.display='flex';setTimeout(poll,5000);return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
 const TABS=['home','rt','rig','aim','skip','color','apc','apc40','speed','health','pre','auto','settings','lab','scene','move','look'];

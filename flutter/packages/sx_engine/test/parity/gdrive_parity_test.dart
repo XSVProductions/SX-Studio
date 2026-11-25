@@ -79,11 +79,10 @@ List<int> _maskState(String path, List<int> bytes) {
   return utf8.encode(jsonEncode({for (final k in j.keys.toList()..sort()) k: j[k]}));
 }
 
-/// Every file under [dir] except the new sync record, which only the port writes.
+/// Every file under [dir].
 Map<String, List<int>> _snapshot(String dir) => {
   for (final f in Directory(dir).listSync(recursive: true, followLinks: false).whereType<File>())
-    if (p.basename(f.path) != syncFilesFile)
-      p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, forCompare(f.path, f.readAsBytesSync())),
+    p.relative(f.path, from: dir).replaceAll(_stamp, 'before import <time>'): _maskState(f.path, forCompare(f.path, f.readAsBytesSync())),
 };
 
 /// PowerShell 7 reads `"2026-11-23T06:20:16"` from JSON as a date and prints
@@ -199,6 +198,23 @@ void main() {
           ..writeAsStringSync('changed on the other laptop')
           ..setLastModifiedSync(DateTime.now().add(const Duration(hours: 1)));
         File(p.join(l.show, 'scenes', 'NEW ONE.scex')).writeAsStringSync('<Scene/>');
+      },
+    );
+    _case(
+      'a file gone from the show stays on Google Drive',
+      'Sync',
+      setup: (l) {
+        _onDrive(l);
+        File(p.join(l.drive, 'scenes', 'DELETED HERE.scex')).writeAsStringSync('<Scene/>');
+        File(p.join(l.show, 'fixtures.ini')).deleteSync();
+      },
+    );
+    _case(
+      'the sync records stay here',
+      'Sync',
+      setup: (l) {
+        File(p.join(l.show, 'gdrive_sync.json')).writeAsStringSync('{"synced":"2001-01-01T00:00:00","target":"elsewhere"}');
+        File(p.join(l.show, 'gdrive_import.json')).writeAsStringSync('{"imported":"2001-01-01T00:00:00","from":"x","backup":""}');
       },
     );
   });

@@ -1,5 +1,7 @@
+import 'auto.dart';
 import 'client.dart';
 import 'json.dart';
+import 'remote.dart';
 
 /// One save waiting for ShowXpress to close.
 class QueueItem {
@@ -46,8 +48,14 @@ class SxStatus {
     live: j.boolean('live'),
     play: j.boolean('play'),
     pend: j.boolean('pend'),
-    auto: j.objOrNull('auto'),
-    rem: j.objOrNull('rem'),
+    auto: switch (j.objOrNull('auto')) {
+      final a? => AutoStatus.fromJson(a),
+      null => null,
+    },
+    rem: switch (j.objOrNull('rem')) {
+      final r? => RemoteLast.fromJson(r),
+      null => null,
+    },
   );
 
   /// ShowXpress is open.
@@ -63,13 +71,13 @@ class SxStatus {
   /// Button presses are waiting for ShowXpress to open.
   final bool pend;
 
-  /// Auto Show status, when it is running.
-  final Json? auto;
+  /// Auto Show status, or null when it never ran since the engine started.
+  final AutoStatus? auto;
 
-  /// Result of the last remote-control action.
-  final Json? rem;
+  /// The last automatic press (see `RemoteLast`), or null.
+  final RemoteLast? rem;
 
-  Json toJson() => {'open': open, 'q': queue.toJson(), 'live': live, 'play': play, 'pend': pend, 'auto': auto, 'rem': rem};
+  Json toJson() => {'open': open, 'q': queue.toJson(), 'live': live, 'play': play, 'pend': pend, 'auto': auto?.toJson(), 'rem': rem?.toJson()};
 }
 
 extension StatusApi on SxClient {

@@ -285,6 +285,19 @@ void main() {
     await h.end();
   });
 
+  testWidgets('stopping asks first while the Auto Show plays on the player, even with no button on', (t) async {
+    final s = Script()
+      ..running = true
+      ..status = playerStatus()
+      ..auto = {'running': true, 'target': 'player'};
+    final h = await pumpLab(t, s);
+    await t.tap(find.text('Stop the player'));
+    await t.pump();
+    expect(find.text('Stop the player?'), findsOneWidget);
+    expect(s.posts.where((p) => p.$1 == '/api/lab/stop'), isEmpty);
+    await h.end();
+  });
+
   testWidgets('starting closes ShowXpress first and carries on what it played', (t) async {
     final s = Script()
       ..sxOpen = true

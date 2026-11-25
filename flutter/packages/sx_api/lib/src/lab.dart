@@ -639,5 +639,4 @@ extension LabApi on SxClient {
 
   /// Stops the player. The lights go out.
   Future<ToolResult> labStop() => run('/api/lab/stop');
-
 }

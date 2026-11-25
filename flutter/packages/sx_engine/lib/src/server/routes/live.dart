@@ -8,6 +8,7 @@ import '../../show/show_env.dart';
 import '../../tools/aim/aim.dart';
 import '../api.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 import 'aim.dart';
 
 /// Live output's state between calls.
@@ -47,7 +48,7 @@ void registerLiveRoutes(Engine e) {
     Json info = const {};
     if (!raw) {
       try {
-        info = aimLiveInfo(e.show(), aimModeOf(req.body.str('mode'))).toJson();
+        info = aimLiveInfo(e.show(), aimModeOf(bodyText(req.body['mode']))).toJson();
       } on ToolError catch (err) {
         throw ToolError(err.message.isEmpty ? 'Could not read the show.' : err.message);
       }
@@ -80,7 +81,7 @@ void registerLiveRoutes(Engine e) {
   });
 
   e.api.post('/api/live/out', (req) {
-    var line = req.body.str('l');
+    var line = bodyText(req.body['l']);
     final tokens = line.split(' ');
     if (line.length > 60000 || tokens.any((t) => t.isNotEmpty && !_token.hasMatch(t))) {
       return {'ok': false, 'error': 'Bad output command.'};
@@ -112,7 +113,7 @@ void registerLiveRoutes(Engine e) {
   // Aim tab), run anything queued, open ShowXpress again
   e.api.post('/api/live/save', (req) async {
     await e.dmx.stopLive();
-    final mode = aimModeOf(req.body.str('mode'));
+    final mode = aimModeOf(bodyText(req.body['mode']));
     final aims = {for (final MapEntry(:key, :value) in req.body.obj('aims').entries) key: value is Map ? LiveAim.fromJson(value.cast()) : const LiveAim()};
     final res = <String, Object?>{'ok': false, 'saved': false, 'applied': false, 'error': '', 'out': '', 'applyError': ''};
     try {

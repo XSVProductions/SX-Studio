@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:sx_api/sx_api.dart';
 
+import '../ps_compat.dart';
 import 'api.dart';
 import 'engine.dart' show runRoute;
 
@@ -51,14 +52,15 @@ class SaveQueue {
     final detail = q.detail?.call(body) ?? '';
     final label = detail.isEmpty ? q.label : '${q.label} $detail';
     final before = _items.length;
-    _items.removeWhere((i) => i.key == key);
+    _items.removeWhere((i) => psEq(i.key, key));
     final replaced = _items.length != before;
     _items.add(_Item(key, label, route, body));
     return {'ok': true, 'queued': true, 'replaced': replaced, 'label': label, 'out': '', 'error': ''};
   }
 
-  /// Drops one queued save, or all of them when [key] is null.
-  void cancel([String? key]) => key == null ? _items.clear() : _items.removeWhere((i) => i.key == key);
+  /// Drops the queued save with [key] (case ignored), or all of them for `*`.
+  /// Port of `/api/queue/cancel`.
+  void cancel(String key) => _items.removeWhere((i) => psEq(i.key, key) || key == '*');
 
   Json info() => {
     'items': [

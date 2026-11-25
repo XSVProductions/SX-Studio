@@ -81,14 +81,25 @@ class SxStatus {
 }
 
 extension StatusApi on SxClient {
-  Future<SxStatus> status() => get('/api/sx', SxStatus.fromJson);
+  /// ShowXpress, the queue and what plays. Remembers whether ShowXpress is
+  /// open, so saves made meanwhile ask to be queued ([SxClient.sxOpen]).
+  Future<SxStatus> status() async {
+    final s = await get('/api/sx', SxStatus.fromJson);
+    sxOpen = s.open;
+    return s;
+  }
 
   Future<ToolResult> sxLaunch() => run('/api/sx/launch');
 
-  /// [force] kills ShowXpress without saving. Laptop only. [live] says live
+  /// [force] kills ShowXpress without saving. [live] says live
   /// aim or the SX Player wants the DMX interface next, so the save queue
   /// holds off reopening ShowXpress (for up to 180 seconds).
-  Future<ToolResult> sxClose({bool force = false, bool live = false}) => run('/api/sx/close', {'force': force, 'live': live});
+  /// After a force close the next saves run straight away, as the old page.
+  Future<ToolResult> sxClose({bool force = false, bool live = false}) async {
+    final r = await run('/api/sx/close', {'force': force, 'live': live});
+    if (force && r.ok) sxOpen = false;
+    return r;
+  }
 
   /// Drops one queued save, or all of them with key `*`.
   Future<ToolResult> queueCancel(String key) => run('/api/queue/cancel', {'key': key});

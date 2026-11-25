@@ -1,12 +1,11 @@
 import 'dart:async';
 
-import 'package:sx_api/sx_api.dart';
-
 import '../../ps_compat.dart';
 import '../../show/show_env.dart';
 import '../../tools/move_edit.dart';
 import '../api.dart';
 import '../engine.dart';
+import '../ps_body.dart';
 
 /// Makes the step scenes that follow a movement again after it changed.
 ///
@@ -40,12 +39,12 @@ void registerMoveRoutes(Engine e) {
     '/api/move/save',
     queue: Queueable(
       'Movement',
-      key: (b) => 'move-${b.str('move').toLowerCase()}',
-      detail: (b) => b.str('move').replaceFirst(RegExp(r'\.gpj$', caseSensitive: false), ''),
+      key: (b) => 'move-${bodyText(b['move']).toLowerCase()}',
+      detail: (b) => bodyText(b['move']).replaceFirst(RegExp(r'\.gpj$', caseSensitive: false), ''),
     ),
     (req) async {
       // Only the changes go to the tool, which changes just those lines of the .gpj.
-      final f = req.body.str('move');
+      final f = bodyText(req.body['move']);
       if (!isMoveName(f)) throw ToolError('Unknown movement.');
       List<Object?> items(String k) => switch (req.body[k]) {
         null => const [],
@@ -55,7 +54,7 @@ void registerMoveRoutes(Engine e) {
       final env = e.show();
       final out = moveSave(env, {
         'move': f,
-        'sha': req.body.str('sha'),
+        'sha': bodyText(req.body['sha']),
         'secs': items('secs'),
         'heads': items('heads'),
       }, backups: moveBackupsIn(e.settingsFolder));
@@ -64,11 +63,11 @@ void registerMoveRoutes(Engine e) {
   );
 
   e.api.post('/api/move/revert', (req) async {
-    final f = req.body.str('f'), id = req.body.str('id');
+    final f = bodyText(req.body['f']), id = bodyText(req.body['id']);
     if (!isMoveName(f) || !RegExp(r'^\d{8}-\d{6}-\d{3}$').hasMatch(id)) throw ToolError('Unknown backup.');
     if (e.sx.running) throw ToolError('ShowXpress is open. Close it (save first), then press Revert again.');
     final env = e.show();
-    return switch (moveRevert(env, f, id, force: req.body['force'] == true, backups: moveBackupsIn(e.settingsFolder))) {
+    return switch (moveRevert(env, f, id, force: psTruthy(req.body['force']), backups: moveBackupsIn(e.settingsFolder))) {
       MoveRevertConflict() => {'ok': true, 'conflict': true, 'out': ''},
       MoveReverted(:final out) => _afterChange(e, env, f, out),
     };

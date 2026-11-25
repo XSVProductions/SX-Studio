@@ -461,6 +461,28 @@ void main() {
     });
   });
 
+  test('a save request drops nulls as the old server did, and keeps other non objects to fail the checks', () {
+    final c = SceneChanges.fromJson({
+      'scene': 'CHASE.scex',
+      'sha': 'x',
+      'steps': [
+        null,
+        {
+          'src': 0,
+          'set': [null, false, 0, '', 'junk'],
+        },
+        7,
+      ],
+      'addch': [null, 0, 'junk'],
+      'delch': null,
+    });
+    expect(c.steps, hasLength(2));
+    expect(c.steps.first.set.single.ix, -1);
+    expect(c.steps.last.src, -1);
+    expect(c.addch.single.ix, -1);
+    expect(c.delch, isEmpty);
+  });
+
   group('beyond the old suite', () {
     late _Show s;
     setUp(() => s = _Show());

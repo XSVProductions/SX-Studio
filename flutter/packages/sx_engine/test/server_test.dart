@@ -96,6 +96,7 @@ void main() {
 
   test('a save made while ShowXpress is open waits, then runs and reopens it', () async {
     sx.running = true;
+    await client.status();
     final r = await client.speedApply(change);
     expect(r.extra['queued'], isTrue);
     expect(ini(), isNot(contains('masterspeedfader')), reason: 'nothing written while ShowXpress is open');

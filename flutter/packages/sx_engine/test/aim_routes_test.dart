@@ -98,6 +98,7 @@ void main() {
 
     test('while ShowXpress is open, apply and reset share one queue slot per mode', () async {
       sx.running = true;
+      await client.status();
       expect((await client.aimApply(AimMode.floor, w: 120, d: 120)).extra['label'], 'Aim Movers - Dance Floor');
       final reset = await client.aimHome(AimMode.floor);
       expect((reset.extra['label'], reset.extra['replaced']), ('Aim Movers (reset) - Dance Floor', true));

@@ -47,6 +47,27 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// The saves the engine queues while ShowXpress is open, when asked to. The
+/// old server's `$queueable` list.
+const queueablePaths = {
+  '/api/apply',
+  '/api/home',
+  '/api/aim/install',
+  '/api/color/apply',
+  '/api/skip/apply',
+  '/api/rig/apply',
+  '/api/apc/apply',
+  '/api/speed/apply',
+  '/api/health/fix',
+  '/api/rt/install',
+  '/api/rt/apply',
+  '/api/gdrive/sync',
+  '/api/gdrive/import',
+  '/api/remote/enable',
+  '/api/scene/save',
+  '/api/move/save',
+};
+
 /// HTTP client for the engine's `/api/...` routes.
 ///
 /// The laptop UI and the phone UI both go through this class, so every screen
@@ -60,6 +81,10 @@ class SxClient {
 
   /// The laptop's session token, or a paired phone's key.
   String token;
+
+  /// Whether ShowXpress was open at the last status poll (`status()`). While
+  /// it is, a save asks the engine to queue it, as the old page's `wq()` did.
+  bool sxOpen = false;
 
   final http.Client _http;
 
@@ -77,8 +102,12 @@ class SxClient {
 
   /// POST a state change. A refusal comes back as a [ToolResult] with
   /// `ok == false`, so screens can show the reason next to the button.
-  Future<ToolResult> run(String path, [Object? body]) async =>
-      ToolResult.fromJson(await _send(() => _http.post(_uri(path, null), headers: _headers, body: jsonEncode(body ?? const {}))));
+  ///
+  /// A save in [queueablePaths] made while [sxOpen] carries `queue: true`.
+  Future<ToolResult> run(String path, [Object? body]) async {
+    final sent = sxOpen && queueablePaths.contains(path) && (body == null || body is Map) ? {...?(body as Map?), 'queue': true} : body;
+    return ToolResult.fromJson(await _send(() => _http.post(_uri(path, null), headers: _headers, body: jsonEncode(sent ?? const {}))));
+  }
 
   /// GET a file the engine serves next to the API (`/brand.png`). Null when
   /// it isn't there or the engine can't be reached.

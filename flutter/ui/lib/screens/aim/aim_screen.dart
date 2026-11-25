@@ -6,6 +6,7 @@ import 'package:sx_api/sx_api.dart';
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../remote/remote_row.dart';
 import 'aim_widgets.dart';
 import 'live_aim_screen.dart';
 
@@ -46,6 +47,19 @@ const _words = {
   ),
 };
 
+/// The buttons the remote row turns on, per mode (the old `remSets`). The
+/// first one goes on by itself when the tab opens.
+const _remoteSets = {
+  AimMode.floor: [
+    RemoteSet('DF AIM (ADJUST)', ['DF AIM (ADJUST)']),
+    RemoteSet('DF CHECK 140 + 251', ['DF CHECK 140', 'DF CHECK 251']),
+  ],
+  AimMode.room: [
+    RemoteSet('ROOM AIM (ADJUST)', ['ROOM AIM (ADJUST)']),
+    RemoteSet('ROOM CHECK', ['ROOM CHECK']),
+  ],
+};
+
 enum _Tone { ok, warn, err, queued }
 
 /// The result card under the tabs, the old page's `#result`.
@@ -79,7 +93,7 @@ class AimScreen extends StatefulWidget {
   State<AimScreen> createState() => _AimScreenState();
 }
 
-class _AimScreenState extends State<AimScreen> {
+class _AimScreenState extends State<AimScreen> with ShowWatcher {
   var _mode = AimMode.floor;
   final _cache = <AimMode, AimPreview>{};
   AimPreview? _p;
@@ -102,6 +116,17 @@ class _AimScreenState extends State<AimScreen> {
     super.initState();
     _load();
   }
+
+  // The old poll: `reloadAll` takes the sizes from the show again for both
+  // modes, and a ShowXpress close reads the show but keeps the typed sizes.
+  @override
+  void onQueueRan() {
+    _sized.clear();
+    _load();
+  }
+
+  @override
+  void onSxClosed() => _load();
 
   Future<void> _load() async {
     final m = _mode;
@@ -502,6 +527,8 @@ class _AimScreenState extends State<AimScreen> {
               ),
             ),
           if (!phone) const SizedBox(height: 14),
+          // the old `#aimrem`: SX Studio presses the ADJUST scene or the CHECK buttons
+          RemoteRow(tab: 'aim', sets: _remoteSets[_mode]!),
           _liveCall(phone),
           const SizedBox(height: 14),
           Row(
@@ -924,10 +951,9 @@ class _NumBoxState extends State<_NumBox> {
     super.dispose();
   }
 
-  void _commit() {
-    widget.onChanged(num.tryParse(_c.text) ?? 100);
-    _c.text = '${widget.value}';
-  }
+  // The box shows the clamped value when the screen rebuilds ([didUpdateWidget]).
+  // Enter commits and then the blur commits again, so the text stays as typed until then.
+  void _commit() => widget.onChanged(num.tryParse(_c.text) ?? 100);
 
   @override
   Widget build(BuildContext context) => SizedBox(

@@ -6,6 +6,7 @@ import '../../sx/pending_presses.dart';
 import '../../tools/aim/aim.dart';
 import '../api.dart';
 import '../engine.dart';
+import 'move.dart';
 
 /// `"$($body.mode)" -eq 'room'` in the old server: anything else is the dance floor.
 AimMode aimModeOf(String mode) => psEq(mode, 'room') ? AimMode.room : AimMode.floor;
@@ -28,6 +29,21 @@ void registerAimRoutes(Engine e) {
     detail: (b) => aimModeOf(b.str('mode')) == AimMode.room ? '- Room' : '- Dance Floor',
   );
 
+  // A saved or reverted GRAND ENTRANCE.gpj makes its step scene again
+  // (`Update-MoveScenes`). The old server ran `-Action Rebuild` through
+  // `Invoke-Engine`, so any failure became a warning line, not a failed save.
+  e.provide(
+    MoveSavedHook((env) {
+      try {
+        aimRebuild(env);
+      } on ToolError {
+        rethrow;
+      } catch (x) {
+        throw ToolError('$x');
+      }
+    }),
+  );
+
   e.api.get('/api/preview', (req) => aimPreview(e.show(), aimModeOf(req.query['mode'] ?? '')));
 
   e.api.post('/api/apply', queue: aimQueue, (req) {
@@ -48,7 +64,8 @@ void registerAimRoutes(Engine e) {
   e.api.post('/api/aim/install', queue: const Queueable('ROOM buttons on the SETUP page'), (req) => aimInstall(e.show(), AimMode.room));
 }
 
-/// `aimApply` with the old server's input check for `/api/apply`.
+/// `aimApply` with the old server's input check for `/api/apply`. The route
+/// also runs for `/api/live/save`, as the old `Invoke-Action '/api/apply'`.
 String applyAims(ShowEnv env, Json body) {
   final w = psInt(body['w']), d = psInt(body['d']);
   if (w < 20 || w > 300 || d < 20 || d > 300) throw ToolError('Size must be 20-300%.');

@@ -81,7 +81,7 @@ A release tagged `v...` is what every installed SX Studio updates to, so the two
 1. In `build.yml`, change `tags: ['v*']` to `tags: ['legacy-v*']`.
 2. In `flutter.yml`, change `tags: ['flutter-v*']` to `tags: ['v*']`.
 
-Until then, try the whole release path without touching anyone's install: push a `flutter-v2.0.0` tag, let `flutter.yml` build, and stop before step 4 of the next section. `HANDOVER.md` has the checks to do before the switch.
+Until then, to try the whole release path without touching anyone's install, push a `flutter-v2.0.0` tag, let `flutter.yml` build, and stop before step 4 of the next section. `HANDOVER.md` has the checks to do before the switch.
 
 ## 5. Every release
 

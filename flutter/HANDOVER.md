@@ -1,4 +1,4 @@
-# Handover: the Flutter port of SX Studio
+# Handover for the Flutter port of SX Studio
 
 For the coding agent picking this up, and for the maintainer. Written 25 November 2026.
 
@@ -54,7 +54,7 @@ cd ui && flutter test                                  # 220 tests
 cd ui && flutter run -d windows                        # the app
 ```
 
-The engine suite's weight is in `test/parity`, the old-versus-new checks. Each runs the PowerShell tool from `../src` and its Dart port on the same copy of a real show, then compares the answer and every file left behind, byte for byte. They need PowerShell on PATH and `SX_SHOW` set to a real show folder. Without those they skip themselves and the suite still passes, so a green run with no `SX_SHOW` proves much less. Set it.
+The engine suite's weight is in `test/parity`, the old-versus-new checks. Each runs the PowerShell tool from `../src` and its Dart port on the same copy of a real show, then compares the answer and every file left behind, byte for byte. They need PowerShell on PATH and `SX_SHOW` set to a real show folder. Without those they skip themselves and the suite still passes, with 377 engine tests run where 843 would. A green run with no `SX_SHOW` proves much less, and that is what GitHub's run is, because a show folder is never in git. Set it on your own machine.
 
 The counts above are from Linux with PowerShell 7. The suites also pass on Windows with Windows PowerShell 5.1, which matters because the two PowerShells differ (number formatting, sort order of ties, JSON layout) and the port follows 5.1.
 
@@ -153,4 +153,4 @@ Step 5 is the point of no easy return. An installed PowerShell app that updates 
 - **Oldest Mac.** The Flutter app needs macOS 12 or newer. The PowerShell app's `Info.plist` says 10.15.
 - **The kept bugs** in the list above. Fix them here, in `../src`, or both.
 - **When to switch.** Nothing forces a date. The two apps can sit side by side as long as changes to `../src` keep getting ported.
-- **Fixes for the PowerShell app.** A separate pull request, `audit-fixes`, has twelve small fixes to `../src` found while porting (write safety, a phone being able to restart the laptop, unescaped show names on the page, and others). They are independent of this folder. The port already behaves the fixed way.
+- **Fixes for the PowerShell app.** Twelve small fixes to `../src` turned up while porting: write safety, a phone being able to restart the laptop, unescaped show names on the page, and others. They sit on a separate branch, not in this pull request, and can be sent as their own if wanted. The port already behaves the fixed way.

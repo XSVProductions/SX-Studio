@@ -91,7 +91,12 @@ class _RigScreenState extends State<RigScreen> with ShowWatcher, RigReloads {
       for (final h in _data!.heads)
         if (_hung.contains(h.id)) h.id,
     ], _flip),
-    after: load,
+    what: 'rig',
+    busy: "Saving tonight's rig.",
+    after: () async {
+      await load();
+      if (mounted) AppScope.read(context).showEdited();
+    },
   );
 
   String _hint(AppState app) {

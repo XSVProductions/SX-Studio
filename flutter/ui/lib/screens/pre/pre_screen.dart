@@ -3,6 +3,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
+import '../../sx_control.dart';
 import '../../widgets/sx_widgets.dart';
 import '../health/issue_row.dart';
 import '../settings/settings_bits.dart' show whenText;
@@ -148,14 +149,14 @@ class _PreScreenState extends State<PreScreen> with ShowWatcher {
     final app = AppScope.read(context);
     final key = i.fix!.key;
     if (key.startsWith('tab:')) return app.go(key.substring(4));
-    if (key == 'launch') return runSave(context, app.client.sxLaunch, quiet: true);
+    if (key == 'launch') return launchSx(context);
     if (key == 'gsync') return _sync();
     final ok = await askConfirm(context, i.title, confirmText('', [_ask[key] ?? '']), i.fix!.label);
     if (!ok || !mounted) return;
-    await runSave(context, () => app.client.preshowFix(key), after: _load);
+    await runSave(context, () => app.client.preshowFix(key), what: 'prefix', busy: 'Applying the fix.', after: _load);
   }
 
-  Future<void> _sync() => runSave(context, AppScope.read(context).client.gdriveSync, after: _load);
+  Future<void> _sync() => runSave(context, AppScope.read(context).client.gdriveSync, what: 'gsync', busy: 'Copying the show to Google Drive.', after: _load);
 
   String _time(DateTime t) => '${t.hour % 12 == 0 ? 12 : t.hour % 12}:${t.minute.toString().padLeft(2, '0')} ${t.hour < 12 ? 'AM' : 'PM'}';
 

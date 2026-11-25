@@ -239,4 +239,26 @@ void main() {
     expect(app.dirtyTabs, isEmpty);
     await finish(tester);
   });
+
+  testWidgets('a save shows what changed in the result card', (tester) async {
+    await pumpScreen(tester);
+    await openScene(tester);
+    await tester.enterText(find.widgetWithText(TextField, '255').first, '10');
+    await tester.pump();
+    await tester.tap(find.text('Save scene'));
+    await tester.pumpAndSettle();
+    expect(find.text('Scene saved'), findsOneWidget);
+    expect(find.text('TEST SCENE: 1 value'), findsOneWidget);
+    expect(find.text('Open ShowXpress to check it.'), findsOneWidget);
+    await finish(tester);
+  });
+
+  testWidgets('a look made on the Looks tab makes the list read again', (tester) async {
+    await pumpScreen(tester);
+    expect(listReads, 1);
+    app.sceneMade('NEW LOOK.scex');
+    await tester.pumpAndSettle();
+    expect(listReads, 2);
+    await finish(tester);
+  });
 }

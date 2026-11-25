@@ -114,10 +114,12 @@ void main() {
     expect(draft.steps, isNotEmpty);
     expect(draft.steps.first.f.keys, unorderedEquals(['1', '2']));
     expect(find.text('Made: $auto'), findsOneWidget);
+    // the old page dropped its cached scene lists and added the file to the player's list
+    expect(app.madeScenes, ['$auto.scex']);
+    expect(find.text('Look made'), findsOneWidget);
 
     // the name it just used is taken now, so the box moves on to a free one
     expect(find.text(auto), findsNothing);
-    await tester.pump(const Duration(seconds: 5)); // let the "Saved." snackbar go
     app.dispose();
   });
 

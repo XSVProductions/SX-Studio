@@ -130,7 +130,12 @@ class _RtScreenState extends State<RtScreen> with ShowWatcher, RigReloads {
                 ? () => runSave(
                     context,
                     () => app.client.rtApply(placed, extra: _extra, rig: _rig),
-                    after: load,
+                    what: 'rt',
+                    busy: 'Saving the 2D view.',
+                    after: () async {
+                      await load();
+                      app.showEdited();
+                    },
                   )
                 : null,
             child: const Text('Save to 2D view'),
@@ -245,7 +250,17 @@ class _RtScreenState extends State<RtScreen> with ShowWatcher, RigReloads {
               ],
             ),
           ),
-          MiniButton(button, primary: true, onPressed: () => runSave(context, () => AppScope.read(context).client.rtInstall(), after: load)),
+          MiniButton(
+            button,
+            primary: true,
+            onPressed: () => runSave(
+              context,
+              () => AppScope.read(context).client.rtInstall(),
+              what: 'install',
+              busy: i.scene && i.button ? 'Updating RIG ID.' : 'Adding RIG ID.',
+              after: load,
+            ),
+          ),
         ],
       ),
     );

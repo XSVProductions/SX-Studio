@@ -323,9 +323,8 @@ void main() {
       await t.pump();
     }
     expect([for (final b in e.postsTo('/api/move/revert')) b['force']], [false, true]);
-    expect(find.text('Reverted'), findsOneWidget);
-    await t.tap(find.text('OK'));
-    await t.pump();
+    expect(find.text('Movement reverted'), findsOneWidget);
+    expect(find.text('Open ShowXpress to check it.'), findsOneWidget);
     await end(t, app);
   });
 
@@ -379,7 +378,11 @@ void main() {
     await t.pump();
     expect(e.postsTo('/api/live/stop'), hasLength(1));
     expect(e.postsTo('/api/sx/launch'), hasLength(1));
-    await t.pump(const Duration(seconds: 1));
+    expect(AppScope.read(t.element(find.byType(MoveScreen))).busy, 'Starting ShowXpress.');
+    // it stays up 3 s after a good start, as the old page's did
+    await t.pump(const Duration(seconds: 3));
+    await t.pump();
+    expect(app.busy, '');
     await end(t, app);
   });
 

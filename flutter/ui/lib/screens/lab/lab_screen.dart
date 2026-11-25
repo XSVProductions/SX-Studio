@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'lab_board.dart';
@@ -124,6 +125,7 @@ class _LabScreenState extends State<LabScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) => _draw());
       return;
     }
+    _made = _app.madeScenes.length;
     _app.addListener(_onApp);
     _onApp();
   }
@@ -145,6 +147,7 @@ class _LabScreenState extends State<LabScreen> {
   /// Polls only while the tab is on show. Showing it again loads the board
   /// the first time and polls straight away after that.
   void _onApp() {
+    _takeMade();
     final v = _app.tab == 'lab';
     if (v == _visible) return;
     _visible = v;
@@ -156,6 +159,21 @@ class _LabScreenState extends State<LabScreen> {
     } else {
       _pollNow();
     }
+  }
+
+  /// How many looks the Looks tab had made when the board last took them.
+  var _made = 0;
+
+  /// A look made on the Looks tab is a scene file the player's own pages can
+  /// use now (old `LB.files.push`).
+  void _takeMade() {
+    final made = _app.madeScenes;
+    if (made.length == _made) return;
+    final add = made.sublist(_made);
+    _made = made.length;
+    final b = _board;
+    if (b == null) return;
+    setState(() => _board = LabBoard(show: b.show, pages: b.pages, faders: b.faders, files: [...b.files, ...add]));
   }
 
   static Note _plain(String t) => (text: t, tone: Tone.dim);
@@ -671,16 +689,7 @@ class _LabScreenState extends State<LabScreen> {
     setState(() {});
     _draw();
     _pollNow();
-    if (reo) {
-      ToolResult l;
-      try {
-        l = await _client.sxLaunch();
-      } on ApiException catch (e) {
-        l = ToolResult.failed(e.message);
-      }
-      if (!l.ok && mounted) await showFailure(context, l.error, out: l.out);
-      unawaited(_app.refresh());
-    }
+    if (reo) await launchSx(context);
   }
 
   /// Stops the player and opens ShowXpress, which carries on (lbHandoff).

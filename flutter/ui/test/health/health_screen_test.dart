@@ -66,9 +66,12 @@ void main() {
 
     await pressInDialog(t, 'Revert anyway');
     expect(c.posts.last.$2, {'id': 'abcd1234', 'force': true});
-    expect(find.text('Reverted'), findsOneWidget);
+    // the old result card, not a dialog: title, where to look, and the report under Full details
+    expect(find.text('Fix reverted'), findsOneWidget);
+    expect(find.text('Open ShowXpress to check it.'), findsOneWidget);
+    await t.tap(find.text('Full details'));
+    await t.pumpAndSettle();
     expect(find.text('Put back live.ini.'), findsOneWidget);
-    await pressInDialog(t, 'OK');
     expect(find.text('Fixes you applied (1)'), findsNothing);
     await end();
   });

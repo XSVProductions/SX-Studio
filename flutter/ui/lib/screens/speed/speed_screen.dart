@@ -121,7 +121,12 @@ class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
                 : () => runSave(
                     context,
                     () => app.client.speedApply([for (final b in changed) SpeedChange(sec: b.sec, title: b.title, fader: _picked[b.sec]!)]),
-                    after: _load,
+                    what: 'speed',
+                    busy: 'Saving speed faders.',
+                    after: () async {
+                      await _load();
+                      app.showEdited();
+                    },
                   ),
             child: const Text('Save'),
           ),

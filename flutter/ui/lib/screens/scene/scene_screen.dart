@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'scene_grid.dart';
@@ -51,6 +52,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     super.initState();
     _app = AppScope.read(context);
     _app.addListener(_onApp);
+    _made = _app.madeScenes.length;
     _loadList();
   }
 
@@ -86,9 +88,17 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     super.dispose();
   }
 
-  /// Leaving the tab stops the preview, as if the user pressed Stop.
+  /// How many looks were made when the list was read.
+  var _made = 0;
+
+  /// Leaving the tab stops the preview, as if the user pressed Stop. A look
+  /// made on the Looks tab is a new scene: read the list again (old `SL=null`).
   void _onApp() {
     if (_app.tab != _tab && _pv != null) unawaited(_pvStop(_reo));
+    if (_app.madeScenes.length != _made) {
+      _made = _app.madeScenes.length;
+      unawaited(_loadList());
+    }
   }
 
   void _markDirty() => _app.setDirty(_tab, _work?.dirty ?? false);
@@ -267,7 +277,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   Future<void> _save() async {
     final w = _work;
     if (w == null || !w.dirty) return;
-    await runSave(context, () => _app.client.sceneSave(w.body()), after: () => _open(w.scene.file, keep: true));
+    await runSave(context, () => _app.client.sceneSave(w.body()), what: 'scene', busy: 'Saving the scene.', after: () => _open(w.scene.file, keep: true));
     unawaited(_loadList());
   }
 
@@ -308,7 +318,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
       unawaited(_loadList());
     }
     if (!mounted) return;
-    await showReport(context, r.ok ? 'Scene reverted' : 'Not saved', r.out, error: r.error);
+    _app.showResult(resultOf(r, 'scenerev', reopen: _app.status?.queue.reopen ?? true));
   }
 
   // ---- on the lights
@@ -330,7 +340,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     }
     if (!mounted) return (go: false, reo: false);
     if (!r.ok) {
-      await showReport(context, "Preview didn't start", r.out, error: r.error);
+      _app.showResult(failedResult('clprev', r.error, out: r.out));
       return (go: false, reo: false);
     }
     setState(() => _busy = 'Waiting for ShowXpress to close. Save it if it asks.');
@@ -349,14 +359,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     if (open) {
       setState(() => _busy = '');
       await _liveStop();
-      if (mounted) {
-        await showReport(
-          context,
-          "Preview didn't start",
-          '',
-          error: 'ShowXpress is still open. Close it (save if it asks), then press Show on the lights again.',
-        );
-      }
+      _app.showResult(failedResult('clprev', 'ShowXpress is still open. Close it (save if it asks), then press Show on the lights again.'));
       return (go: false, reo: false);
     }
     setState(() => _busy = 'ShowXpress closed. Waiting for it to let go of the interface.');
@@ -394,7 +397,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     if (pv == null) {
       await _liveStop();
       if (!mounted) return;
-      await showReport(context, "Preview didn't start", r.out, error: '${r.error}${c.reo ? _reoNote : ''}');
+      _app.showResult(failedResult('clprev', '${r.error}${c.reo ? _reoNote : ''}', out: r.out));
       return;
     }
     if (_app.tab != _tab || _work != w) {
@@ -412,7 +415,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     final reo = _reo;
     if (!mounted) return;
     setState(() => _pv = null);
-    unawaited(showReport(context, "Preview didn't start", '', error: '$error${reo ? _reoNote : ''}'));
+    _app.showResult(failedResult('clprev', '$error${reo ? _reoNote : ''}'));
   }
 
   /// Stops the preview, and opens ShowXpress again when [reo]. Port of `sePvStop`.
@@ -428,18 +431,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     await pv.stop();
     if (!mounted) return;
     setState(() => _busy = '');
-    if (!reo) return;
-    setState(() => _busy = 'Starting ShowXpress.');
-    ToolResult r;
-    try {
-      r = await _app.client.sxLaunch();
-    } on ApiException catch (e) {
-      r = ToolResult.failed(e.message);
-    }
-    await _app.refresh();
-    if (!mounted) return;
-    setState(() => _busy = '');
-    if (!r.ok) await showReport(context, "Didn't work", r.out, error: r.error);
+    if (reo) await launchSx(context);
   }
 
   void _play() {

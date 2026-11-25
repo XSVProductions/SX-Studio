@@ -1,18 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
-const _themeKey = 'theme';
+import 'tabs.dart';
+import 'theme_store.dart';
+import 'widgets/result_card.dart';
 
-/// The theme this device chose last time. Dark until someone picks another.
-Future<ThemeMode> loadThemeMode() async => ThemeMode.values.asNameMap()[(await SharedPreferences.getInstance()).getString(_themeKey)] ?? ThemeMode.dark;
+/// The theme this device chose last time, read from the old page's
+/// `sxh_theme` (`auto` is the device's own). Dark until someone picks another.
+Future<ThemeMode> loadThemeMode() async => switch (await readThemeChoice()) {
+  'light' => ThemeMode.light,
+  'auto' => ThemeMode.system,
+  _ => ThemeMode.dark,
+};
 
 /// What every screen shares: the engine client, the tab on show, and the
 /// status the app polls from the engine.
 class AppState extends ChangeNotifier {
-  AppState(this.client, {this.tab = 'home', this.themeMode = ThemeMode.dark}) {
+  AppState(this.client, {String tab = 'home', this.themeMode = ThemeMode.dark}) : tab = knownTab(tab) ? tab : 'home' {
     _poll();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) => _poll());
   }
@@ -64,12 +70,60 @@ class AppState extends ChangeNotifier {
     if (mode == themeMode) return;
     themeMode = mode;
     notifyListeners();
-    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_themeKey, mode.name)));
+    unawaited(
+      writeThemeChoice(switch (mode) {
+        ThemeMode.light => 'light',
+        ThemeMode.system => 'auto',
+        ThemeMode.dark => 'dark',
+      }),
+    );
   }
 
+  /// Shows tab [id]. Hides the last save's result, as the old `setTab` did.
   void go(String id) {
-    if (id == tab) return;
+    if (!knownTab(id)) id = 'home';
+    if (id == tab && result == null) return;
     tab = id;
+    result = null;
+    notifyListeners();
+  }
+
+  /// The last save's result card, the old page's `#result`, and the tab it
+  /// belongs to. [resultSeq] goes up with each new one.
+  SaveResult? result;
+  String resultTab = '';
+  int resultSeq = 0;
+
+  /// Shows [r] under the tab on show (the old `showResult`).
+  void showResult(SaveResult r) {
+    result = r;
+    resultTab = tab;
+    resultSeq++;
+    notifyListeners();
+  }
+
+  /// Hides the result card (Aim Movers switching between Floor and Room).
+  void hideResult() {
+    if (result == null) return;
+    result = null;
+    notifyListeners();
+  }
+
+  /// The show on disk was replaced (an immediate Google Drive import). Every
+  /// screen reads everything again, unsaved edits are dropped, as the old
+  /// page's `reloadAll`.
+  void reloadAll() {
+    queueRuns++;
+    notifyListeners();
+  }
+
+  /// Scene files made here (One-click Looks), in order. Screens that keep a
+  /// list of the show's files add them or read the list again: the old
+  /// `SL=null;MLS=null;LB.files.push(...)` after a look was made.
+  final madeScenes = <String>[];
+
+  void sceneMade(String file) {
+    madeScenes.add(file);
     notifyListeners();
   }
 
@@ -80,6 +134,7 @@ class AppState extends ChangeNotifier {
   void openFile(String id, String file) {
     _fileRequests[id] = file;
     tab = id;
+    result = null;
     notifyListeners();
   }
 
@@ -92,6 +147,19 @@ class AppState extends ChangeNotifier {
     if (dirty ? dirtyTabs.add(id) : dirtyTabs.remove(id)) notifyListeners();
   }
 
+  /// The old page's busy veil text, empty when nothing runs.
+  String busy = '';
+
+  void setBusy(String text) {
+    if (text == busy) return;
+    busy = text;
+    notifyListeners();
+  }
+
+  /// When the user last asked ShowXpress to close, while it still runs
+  /// (the old `sxCloseT`). Cleared once it is closed.
+  DateTime? sxCloseAsked;
+
   /// Fetches the status now, for right after an action that changes it.
   Future<void> refresh() => _poll();
 
@@ -102,10 +170,15 @@ class AppState extends ChangeNotifier {
       final was = status, now = await client.status();
       status = now;
       connected = true;
+      if (!now.open) sxCloseAsked = null;
       if (was != null) {
         if (was.open && !now.open) sxCloses++;
         final at = now.queue.done?['at'];
-        if (at != null && at != was.queue.done?['at']) queueRuns++;
+        if (at != null && at != was.queue.done?['at']) {
+          // the old reloadAll ends in setTab, which hides the result card
+          queueRuns++;
+          result = null;
+        }
       }
     } on ApiException {
       connected = false;
@@ -130,4 +203,21 @@ class AppScope extends InheritedNotifier<AppState> {
   static AppState of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
 
   static AppState read(BuildContext context) => context.getInheritedWidgetOfExactType<AppScope>()!.notifier!;
+
+  /// [of] where there may be no app (a widget shown on its own in a test).
+  static AppState? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()?.notifier;
+}
+
+/// Tells a screen which tab it is. The shell puts one around each tab, so
+/// the result card shows only under the tab that saved.
+class TabScope extends InheritedWidget {
+  const TabScope({super.key, required this.id, required super.child});
+
+  final String id;
+
+  /// The tab [context] is in, or null outside the shell.
+  static String? of(BuildContext context) => context.getInheritedWidgetOfExactType<TabScope>()?.id;
+
+  @override
+  bool updateShouldNotify(TabScope oldWidget) => id != oldWidget.id;
 }

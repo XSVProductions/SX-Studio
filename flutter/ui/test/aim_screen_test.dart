@@ -139,7 +139,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(posts['/api/apply'], {'w': 120, 'd': 90, 'force': false, 'mode': 'floor'});
     expect(find.text('Applied to the show'), findsOneWidget);
-    expect(find.text('·  CHANGED · STAR.gpj · 12 values changed'), findsOneWidget);
+    expect(find.text('CHANGED · STAR.gpj · 12 values changed'), findsOneWidget);
     expect(find.textContaining('9 movement scenes checked'), findsOneWidget);
     app.dispose();
   });

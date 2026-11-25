@@ -57,13 +57,17 @@ bool _isSetup(String page) => RegExp(r'^\s*setup\s*$', caseSensitive: false).has
 ///
 /// Port of `remRefresh`, `remDraw`, `remAct` and `remPoll` in the old page.
 class RemoteRow extends StatefulWidget {
-  const RemoteRow({super.key, required this.tab, required this.sets});
+  const RemoteRow({super.key, required this.tab, required this.sets, this.margin = const EdgeInsets.only(bottom: 14)});
 
   /// The tab this row sits in. It only acts while that tab is on show.
   final String tab;
 
   /// The first set is the one turned on by itself.
   final List<RemoteSet> sets;
+
+  /// Space around the row. The old `.remrow` has 14 px under it; Rig Test's
+  /// row (`style="margin:12px 0 0"`) has 12 px above instead.
+  final EdgeInsets margin;
 
   @override
   State<RemoteRow> createState() => _RemoteRowState();
@@ -265,7 +269,7 @@ class _RemoteRowState extends State<RemoteRow> {
     // the old `.remrow`
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 14),
+      margin: widget.margin,
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: Sx.green.withValues(alpha: .05),

@@ -4,6 +4,7 @@ import '../../show/show_env.dart';
 import '../../sx/auto_player.dart';
 import '../../sx/pending_presses.dart';
 import '../engine.dart';
+import 'aim.dart' show psTruthy;
 
 /// ShowXpress open/close, the status poll and the save queue.
 void registerSxRoutes(Engine e) {
@@ -28,7 +29,7 @@ void registerSxRoutes(Engine e) {
 
   e.api.post('/api/sx/close', (req) {
     // live aim or the player asked: the queue must not reopen ShowXpress now
-    if (req.body.boolean('live')) e.liveHold.start();
+    if (psTruthy(req.body['live'])) e.liveHold.start(); // `if ($body.live)`
     // Force closing loses whatever ShowXpress hasn't saved. Never from a phone.
     final force = req.body.boolean('force');
     if (force && req.fromPhone) throw ToolError('Only on the laptop.');

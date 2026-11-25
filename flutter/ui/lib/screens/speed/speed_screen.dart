@@ -16,7 +16,7 @@ class SpeedScreen extends StatefulWidget {
   State<SpeedScreen> createState() => _SpeedScreenState();
 }
 
-class _SpeedScreenState extends State<SpeedScreen> {
+class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
   SpeedPreview? _data;
   var _error = '';
 
@@ -31,6 +31,14 @@ class _SpeedScreenState extends State<SpeedScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void onQueueRan() => _load();
+
+  @override
+  void onSxClosed() {
+    if (_changed.isEmpty) _load();
   }
 
   Future<void> _load() async {

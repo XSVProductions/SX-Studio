@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -21,7 +22,7 @@ const List<(String, List<_TileDef>)> _sections = [
   (
     'Before the gig',
     [
-      (id: 'rt', tag: 'STEP 01', kind: _Kind.step, text: "Which mover hangs where, for the 2D view, Tonight's Rig and Skip Flash"),
+      (id: 'rt', tag: 'STEP 01', kind: _Kind.step, text: "Which mover hangs where, for the 2D view, Tonight's Rig and Strobe"),
       (id: 'aim', tag: 'STEP 02', kind: _Kind.step, text: "Fit the dance floor and AROUND ROOM to tonight's venue"),
       (id: 'color', tag: 'STEP 03', kind: _Kind.step, text: 'The decor colour on the movers and uplights'),
       (id: 'pre', tag: 'STEP 04', kind: _Kind.step, text: 'One look before the guests arrive'),
@@ -38,23 +39,59 @@ const List<(String, List<_TileDef>)> _sections = [
     'Show tools',
     [
       (id: 'rig', tag: 'RIG', kind: _Kind.tool, text: 'Which heads are hung tonight'),
-      (id: 'skip', tag: 'RIG', kind: _Kind.tool, text: 'The heads SKIP FLASH uses'),
+      (id: 'skip', tag: 'RIG', kind: _Kind.tool, text: 'The heads the SKIP FLASH button uses'),
       (id: 'apc', tag: 'CONTROL', kind: _Kind.tool, text: 'Move pads and pick their colours'),
+      (id: 'apc40', tag: 'CONTROL', kind: _Kind.tool, text: 'Your own pages of pads for the APC40'),
       (id: 'speed', tag: 'CONTROL', kind: _Kind.tool, text: 'Which fader drives which button'),
       (id: 'health', tag: 'SHOW', kind: _Kind.tool, text: 'Find and fix problems in the show'),
       (id: 'scene', tag: 'SHOW', kind: _Kind.tool, text: 'Change a scene and see it on the lights'),
       (id: 'move', tag: 'SHOW', kind: _Kind.tool, text: "Change a movement's shape and speed"),
       (id: 'look', tag: 'SHOW', kind: _Kind.tool, text: 'Make a new scene from a template'),
-      (id: 'settings', tag: 'SETUP', kind: _Kind.tool, text: 'Google Drive, phone & iPad, tabs, light mode'),
+      (id: 'settings', tag: 'SETUP', kind: _Kind.tool, text: 'Google Drive, phone & iPad, tabs, light mode, export & import'),
     ],
   ),
 ];
 
+/// Where a tile goes inside its section on a phone, the old page's
+/// `.ph .ht[data-go=...]{order:N}`. A tile not listed has order 0, so it comes
+/// first, as in CSS.
+const _phoneOrder = {
+  'rt': 1,
+  'rig': 2,
+  'skip': 3,
+  'aim': 4,
+  'color': 5,
+  'pre': 6,
+  'auto': 7,
+  'lab': 7,
+  'apc': 8,
+  'apc40': 8,
+  'speed': 9,
+  'health': 10,
+  'settings': 11,
+};
+
+/// The tile ids of each section in the order Home shows them: as listed, or
+/// on a [phone] by [_phoneOrder], ties kept as listed.
+List<List<String>> homeTileOrder({required bool phone}) => [for (final (_, all) in _sections) _ordered(all, phone).map((t) => t.id).toList()];
+
+List<_TileDef> _ordered(List<_TileDef> all, bool phone) {
+  if (!phone) return all;
+  final i = {for (final (k, t) in all.indexed) t.id: k};
+  return [...all]..sort((a, b) {
+    final c = (_phoneOrder[a.id] ?? 0).compareTo(_phoneOrder[b.id] ?? 0);
+    return c != 0 ? c : i[a.id]!.compareTo(i[b.id]!);
+  });
+}
+
 /// The start screen: the brand banner, then a tile per tab in the order a gig
 /// night runs. A tab hidden in Settings loses its tile, and a section with no
-/// tiles left goes too.
+/// tiles left goes too. A phone (the web build) orders the tiles as the old
+/// phone page did.
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({super.key, this.phone = kIsWeb});
+
+  final bool phone;
 
   @override
   Widget build(BuildContext context) {
@@ -68,7 +105,7 @@ class HomeScreen extends StatelessWidget {
       const _Hero(),
       for (final (title, all) in _sections)
         if ([
-              for (final t in all)
+              for (final t in _ordered(all, phone))
                 if (t.id == 'settings' || !m.settings.tabHidden.contains(t.id)) t,
             ]
             case final tiles when tiles.isNotEmpty)

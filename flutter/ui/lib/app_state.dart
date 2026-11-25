@@ -43,9 +43,18 @@ class AppState extends ChangeNotifier {
   /// follow it with [ShowWatcher].
   int queueRuns = 0;
 
-  /// Goes up each time ShowXpress goes from open to closed. It may have
-  /// saved the show on the way out.
+  /// Goes up each time ShowXpress goes from open to closed (it may have
+  /// saved the show on the way out), and when a screen changes files that
+  /// other tabs show too. See [showEdited].
   int sxCloses = 0;
+
+  /// A screen just changed show files other tabs also show (a Health Check
+  /// fix moves pads and faders). Screens without unsaved edits read again,
+  /// the old page's `hlAfter`.
+  void showEdited() {
+    sxCloses++;
+    notifyListeners();
+  }
 
   /// Dark, light, or the same as this device (`ThemeMode.system`). Each
   /// device keeps its own choice, as the old app kept it in the browser.

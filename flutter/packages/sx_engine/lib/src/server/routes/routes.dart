@@ -18,6 +18,7 @@ import 'rig.dart';
 import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
+import 'config.dart';
 
 /// Every area's routes. One line per area, each in its own file.
 void registerRoutes(Engine e) {
@@ -40,4 +41,5 @@ void registerRoutes(Engine e) {
   registerLiveRoutes(e);
   registerSceneRoutes(e);
   registerRigRoutes(e);
+  registerConfigRoutes(e);
 }

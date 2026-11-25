@@ -566,7 +566,7 @@ function Invoke-Action([string]$path, $body) {
     }
     '/api/health/fix' {
       $k = "$($body.key)"
-      if ($k -notmatch '^(speed|midiout|midilight|pad|color|fixtures)\|(page\d+_button\d+|\d+)$') { return @{ ok = $false; error = 'Unknown fix.'; out = '' } }
+      if ($k -notmatch '^(speed|midiout|midilight|pad|color|color251|fixtures)\|(page\d+_button\d+|\d+)$') { return @{ ok = $false; error = 'Unknown fix.'; out = '' } }
       return (Invoke-Engine "-Action Fix -FixId `"$k`"" $healthEngine)
     }
     '/api/rt/install' { return (Invoke-Engine '-Action Install' $rtEngine) }

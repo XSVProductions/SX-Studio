@@ -13,6 +13,8 @@ Its main tabs:
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
 - **Auto Show:** SX Studio presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
 - **Scene Editor:** open any scene, change its steps (values, step times, fades; copy, move or delete steps; add or take out a channel) and see it on the lights as you go, then save. Only what you changed is written into the scene file; everything else stays exactly as ShowXpress wrote it.
+- **Movement Editor:** open any movement (the Generator's `.gpj` files) and change its shape by dragging the points. You can also change its speed, how the heads follow each other, the other channels' graphs and each head's aim and size. The heads move on screen and on the lights as you go. Like the Scene Editor, only what you changed is written.
+- **One-click Looks:** pick a template (contrast pairs, a colour chase, a beat strobe or a prism fan), choose the colours and the heads, see it on the lights, and SX Studio makes it as a **new** scene. No scene you have is changed and ShowXpress's live board isn't touched. You can put the new scene straight on one of the SX Player's own pages.
 - **Phone & iPad:** the same SX Studio on your iPhone or iPad over the Wi-Fi, with touch-friendly screens and Aim live by finger. See [Phone & iPad](#phone--ipad).
 - **Health Check:** a scan for problems that have caused trouble before. It looks for buttons whose scene is missing, scenes that use deleted fixtures, `beats = 0`, speed faders that don't exist, APC pads that fire two buttons, buttons stacked on the same spot, and colour chases that jump back across the colour wheel when they loop. Each problem comes with a recommended fix, and many can be fixed with one click. Every fix can be reverted.
 
@@ -99,9 +101,31 @@ The backups are kept in `health_fixes.json` in the show folder. If you change th
 4. **Show on the lights** (ShowXpress closes; save it first) sends the step you're on to the rig as you change it. **Play the scene** runs it with its step times and fades. Nothing is saved yet.
 5. Press **Save scene**. While ShowXpress is open the save is queued, like the other tabs.
 
-What's safe: saving changes only the values, steps and channels you changed. The rest of the file (things SX Studio doesn't know, spacing, line endings) is kept byte for byte, and SX Studio checks the result two ways before writing it. If the scene was changed in ShowXpress after you opened it, the save is refused (press Reload). Every save keeps the scene as it was before; **Earlier versions** puts one back. Backups are kept outside the show folder (`%APPDATA%\ShowXpress Helper\scene_backups`, Mac `~/AwaazTools/scene_backups`), so they don't go to Google Drive. A scene SX Studio can't read safely is shown read-only and stays a ShowXpress job. Movements (Generator `.gpj`), the live buttons, fixture patching, the 3D view and macros stay in ShowXpress.
+What's safe: saving changes only the values, steps and channels you changed. The rest of the file (things SX Studio doesn't know, spacing, line endings) is kept byte for byte, and SX Studio checks the result two ways before writing it. If the scene was changed in ShowXpress after you opened it, the save is refused (press Reload). Every save keeps the scene as it was before; **Earlier versions** puts one back. Backups are kept outside the show folder (`%APPDATA%\ShowXpress Helper\scene_backups`, Mac `~/AwaazTools/scene_backups`), so they don't go to Google Drive. A scene SX Studio can't read safely is shown read-only and stays a ShowXpress job. The live buttons, fixture patching, the 3D view and macros stay in ShowXpress.
 
 If **Tonight's Rig** has trimmed the scene, the tab says so: the version you save counts as the full scene from then on.
+
+**Movement Editor**
+1. Go to the **Movement Editor** tab and tap a movement (search by movement or button name). In the **SX Player** you can also right-click (or long-press) any button and pick **Edit scene** / **Edit movement**.
+2. **Pan / Tilt** is the shape the heads trace. Drag a point to move it, drag empty space to move the whole shape, double-click to add a point, and press Delete to remove the selected one. **Smaller / Bigger / Mirror / Reverse direction / Centre** change the whole shape. The coloured dots are the heads, moving as they will on the night.
+3. On the right: **Plays** (ticked = the channel is sent), **Between points** (smooth curve, straight lines or jump), **Once round in** (the cycle time) and **Each next head behind by** (the shift that makes the heads chase each other).
+4. The other channels (dimmer, colour, gobo...) are graphs: left to right is once round the cycle, bottom to top is the value.
+5. **Heads** sets each head's aim and zoom. For movements that **Aim Movers** looks after, those come from the Aim Movers tab and are only shown here. The shape you draw is kept as you drew it the next time Aim Movers saves.
+6. **Show on the lights** (ShowXpress closes; save it first) plays the movement on the rig as you change it. A movement only moves the heads, so pick a scene in **Light it with** to light them. Then press **Save movement** (queued while ShowXpress is open).
+
+What's safe: the same rules as the Scene Editor. Only the values and points you changed are written, and the rest of the file stays byte for byte. The result is checked before writing. A movement changed in ShowXpress since you opened it is refused. Every save keeps a backup (**Earlier versions**; `%APPDATA%\ShowXpress Helper\move_backups`, Mac `~/AwaazTools/move_backups`). Reverse pan/tilt stays with **Reverse heads**. Saving **GRAND ENTRANCE** also makes its step scene again.
+
+**One-click Looks**
+1. Go to the **Looks** tab and pick a template:
+   - **Contrast pairs**: two colours side by side (every other head, or first half / second half), swapping each hold time. Set up to 4 pairs; they play one after another.
+   - **Colour chase**: tap colours in the order you want; **Back and forth** plays them there and back so the chase never jumps across the colour wheel. **Spread over the heads** puts each head a step further along.
+   - **Strobe**: one flash each beat (put it on a player button with a BPM) or a steady strobe at the speed you set, in the colour you pick.
+   - **Prism fan**: prisms in and spinning (direction and speed set per prism), with zoom and focus; it has no colour of its own, so play it with a colour look.
+2. **Heads** picks which heads take part (by model). Heads SX Studio has no definition for, and groups of several heads, are left out and listed.
+3. **How it looks** plays the look on screen. **Show on the lights** (ShowXpress closes; save it first) plays it on the rig. Nothing is written yet.
+4. Give it a name and press **Make the scene**. Then you can put it on a page of the SX Player (a beat look gets the BPM flash), or open it in the **Scene Editor** to fine-tune it.
+
+What's safe: a look is always a **new** scene file, written the way ShowXpress writes scenes and checked before it is saved. A name that's already in the show is refused, so no scene is ever overwritten. live.ini isn't touched: to have the look on a ShowXpress button, add it there yourself.
 
 **Auto Show**
 1. Press **+ New look** and pick the buttons that should play **together** (say one movement + a colour + the uplights), or set them up in ShowXpress and press **New look from what's playing**. To cycle through movements, make **one look per movement**: MOVEMENTS plays one button at a time, so the tab offers to split a look that has several of them.
@@ -163,7 +187,7 @@ SX Studio looks for the show in this order:
 
 ## Building
 
-The scene editor's tests (`tools/test_scene_edit.ps1`) run before every release build, on Windows PowerShell 5.1 and PowerShell 7. `-Show <show folder>` also checks that every scene of a real show reads back byte for byte (on a temporary copy).
+The scene and movement editors' tests and the looks tests (`tools/test_scene_edit.ps1`, `tools/test_move_edit.ps1`, `tools/test_looks.ps1`) run before every release build, on Windows PowerShell 5.1 and PowerShell 7. `-Show <show folder>` also checks that every scene or movement of a real show reads back byte for byte (on a temporary copy).
 
 Pushing a tag such as `v1.1.0` makes GitHub Actions build both installers and publish them as a release.
 - **Windows:** Inno Setup, `windows/aim_movers.iss`

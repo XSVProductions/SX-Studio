@@ -55,4 +55,25 @@ void main() {
     expect(_reads(c), 2);
     await end();
   });
+
+  testWidgets('unsaved moves hold back the reload when ShowXpress closes, and the queue running drops them', (t) async {
+    final c = Canned({
+      '/api/sx': [sxStatus(open: true), sxStatus(), sxStatus(done: '2026-11-25T21:00:00')],
+      '/api/apc': _apc,
+    });
+    final (app, end) = await pumpScreen(t, c, ApcScreen.new, tab: 'apc');
+    await t.tap(find.text('RED').first);
+    await t.pump();
+    await t.tap(find.text('free').first);
+    await t.pump();
+    expect(app.dirtyTabs, contains('apc'));
+
+    await poll(t, app);
+    expect(_reads(c), 1, reason: 'ShowXpress closed, but there are unsaved moves');
+
+    await poll(t, app);
+    expect(_reads(c), 2, reason: 'the queue ran');
+    expect(app.dirtyTabs, isNot(contains('apc')));
+    await end();
+  });
 }

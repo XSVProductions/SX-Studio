@@ -17,7 +17,7 @@ class ApcScreen extends StatefulWidget {
   State<ApcScreen> createState() => _ApcScreenState();
 }
 
-class _ApcScreenState extends State<ApcScreen> {
+class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
   ApcEdits? _e;
   var _error = '';
   var _loading = true;
@@ -38,15 +38,22 @@ class _ApcScreenState extends State<ApcScreen> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     final shown = AppScope.of(context).tab == 'apc';
-    if (shown && _shown == false && !_loading && !(_e?.dirty ?? false)) {
-      _loading = true;
-      _load();
-    }
+    if (shown && _shown == false && !_loading && !(_e?.dirty ?? false)) _load();
     _shown = shown;
+  }
+
+  /// The queue saved into the show, so edits that waited in it are saved now.
+  @override
+  void onQueueRan() => _load();
+
+  @override
+  void onSxClosed() {
+    if (!(_e?.dirty ?? false)) _load();
   }
 
   Future<void> _load() async {
     final app = AppScope.read(context);
+    _loading = true;
     try {
       final d = await app.client.apc();
       if (!mounted) return;

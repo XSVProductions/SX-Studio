@@ -10,7 +10,7 @@ import 'package:sx_studio/theme.dart';
 
 /// Canned engine answers by path for the Health, Pre-show and APC screen
 /// tests. Records every POST with its body. A path missing from [answers]
-/// answers as the status route does. Records every GET path in [gets].
+/// answers with [sxStatus]. Records every GET path in [gets].
 class Canned {
   Canned(this.answers);
 
@@ -28,10 +28,28 @@ class Canned {
       final List<Object> l when l.length > 1 => l.removeAt(0),
       final List<Object> l => l.single,
       final Object o => o,
-      null => {'ok': true, 'open': false},
+      null => sxStatus(),
     };
     return http.Response(jsonEncode(j), 200, headers: {'content-type': 'application/json; charset=utf-8'});
   }
+}
+
+/// What `/api/sx` answers: ShowXpress [open] or not, and the time the queue
+/// last ran ([done]), if it has.
+Map<String, Object?> sxStatus({bool open = false, String? done}) => {
+  'ok': true,
+  'open': open,
+  'q': {
+    'items': <Object>[],
+    'reopen': true,
+    'done': done == null ? null : {'at': done},
+  },
+};
+
+/// Reads the status again, as the 2 s poll does, and lets the screen react.
+Future<void> poll(WidgetTester t, AppState app) async {
+  await app.refresh();
+  await t.pumpAndSettle();
 }
 
 /// Pumps [screen] at [width] px against [c], with [tab] on show. Call the returned function last.

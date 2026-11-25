@@ -74,7 +74,7 @@ PreItem? driveLine(DriveInfo? g, {DateTime? now}) {
   );
 }
 
-class _PreScreenState extends State<PreScreen> {
+class _PreScreenState extends State<PreScreen> with ShowWatcher {
   List<PreItem>? _items;
   var _error = '';
   var _loading = true;
@@ -97,6 +97,13 @@ class _PreScreenState extends State<PreScreen> {
     final shown = AppScope.of(context).tab == 'pre';
     if (shown && _shown == false && !_loading) _load();
     _shown = shown;
+  }
+
+  /// After the queue ran the old page opened the tab on show again, which
+  /// checks again when that is this one. Closing ShowXpress didn't.
+  @override
+  void onQueueRan() {
+    if (AppScope.read(context).tab == 'pre') _load();
   }
 
   Future<void> _load() async {

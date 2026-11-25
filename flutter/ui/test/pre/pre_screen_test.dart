@@ -146,4 +146,19 @@ void main() {
     expect(c.gets.where((g) => g == '/api/pre'), hasLength(2));
     await end();
   });
+
+  testWidgets('checks again when the queue ran while the tab is on show, not when ShowXpress closes', (t) async {
+    final c = Canned({
+      '/api/sx': [sxStatus(open: true), sxStatus(), sxStatus(done: '2026-11-25T21:00:00')],
+      '/api/pre': _pre,
+      '/api/health': _health,
+      '/api/gdrive': _drive(),
+    });
+    final (app, end) = await pumpScreen(t, c, PreScreen.new, tab: 'pre');
+    await poll(t, app);
+    expect(c.gets.where((g) => g == '/api/pre'), hasLength(1));
+    await poll(t, app);
+    expect(c.gets.where((g) => g == '/api/pre'), hasLength(2));
+    await end();
+  });
 }

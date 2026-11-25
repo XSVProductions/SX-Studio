@@ -15,7 +15,7 @@ class HealthScreen extends StatefulWidget {
   State<HealthScreen> createState() => _HealthScreenState();
 }
 
-class _HealthScreenState extends State<HealthScreen> {
+class _HealthScreenState extends State<HealthScreen> with ShowWatcher {
   HealthReport? _data;
   var _error = '';
   var _loading = true;
@@ -26,6 +26,14 @@ class _HealthScreenState extends State<HealthScreen> {
     super.initState();
     _load();
   }
+
+  // The old poll read the health check again after the queue ran and when
+  // ShowXpress closed. It holds no edits, so it always reads again.
+  @override
+  void onQueueRan() => _load();
+
+  @override
+  void onSxClosed() => _load();
 
   Future<void> _load() async {
     setState(() => _loading = true);

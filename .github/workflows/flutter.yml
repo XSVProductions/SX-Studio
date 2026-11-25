@@ -5,7 +5,7 @@ name: Flutter app
 # publishes the PowerShell app on v* tags. flutter/RELEASE_SETUP.md says when and how the two swap.
 on:
   push:
-    tags: ['flutter-v*']
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:

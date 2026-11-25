@@ -2,7 +2,7 @@ name: Build installers
 
 on:
   push:
-    tags: ['v*']
+    tags: ['legacy-v*']
   workflow_dispatch:
 
 permissions:

@@ -1,3 +1,8 @@
+// The old app refuses the SX Player on a Mac, and so does the port, so these
+// run everywhere else.
+@TestOn('!mac-os')
+library;
+
 import 'dart:convert';
 import 'dart:io';
 

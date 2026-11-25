@@ -36,3 +36,4 @@ export 'src/tools/preshow.dart';
 export 'src/tools/aim/aim.dart';
 export 'src/tools/aim/aim_math.dart';
 export 'src/tools/speed.dart';
+export 'src/tools/scene_edit.dart';

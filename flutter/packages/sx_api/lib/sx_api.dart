@@ -17,3 +17,4 @@ export 'src/live.dart';
 export 'src/speed.dart';
 export 'src/status.dart';
 export 'src/update.dart';
+export 'src/scene_edit.dart';

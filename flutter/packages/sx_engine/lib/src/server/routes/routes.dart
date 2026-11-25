@@ -10,6 +10,7 @@ import 'health.dart';
 import 'preshow.dart';
 import 'aim.dart';
 import 'live.dart';
+import 'scene.dart';
 import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
@@ -30,4 +31,5 @@ void registerRoutes(Engine e) {
   registerPreshowRoutes(e);
   registerAimRoutes(e);
   registerLiveRoutes(e);
+  registerSceneRoutes(e);
 }

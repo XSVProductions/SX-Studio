@@ -33,6 +33,13 @@ int _width(ShowEnv env, String gpj) {
   return xs.reduce((a, b) => a > b ? a : b) - xs.reduce((a, b) => a < b ? a : b);
 }
 
+/// Makes [file] read only, or writable again. Windows has no `chmod`; its
+/// read-only attribute makes .NET's writes fail the same way.
+Future<void> _readOnly(String file, bool on) async {
+  final r = Platform.isWindows ? await Process.run('attrib', [on ? '+R' : '-R', file]) : await Process.run('chmod', [on ? '444' : '644', file]);
+  if (r.exitCode != 0) fail('could not change $file: ${r.stderr}');
+}
+
 void main() {
   late Directory tmp;
   late String gpj;
@@ -49,11 +56,12 @@ void main() {
   test('old tool: a failed state write makes the next apply resize again', skip: paritySkip, () async {
     final env = _copy(p.join(tmp.path, 'old'));
     final state = env.path('df_aim_state.json');
-    await Process.run('chmod', ['444', state]);
+    await _readOnly(state, true);
     final first = await runOld('df_aim.ps1', {'Action': 'Apply', 'Size': '120', 'NoPrompt': true, 'TestRoot': env.root});
+    // writable again before any check, so a failed check still lets tearDown delete the folder
+    await _readOnly(state, false);
     expect(first.exitCode, isNot(0), reason: 'the state file could not be written');
     expect(_width(env, gpj), closeTo(before * 1.2, 2), reason: 'the movements were written anyway');
-    await Process.run('chmod', ['644', state]);
     final second = await runOld('df_aim.ps1', {'Action': 'Apply', 'Size': '120', 'NoPrompt': true, 'TestRoot': env.root});
     expect(second.exitCode, 0);
     expect(_width(env, gpj), closeTo(before * 1.44, 3), reason: '120% of 120%');

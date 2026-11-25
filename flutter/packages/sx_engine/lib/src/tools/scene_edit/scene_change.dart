@@ -32,11 +32,13 @@ bool ownLine(String t, SxsCh c) {
 /// The tag a channel added by the editor gets. Port of `Get-NewChannelTag`.
 String newChannelTag(int ix, String? name) => '<Channel index="$ix" name="${xmlEscape(name ?? '')}" value="0"/>';
 
-/// One text edit: replace [len] characters at [at] with [text].
+/// One text edit: replace [len] characters at [at] with [text]. [ix] is the
+/// channel a new channel tag adds, so tags added at one place keep channel order.
 class _Edit {
-  _Edit(this.at, this.len, this.text);
+  _Edit(this.at, this.len, this.text, [this.ix]);
 
   final int at, len;
+  final int? ix;
   String text;
 }
 
@@ -46,7 +48,7 @@ class _Edit {
 String changedText(String t, SxsScene sc, List<SceneStepChange> steps, List<SceneChannelRef> addch, List<SceneChannelRef> delch, Map<String, String> names) {
   final nl = sc.nl;
   final perStep = <int, List<_Edit>>{};
-  void edit(SxsStep s, int at, int len, String text) => perStep.putIfAbsent(s.n, () => []).add(_Edit(at, len, text));
+  void edit(SxsStep s, int at, int len, String text, [int? ix]) => perStep.putIfAbsent(s.n, () => []).add(_Edit(at, len, text, ix));
   // delch / addch hit every step the same way, done on the old steps (a copied step gets them too)
   for (final dc in delch) {
     for (final s in sc.steps) {
@@ -77,17 +79,17 @@ String changedText(String t, SxsScene sc, List<SceneStepChange> steps, List<Scen
         if (after != null) {
           final ind = indentAt(t, after.start);
           if (ind != null && ownLine(t, after)) {
-            edit(s, after.end, 0, nl + ind + tag);
+            edit(s, after.end, 0, nl + ind + tag, ac.ix);
           } else {
-            edit(s, after.end, 0, tag);
+            edit(s, after.end, 0, tag, ac.ix);
           }
         } else {
           final first = kept.first;
           final ind = indentAt(t, first.start);
           if (ind != null && ownLine(t, first)) {
-            edit(s, first.start - ind.length, 0, ind + tag + nl);
+            edit(s, first.start - ind.length, 0, ind + tag + nl, ac.ix);
           } else {
-            edit(s, first.start, 0, tag);
+            edit(s, first.start, 0, tag, ac.ix);
           }
         }
       }
@@ -97,7 +99,7 @@ String changedText(String t, SxsScene sc, List<SceneStepChange> steps, List<Scen
   final parts = StringBuffer(t.substring(0, sc.open));
   for (final ns in steps) {
     final s = sc.steps[ns.src];
-    final ed = [for (final x in perStep[s.n] ?? const <_Edit>[]) _Edit(x.at, x.len, x.text)]; // a copied step has its own
+    final ed = [for (final x in perStep[s.n] ?? const <_Edit>[]) _Edit(x.at, x.len, x.text, x.ix)]; // a copied step has its own
     if (ns.len != null) {
       final lv = '${ns.len}';
       final la = s.len;
@@ -133,8 +135,17 @@ String changedText(String t, SxsScene sc, List<SceneStepChange> steps, List<Scen
       }
     }
     // from the back; at the same place a removal goes before an insert (so the insert isn't removed with it).
-    // Sort-Object is stable, so edits at the same place and length stay in the order they were made.
-    mergeSort(ed, compare: (a, b) => a.at != b.at ? b.at.compareTo(a.at) : b.len.compareTo(a.len));
+    // Channel tags added at one place go in highest channel first, so they read in channel order, as the
+    // XML way puts them. The old tool left that to Sort-Object's handling of ties: right on Windows
+    // PowerShell 5.1 for two tags in the order added, wrong on PowerShell 7 (the self-check refused).
+    mergeSort(
+      ed,
+      compare: (a, b) {
+        if (a.at != b.at) return b.at.compareTo(a.at);
+        if (a.len != b.len) return b.len.compareTo(a.len);
+        return a.ix != null && b.ix != null ? b.ix!.compareTo(a.ix!) : 0;
+      },
+    );
     var chunk = t.substring(s.from, s.end);
     for (final x in ed) {
       final at = x.at - s.from;

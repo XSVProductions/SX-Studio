@@ -1,4 +1,4 @@
-import 'gpj.dart';
+import '../../ps_compat.dart';
 
 /// Writes a decoded JSON value the way PowerShell 7's `ConvertTo-Json` does
 /// (Newtonsoft, indented by two spaces, `"key": value`, LF line ends, doubles

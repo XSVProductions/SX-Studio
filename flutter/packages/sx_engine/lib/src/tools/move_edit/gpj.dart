@@ -20,38 +20,16 @@ import '../../show/show_env.dart';
 
 // ---------------------------------------------------------------- PowerShell number and text habits
 
-/// `"$x"` of a value read from JSON: doubles with 15 significant digits and
-/// no `.0`, booleans as `True`/`False`, null as ''.
+/// `"$x"` of a value read from JSON: doubles as [psDoubleText] writes them,
+/// booleans as `True`/`False`, null as ''.
 String psText(Object? v) => switch (v) {
   null => '',
   bool b => b ? 'True' : 'False',
   int i => '$i',
-  double d => netNumber(d, digits: 15),
+  double d => psDoubleText(d),
   List l => l.map(psText).join(' '),
   _ => '$v',
 };
-
-/// .NET's text for a double: [digits] significant digits (`G15` is what
-/// PowerShell's `"$d"` gives), or the shortest that reads back the same when
-/// null (`R`, what JSON writers use). `1E+20`, `1E-05`, `0.0001`.
-String netNumber(double d, {int? digits}) {
-  if (d.isNaN) return 'NaN';
-  if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
-  if (d == 0) return d.isNegative ? '-0' : '0';
-  final e = digits == null ? d.abs().toStringAsExponential() : d.abs().toStringAsExponential(digits - 1);
-  final m = RegExp(r'^(\d)(?:\.(\d+))?e([+-]\d+)$').firstMatch(e)!;
-  var ds = '${m[1]}${m[2] ?? ''}'.replaceFirst(RegExp(r'0+$'), '');
-  if (ds.isEmpty) ds = '0';
-  final exp = int.parse(m[3]!);
-  final sign = d < 0 ? '-' : '';
-  if (exp >= 15 || exp < -5) {
-    final mant = ds.length > 1 ? '${ds[0]}.${ds.substring(1)}' : ds;
-    return '$sign${mant}E${exp < 0 ? '-' : '+'}${exp.abs().toString().padLeft(2, '0')}';
-  }
-  if (exp < 0) return '${sign}0.${'0' * (-exp - 1)}$ds';
-  if (ds.length <= exp + 1) return '$sign$ds${'0' * (exp + 1 - ds.length)}';
-  return '$sign${ds.substring(0, exp + 1)}.${ds.substring(exp + 1)}';
-}
 
 final _intText = RegExp(r'^[\t\n\v\f\r ]*([+-]?[0-9]+)[\t\n\v\f\r ]*$');
 final _floatText = RegExp(r'^[\t\n\v\f\r ]*([+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?)[\t\n\v\f\r ]*$');
@@ -79,18 +57,48 @@ double? netDouble(String s) {
 /// `Format-Num $v $true`: how ShowXpress writes Shift, always with a decimal
 /// point ("0.0", "12.5"), at most 4 decimals.
 ///
-/// `[math]::Round($v, 4)` on PowerShell 7 (.NET 11) rounds the double's exact
-/// value, halves to even: 0.00005 is a hair above half and becomes 0.0001.
-/// Windows PowerShell 5.1 multiplies by 10000 first, which can land on the
-/// other side of a half. Only values with more than 4 decimals differ, and the
+/// `[math]::Round($v, 4)` differs between the two .NETs, so this follows
+/// [psFlavor]. Windows PowerShell 5.1 (.NET Framework) multiplies by 10000 as
+/// a double and rounds that halves to even: 0.00005 becomes 0.0. PowerShell 7
+/// (.NET 11) rounds the double's exact value: 0.00005 is a hair above half and
+/// becomes 0.0001. Only values with more than 4 decimals can differ, and the
 /// screen sends at most 2.
 String formatShift(double v) {
   if (!v.isFinite) return netNumber(v);
+  if (psFlavor == PsFlavor.winPs51) return _formatShift51(v);
   final q = _round4(v.abs());
   final digits = q.toString().padLeft(5, '0');
   var s = '${digits.substring(0, digits.length - 4)}.${digits.substring(digits.length - 4)}'.replaceFirst(RegExp(r'0{1,3}$'), '');
   if (v < 0 && q != BigInt.zero) s = '-$s';
   return s;
+}
+
+/// [formatShift] on .NET Framework: `Math.Round(v, 4)` is `Math.Round(v * 10000) / 10000`
+/// for values under 1E+16 (others come back unchanged), then `ToString('0.0###')`
+/// takes 15 significant digits and rounds them to 4 decimals, halves up.
+String _formatShift51(double v) {
+  final r = v.abs() >= 1e16 ? v.abs() : _roundEven(v.abs() * 10000) / 10000;
+  final m = RegExp(r'^(\d)\.(\d+)e([+-]\d+)$').firstMatch(r.toStringAsExponential(14))!;
+  final ds = BigInt.parse('${m[1]}${m[2]}'), k = int.parse(m[3]!) - 10; // r = ds * 10^(k - 4)
+  var q = ds;
+  if (k >= 0) {
+    q = ds * BigInt.from(10).pow(k);
+  } else {
+    final d = BigInt.from(10).pow(-k);
+    q = ds ~/ d;
+    if ((ds - q * d) * BigInt.two >= d) q += BigInt.one;
+  }
+  final digits = q.toString().padLeft(5, '0');
+  final s = '${digits.substring(0, digits.length - 4)}.${digits.substring(digits.length - 4)}'.replaceFirst(RegExp(r'0{1,3}$'), '');
+  return v < 0 && q != BigInt.zero ? '-$s' : s;
+}
+
+/// .NET's `Math.Round(double)`: to a whole number, halves to even.
+double _roundEven(double x) {
+  final f = x.floorToDouble(), diff = x - f;
+  if (diff < 0.5) return f;
+  if (diff > 0.5) return f + 1;
+  return f % 2 == 0 ? f : f + 1;
 }
 
 /// [v] (not negative) times 10000, rounded from its exact binary value, halves to even.

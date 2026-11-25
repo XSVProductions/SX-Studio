@@ -32,6 +32,17 @@ void main() {
     expect(hasBom(src), ini.bom);
   });
 
+  test('scenePath joins with / on every system, as Get-ScenePath does', () {
+    final tmp = Directory.systemTemp.createTempSync('sx_scenepath_');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    File('${tmp.path}/scenes/A.scex').createSync(recursive: true);
+    File('${tmp.path}/Editor/Generator/projects/M.gpj').createSync(recursive: true);
+    final env = ShowEnv(tmp.path);
+    expect(scenePath(env, 'A.scex'), '${tmp.path}/scenes/A.scex');
+    expect(scenePath(env, 'M.gpj'), '${tmp.path}/Editor/Generator/projects/M.gpj');
+    expect(scenePath(env, 'gone.scex'), isNull);
+  });
+
   test('psRound rounds halves to even', () {
     expect([0.5, 1.5, 2.5, 3.5, -0.5, -1.5, 2.4, 2.6].map(psRound), [0, 2, 2, 4, 0, -2, 2, 3]);
   });

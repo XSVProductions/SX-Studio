@@ -145,8 +145,11 @@ void main() {
 
   test('number text the way PowerShell writes it', () {
     expect(
-      [psNum(120.0), psNum(0.29 * 100), psFormat0(112.5), psFormat0(113.5), psFormat0(112.49999999999999)],
-      ['120', '28.999999999999996', '113', '114', '113'],
+      [psNum(120.0), psNum(0.29 * 100), psNum(1.1 * 100), psFormat0(112.5), psFormat0(113.5), psFormat0(112.49999999999999)],
+      ['120', '29', '110', '113', '114', '113'],
     );
+    psFlavor = PsFlavor.ps7;
+    addTearDown(() => psFlavor = PsFlavor.winPs51);
+    expect([psNum(120.0), psNum(0.29 * 100), psNum(1.1 * 100)], ['120', '28.999999999999996', '110.00000000000001']);
   });
 }

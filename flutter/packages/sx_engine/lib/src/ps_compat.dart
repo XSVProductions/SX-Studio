@@ -4,6 +4,52 @@ library;
 
 import 'package:collection/collection.dart';
 
+/// The two PowerShells the old tools ran under, where they give different
+/// answers for the same script.
+enum PsFlavor {
+  /// Windows PowerShell 5.1 on .NET Framework: what the owner's laptop runs.
+  winPs51,
+
+  /// PowerShell 7 on .NET Core.
+  ps7,
+}
+
+/// Which PowerShell the port copies where 5.1 and 7 differ in something the
+/// user sees or that lands in a show file. The app ships with
+/// [PsFlavor.winPs51]. Only tests may set it: the parity harness sets it to
+/// match the PowerShell it compares against, before the Dart side runs.
+var psFlavor = PsFlavor.winPs51;
+
+/// `"$d"`, `[string]$d` and `'{0}' -f $d` of a double. Windows PowerShell 5.1
+/// gives 15 significant digits (`110`), PowerShell 7 the shortest text that
+/// reads back the same (`110.00000000000001`). Follows [psFlavor].
+String psDoubleText(double d) => psFlavor == PsFlavor.winPs51 ? netNumber(d, digits: 15) : netNumber(d);
+
+/// .NET's text for a double: [digits] significant digits (`G15`, .NET
+/// Framework's `ToString()`), or the shortest that reads back the same when
+/// null (`R`, .NET Core's `ToString()` and JSON writers). `1E+20`, `1E-05`,
+/// `0.0001`. Negative zero is `0` with [digits] (.NET Framework) and `-0`
+/// without (.NET Core).
+String netNumber(double d, {int? digits}) {
+  if (d.isNaN) return 'NaN';
+  if (d.isInfinite) return d > 0 ? 'Infinity' : '-Infinity';
+  if (d == 0) return d.isNegative && digits == null ? '-0' : '0';
+  final e = digits == null ? d.abs().toStringAsExponential() : d.abs().toStringAsExponential(digits - 1);
+  final m = RegExp(r'^(\d)(?:\.(\d+))?e([+-]\d+)$').firstMatch(e)!;
+  var ds = '${m[1]}${m[2] ?? ''}'.replaceFirst(RegExp(r'0+$'), '');
+  if (ds.isEmpty) ds = '0';
+  final exp = int.parse(m[3]!);
+  final sign = d < 0 ? '-' : '';
+  // .NET switches to an exponent from 1E+15 up and from 1E-05 down.
+  if (exp >= 15 || exp < -4) {
+    final mant = ds.length > 1 ? '${ds[0]}.${ds.substring(1)}' : ds;
+    return '$sign${mant}E${exp < 0 ? '-' : '+'}${exp.abs().toString().padLeft(2, '0')}';
+  }
+  if (exp < 0) return '${sign}0.${'0' * (-exp - 1)}$ds';
+  if (ds.length <= exp + 1) return '$sign$ds${'0' * (exp + 1 - ds.length)}';
+  return '$sign${ds.substring(0, exp + 1)}.${ds.substring(exp + 1)}';
+}
+
 /// PowerShell's `-eq` on strings ignores case.
 bool psEq(String a, String b) => a.toLowerCase() == b.toLowerCase();
 

@@ -55,7 +55,7 @@ Source: "..\src\dmx_out.ps1";      DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\scene_edit.ps1";   DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\move_edit.ps1";    DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\looks.ps1";        DestDir: "{app}"; Flags: ignoreversion
-Source: "..\srcpc40.ps1";        DestDir: "{app}"; Flags: ignoreversion
+Source: "..\src\apc40.ps1";        DestDir: "{app}"; Flags: ignoreversion
 Source: "..\src\showxpress_helper.vbs";  DestDir: "{app}"; Flags: ignoreversion
 ; installed as sx_studio_2.ico (the new SX logo, v1.9.8): a NEW file name again, so Windows reads the icon fresh instead of its cached old picture
 Source: "..\assets\aim_movers.ico";      DestDir: "{app}"; DestName: "sx_studio_2.ico"; Flags: ignoreversion

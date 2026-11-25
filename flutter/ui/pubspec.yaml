@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   http: ^1.2.0
-  shared_preferences: ^2.5.6
+  shared_preferences: ^2.5.0
   sx_api:
     path: ../packages/sx_api
   sx_engine:

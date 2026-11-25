@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import '../apc40/runner.dart';
 import '../player/player_links.dart';
 import '../sx/auto_player.dart';
 import 'engine.dart';
@@ -15,17 +16,19 @@ const idleMax = Duration(seconds: 300);
 /// rule only bites after the window has been closed.
 ///
 /// Port of the idle check in `df_aim_gui.ps1`'s main loop (`$last`,
-/// `$idleMax`, `Test-Auto`, `Test-Player`, `$queue.Count`).
+/// `$idleMax`, `Test-Auto`, `Test-Player`, `Test-Apc40Busy`, `$queue.Count`).
 class Lifetime {
   Lifetime({required this.busy, this.max = idleMax, DateTime Function()? clock}) : _clock = clock ?? DateTime.now {
     _last = _clock();
   }
 
   /// The engine's rule: work in the save queue, the Auto Show or the SX
-  /// Player playing. Live output does not count, as before: the window that
-  /// drove it stops it when it closes.
-  factory Lifetime.of(Engine e) =>
-      Lifetime(busy: () => !e.queue.isEmpty || (e.find<AutoShow>()?.running ?? false) || (e.find<PlayerControl>()?.running ?? false));
+  /// Player playing, or the APC40 in use (`Test-Apc40Busy`). Live output does
+  /// not count, as before: the window that drove it stops it when it closes.
+  factory Lifetime.of(Engine e) => Lifetime(
+    busy: () =>
+        !e.queue.isEmpty || (e.find<AutoShow>()?.running ?? false) || (e.find<PlayerControl>()?.running ?? false) || (e.find<Apc40Runner>()?.busy ?? false),
+  );
 
   /// True while something must keep the engine alive.
   final bool Function() busy;

@@ -5,7 +5,6 @@ import 'dart:math';
 import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 import 'package:sx_engine/sx_engine.dart';
-import 'package:sx_engine/src/tools/apc40.dart';
 import 'package:test/test.dart';
 
 import 'parity.dart';

@@ -82,8 +82,10 @@ The old tools lean on these. Most parity failures come from one of them. Helpers
 ## Rules for the UI
 
 - Screens talk to the engine through `SxClient` only. Never import `sx_engine` or `dart:io` under `ui/lib`, except `boot/boot_io.dart`.
-- Use the pieces in `ui/lib/widgets/sx_widgets.dart` (`ScreenBody`, `SxCard`, `SxHeader`, `SaveBar`, `GroupLabel`, `ErrorBox`, `runSave`) and the colors and text styles in `ui/lib/theme.dart`. If you need a new shared widget, put it in your own screen folder and say so in your report.
-- Keep the old app's look: its colors, fonts, cards and spacing. Take every color from `Sx` in `theme.dart`, never a literal, because the light theme swaps them.
+- Use the pieces in `ui/lib/widgets/sx_widgets.dart` (`ScreenBody`, `SxCard`, `SxHeader`, `SaveBar`, `GroupLabel`, `ErrorBox`, `MiniButton`, `Seg`, `runSave`, `showReport`, `sxGutter`) and the colors and text styles in `ui/lib/theme.dart`. If you need a new shared widget, put it in your own screen folder and say so in your report.
+- Keep the old app's look. Read your screen's CSS in `repo/src/df_aim_gui.ps1` and copy its sizes, radii, spacing and which color goes where. `FilledButton` is the old `.primary`, `OutlinedButton` the plain `button`, `MiniButton` the `.mini`, `Seg` the `.seg`, `Sx.tint(color)` the tinted boxes and pills.
+- The app has the old dark theme and the old light theme, and Settings switches between them. So every color comes from `Sx`, and the `Sx` colors are getters. Never write `const` around one, never keep one in a field or a `static final`, never write a literal `Color(...)` or `Colors.x` (transparent is fine). Read them in `build` or `paint` each time. Screenshot your screen in both themes (`&theme=light`).
+- No symbol characters or emoji in text: no check marks, arrows, triangles, warning signs or gears. The fonts don't have them, and a phone on a venue network can't download a fallback font, so they show as empty boxes. Use an `Icon` from Material Icons, which ships with the app.
 - Nothing that repaints continuously. No `CircularProgressIndicator`, no pulsing, no shimmer. While loading, show a line of text.
 - Keep the old screen's wording, trimmed. No em dashes anywhere, in copy or comments.
 - A screen that holds unsaved edits calls `AppScope.read(context).setDirty(tabId, true)` and clears it after saving or undoing.
@@ -105,6 +107,8 @@ cd ui && flock /tmp/sx-flutter-build.lock flutter build web --release --no-web-r
 chromium-browser --headless --no-sandbox --hide-scrollbars --window-size=1300,900 --virtual-time-budget=15000 \
   --screenshot=/tmp/<you>/shot.png "http://127.0.0.1:<your port>/?k=dev&tab=<tab id>"
 ```
+
+Add `&theme=light` for the light theme, and `--window-size=390,844` for a phone.
 
 The old app runs here too, for comparing screens and API answers:
 

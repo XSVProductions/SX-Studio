@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 
+import 'screens/aim/aim_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
@@ -36,7 +37,7 @@ Widget _todo(BuildContext context) => ScreenBody(
 /// Every tab, in the old app's order. A screen replaces its `_todo` here.
 const tabs = [
   TabDef('rt', 'Rig Test', TabGroup.gig, 'Which mover hangs where', _todo),
-  TabDef('aim', 'Aim Movers', TabGroup.gig, "Fit the dance floor and AROUND ROOM to tonight's venue", _todo),
+  TabDef('aim', 'Aim Movers', TabGroup.gig, "Fit the dance floor and AROUND ROOM to tonight's venue", AimScreen.new),
   TabDef('color', "Tonight's Color", TabGroup.gig, 'The decor color on the movers and uplights', _todo),
   TabDef('pre', 'Pre-show Check', TabGroup.gig, 'One look before the guests arrive', _todo),
   TabDef('lab', 'SX Player', TabGroup.live, 'Play the show without ShowXpress', _todo),

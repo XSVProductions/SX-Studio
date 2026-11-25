@@ -3,6 +3,7 @@ library;
 
 export 'src/auto.dart';
 export 'src/apc.dart';
+export 'src/apc40.dart';
 export 'src/aim.dart';
 export 'src/client.dart';
 export 'src/color.dart';

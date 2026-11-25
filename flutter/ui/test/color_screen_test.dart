@@ -52,7 +52,10 @@ void main() {
     await tester.pumpWidget(
       AppScope(
         state: app,
-        child: MaterialApp(theme: sxTheme(), home: Scaffold(body: Builder(builder: ColorScreen.new))),
+        child: MaterialApp(
+          theme: sxTheme(),
+          home: Scaffold(body: Builder(builder: ColorScreen.new)),
+        ),
       ),
     );
     await tester.pumpAndSettle();

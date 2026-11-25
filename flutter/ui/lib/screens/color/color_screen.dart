@@ -16,6 +16,7 @@ const colorPresets = [
   ('Peach', 'ffb38a'), ('Orange', 'ff6a00'), ('Warm white', 'ffd9a8'), ('Cold white', 'e6f2ff'),
 ];
 
+/// A color from the show or the one picked: data, not a theme color.
 Color hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
 
 /// "today at 7:11 AM", or "Mon, Nov 23 7:11 AM", from the saved `yyyy-MM-ddTHH:mm:ss`.
@@ -179,51 +180,54 @@ class _ColorScreenState extends State<ColorScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SxHeader(
-                "Tonight's color",
-                sub:
-                    'The decor colour for tonight. Saving makes two ShowXpress buttons called TONIGHTS COLOR: on the MOVER COLORS page '
-                    '(every mover on the nearest colour of its wheel, colour only, so it goes on top of any movement) and on the UPLIGHTS page '
-                    '(the uplights in exactly this colour).',
-                actions: [
-                  // on a phone the save bar's hint says the same, and the title needs the room
-                  if (d != null && (d.hex.isNotEmpty || _hex.isNotEmpty) && MediaQuery.sizeOf(context).width >= 600)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(dirty ? 'Not saved yet' : 'Matches the show', style: TextStyle(fontSize: 12.5, color: dirty ? Sx.amber : Sx.green)),
-                    ),
-                  OutlinedButton(onPressed: _load, child: const Text('Refresh')),
-                ],
-              ),
+              _header(d, dirty),
               ErrorBox(_error),
               if (d == null && _error.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 14),
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
                   child: Text('Reading the show.', style: Sx.sub),
                 ),
               if (d != null)
-                LayoutBuilder(
-                  builder: (context, c) {
-                    final wide = c.maxWidth >= 720;
-                    final left = _pickers(), right = _result(d);
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: wide
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(flex: 3, child: left),
-                                const SizedBox(width: 26),
-                                Expanded(flex: 2, child: right),
-                              ],
-                            )
-                          : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [left, const SizedBox(height: 18), right]),
-                    );
-                  },
+                // the old `.clwrap`: picks, then a 300 px result column; one column under 860 px
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: MediaQuery.sizeOf(context).width > 860
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _pickers()),
+                            const SizedBox(width: 22),
+                            SizedBox(width: 300, child: _result(d)),
+                          ],
+                        )
+                      : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_pickers(), const SizedBox(height: 22), _result(d)]),
                 ),
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  /// Title, the saved-or-not pill and Refresh. On a phone the title takes the
+  /// full width and the rest goes under it, as on the old page.
+  Widget _header(ColorPreview? d, bool dirty) {
+    const title = "Tonight's color";
+    const sub =
+        'The decor colour for tonight. Saving makes two ShowXpress buttons called TONIGHTS COLOR: on the MOVER COLORS page '
+        '(every mover on the nearest colour of its wheel, colour only, so it goes on top of any movement) and on the UPLIGHTS page '
+        '(the uplights in exactly this colour).';
+    final actions = [
+      if (d != null && (d.hex.isNotEmpty || _hex.isNotEmpty)) _StateTag(dirty: dirty),
+      OutlinedButton(onPressed: _load, child: const Text('Refresh')),
+    ];
+    if (MediaQuery.sizeOf(context).width > 640) return SxHeader(title, sub: sub, actions: actions);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SxHeader(title, sub: sub),
+        const SizedBox(height: 10),
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: actions),
       ],
     );
   }
@@ -234,7 +238,8 @@ class _ColorScreenState extends State<ColorScreen> {
       const GroupLabel('Quick picks'),
       LayoutBuilder(
         builder: (context, c) {
-          final cols = math.max(2, (c.maxWidth + 6) ~/ 110);
+          // the old `.clpal`: columns of at least 104 px, two on a phone
+          final cols = MediaQuery.sizeOf(context).width <= 640 ? 2 : math.max(2, (c.maxWidth + 6) ~/ 110);
           final w = (c.maxWidth - 6 * (cols - 1)) / cols;
           return Wrap(
             spacing: 6,
@@ -259,7 +264,7 @@ class _ColorScreenState extends State<ColorScreen> {
         spacing: 22,
         runSpacing: 14,
         children: [
-          ColorWheel(size: 200, hex: _hex, brightness: _bright / 100, onPick: _wheel),
+          ColorWheel(size: MediaQuery.sizeOf(context).width <= 640 ? 190 : 200, hex: _hex, brightness: _bright / 100, onPick: _wheel),
           SizedBox(
             width: 230,
             child: Column(
@@ -273,14 +278,14 @@ class _ColorScreenState extends State<ColorScreen> {
                     focusNode: _hexFocus,
                     maxLength: 7,
                     decoration: const InputDecoration(hintText: '#RRGGBB', counterText: ''),
-                    style: const TextStyle(fontFamily: 'monospace', fontSize: 13.5),
+                    style: const TextStyle(fontSize: 13),
                     onSubmitted: (_) => _typedHex(),
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text('Brightness  $_bright%', style: const TextStyle(fontSize: 12.5, color: Sx.dim)),
+                Text('Brightness  $_bright%', style: TextStyle(fontSize: 12.5, color: Sx.dim)),
                 Slider(min: 10, max: 100, value: _bright.toDouble().clamp(10, 100), onChanged: _brightness),
-                const Text('Tap or drag on the wheel. The uplights get exactly this colour, the movers only have their wheel colours.', style: Sx.sub),
+                Text('Tap or drag on the wheel. The uplights get exactly this colour, the movers only have their wheel colours.', style: Sx.sub),
               ],
             ),
           ),
@@ -291,29 +296,31 @@ class _ColorScreenState extends State<ColorScreen> {
 
   Widget _result(ColorPreview d) {
     final n140 = _hex.isEmpty ? null : nearestWheel(d.wheel140, _hex), n251 = _hex.isEmpty ? null : nearestWheel(d.wheel251, _hex);
+    // the old `.kv` rows and `.sw` swatches
     Widget swatch(String hex) => Container(
-      width: 14,
-      height: 14,
-      margin: const EdgeInsets.only(right: 7),
+      width: 12,
+      height: 12,
+      margin: const EdgeInsets.only(right: 6),
       decoration: BoxDecoration(
         color: hexColor(hex),
         borderRadius: BorderRadius.circular(3),
         border: Border.all(color: Sx.line2),
       ),
     );
-    Widget wheelRow(WheelColor? w) => w == null ? const Text('-', style: TextStyle(color: Sx.dim)) : Row(children: [swatch(w.hex), Text(w.name)]);
+    Widget none() => Text('-', style: TextStyle(color: Sx.dim));
+    Widget wheelRow(WheelColor? w) => w == null ? none() : Row(children: [swatch(w.hex), Text(w.name)]);
     Widget row(String label, Widget value) => Padding(
-      padding: const EdgeInsets.symmetric(vertical: 5),
+      padding: const EdgeInsets.symmetric(vertical: 1.5),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 86,
-            child: Text(label, style: const TextStyle(fontSize: 13, color: Sx.dim)),
+            width: 94,
+            child: Text(label, style: TextStyle(fontSize: 12.5, color: Sx.dim)),
           ),
           Expanded(
             child: DefaultTextStyle.merge(
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+              style: TextStyle(fontSize: 12.5, color: Sx.text, fontWeight: FontWeight.w500),
               child: value,
             ),
           ),
@@ -323,11 +330,10 @@ class _ColorScreenState extends State<ColorScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 18),
         Container(
           height: 120,
           alignment: Alignment.bottomLeft,
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
             color: _hex.isEmpty ? Sx.well : hexColor(_hex),
             borderRadius: BorderRadius.circular(12),
@@ -335,10 +341,11 @@ class _ColorScreenState extends State<ColorScreen> {
           ),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(color: const Color(0x8C000000), borderRadius: BorderRadius.circular(6)),
+            // a dark label that reads on any picked colour, in both themes
+            decoration: BoxDecoration(color: Sx.isLight ? Sx.text.withValues(alpha: .7) : Sx.bg.withValues(alpha: .55), borderRadius: BorderRadius.circular(6)),
             child: Text(
               _hex.isEmpty ? 'pick a colour' : '#$_hex',
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Sx.text),
+              style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: Sx.isLight ? Sx.bg : Sx.text),
             ),
           ),
         ),
@@ -347,6 +354,7 @@ class _ColorScreenState extends State<ColorScreen> {
           key: const Key('color-name'),
           controller: _name,
           maxLength: 30,
+          style: const TextStyle(fontSize: 13),
           decoration: const InputDecoration(hintText: 'Name (optional), e.g. Blush', counterText: ''),
           onChanged: (_) {
             setState(() {});
@@ -363,14 +371,14 @@ class _ColorScreenState extends State<ColorScreen> {
             children: [
               Row(
                 children: [
-                  if (_hex.isEmpty) const Text('-', style: TextStyle(color: Sx.dim)) else ...[swatch(_hex), const Text('exact colour')],
-                  if (d.washes.isEmpty) const Text('  none found', style: TextStyle(color: Sx.amber)),
+                  if (_hex.isEmpty) none() else ...[swatch(_hex), const Text('exact colour')],
+                  if (d.washes.isEmpty) Text('  none found', style: TextStyle(color: Sx.amber)),
                 ],
               ),
               if (d.washes.isNotEmpty)
                 Text(
                   d.washes.join(', '),
-                  style: const TextStyle(fontSize: 12, color: Sx.dim, fontWeight: FontWeight.w400),
+                  style: TextStyle(fontSize: 11.5, color: Sx.dim, fontWeight: FontWeight.w400),
                 ),
             ],
           ),
@@ -386,7 +394,7 @@ class _ColorScreenState extends State<ColorScreen> {
                 if (d.saved.isNotEmpty)
                   Text(
                     '  ${savedWhen(d.saved, DateTime.now())}',
-                    style: const TextStyle(color: Sx.dim, fontWeight: FontWeight.w400),
+                    style: TextStyle(color: Sx.dim, fontWeight: FontWeight.w400),
                   ),
               ],
             ),
@@ -411,16 +419,20 @@ class _Preset extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: on ? const Color(0x14A3E635) : Sx.panel,
+        color: on ? Sx.accent.withValues(alpha: .08) : Sx.panel,
         border: Border.all(color: on ? Sx.accent : Sx.line),
         borderRadius: BorderRadius.circular(9),
       ),
       child: Row(
         children: [
           Container(
-            width: 16,
-            height: 16,
-            decoration: BoxDecoration(color: hexColor(hex), borderRadius: BorderRadius.circular(4)),
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              color: hexColor(hex),
+              shape: BoxShape.circle,
+              border: Border.all(color: Sx.line2),
+            ),
           ),
           const SizedBox(width: 7),
           Expanded(
@@ -430,4 +442,35 @@ class _Preset extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// The old page's `.state` pill: blue "Not saved yet" or green "Matches the show".
+class _StateTag extends StatelessWidget {
+  const _StateTag({required this.dirty});
+
+  final bool dirty;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = dirty ? Sx.blue : Sx.green;
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border.all(color: c.withValues(alpha: dirty ? .45 : .35)),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(dirty ? Icons.circle : Icons.check, size: dirty ? 8 : 14, color: c),
+          const SizedBox(width: 6),
+          Text(
+            dirty ? 'Not saved yet' : 'Matches the show',
+            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c),
+          ),
+        ],
+      ),
+    );
+  }
 }

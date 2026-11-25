@@ -286,10 +286,7 @@ class LookDraft {
     name: j.str('name'),
     steps: [
       for (final s in _rawList(j['steps']))
-        if (s is Map)
-          LookStep.fromJson(s.cast<String, Object?>())
-        else if (s != null)
-          const LookStep(len: null, f: {}),
+        if (s is Map) LookStep.fromJson(s.cast<String, Object?>()) else if (s != null) const LookStep(len: null, f: {}),
     ],
   );
 
@@ -591,7 +588,9 @@ _HeadStep _colorChannels(ModelCaps c, String name, {required bool on, required b
 /// The prism fan on one head: gobos open, prisms in or spinning, zoom and
 /// focus, frost off, lit. No color of its own.
 _HeadStep _prismChannels(ModelCaps c, LookOptions o) {
-  final out = <List<int>>[for (final ix in c.gobos) [ix, 0, 0]];
+  final out = <List<int>>[
+    for (final ix in c.gobos) [ix, 0, 0],
+  ];
   for (final (j, p) in c.prisms.indexed) {
     final q = o.prisms.isEmpty ? PrismSetting(PrismMode.off, 0) : o.prisms[j < o.prisms.length ? j : o.prisms.length - 1];
     var v = 0;

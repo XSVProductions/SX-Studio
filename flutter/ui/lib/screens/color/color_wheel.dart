@@ -2,6 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../../theme.dart';
+import 'color_screen.dart' show hexColor;
+
 /// JavaScript's `Math.round`: halves go up. The old page did its color maths
 /// in JavaScript, so the picker gives the same hex for the same spot.
 int jsRound(num v) => (v + 0.5).floor();
@@ -90,21 +93,22 @@ class _WheelPainter extends CustomPainter {
           ..lineTo(c.dx + r0 * math.cos(a1), c.dy + r0 * math.sin(a1));
         if (r0 > 0) path.arcTo(Rect.fromCircle(center: c, radius: r0), a1, a0 - a1, false);
         path.close();
-        canvas.drawPath(path, paint..color = Color(0xFF000000 | int.parse(hsvToHex(h, s, brightness), radix: 16)));
+        canvas.drawPath(path, paint..color = hexColor(hsvToHex(h, s, brightness)));
       }
     }
     if (hex.isEmpty) return;
     final (h, s, _) = hexToHsv(hex);
     final a = h * math.pi / 180;
+    // the knob: a light ring with a thin dark edge, from the theme
     final k = Offset(c.dx + math.sin(a) * s * r, c.dy - math.cos(a) * s * r);
-    canvas.drawCircle(k, 10, Paint()..color = Color(0xFF000000 | int.parse(hex, radix: 16)));
+    canvas.drawCircle(k, 10, Paint()..color = hexColor(hex));
     canvas.drawCircle(
       k,
       10,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3
-        ..color = Colors.white,
+        ..color = Sx.isLight ? Sx.bg : Sx.text,
     );
     canvas.drawCircle(
       k,
@@ -112,7 +116,7 @@ class _WheelPainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1
-        ..color = Colors.black,
+        ..color = Sx.isLight ? Sx.text : Sx.bg,
     );
   }
 

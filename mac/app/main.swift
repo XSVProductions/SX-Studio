@@ -184,6 +184,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
 
+    // <input type="file"> (Import settings): WKWebView only shows a file picker if the app opens one
+    func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+        let p = NSOpenPanel()
+        p.canChooseFiles = true
+        p.canChooseDirectories = parameters.allowsDirectories
+        p.allowsMultipleSelection = parameters.allowsMultipleSelection
+        p.beginSheetModal(for: window) { r in completionHandler(r == .OK ? p.urls : nil) }
+    }
+
     func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = NSAlert()
         a.messageText = "SX Studio"

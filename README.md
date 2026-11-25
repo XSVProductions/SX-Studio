@@ -35,7 +35,7 @@ The installers aren't code-signed, which is why Windows and macOS ask the first 
 - **Windows:** "SX Studio" on the Desktop and in the Start menu. Uninstall it from *Settings -> Apps*.
 - **Mac:** *SX Studio* in Applications, plus an *SX Studio* shortcut on the Desktop. It opens in its own window with its own Dock icon (to keep it there: right-click the icon -> *Options -> Keep in Dock*).
 
-SX Studio always opens on its **Home** page: the tabs, a **⚙ Settings** button (top right), **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to SX Studio's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
+SX Studio always opens on its **Home** page: the tabs (along the top they're in four menus — **Before the gig**, **Live**, **Rig & Control** and **Editors** — plus **Home**), a **⚙ Settings** button (top right), **Launch / Close ShowXpress** at the top, and an **Update** button there when a newer version is on GitHub (it downloads and installs it for you). Put your own logo next to SX Studio's by saving it as `brand.png` in `%APPDATA%\ShowXpress Helper\` (Mac: `~/AwaazTools/brand.png`).
 
 ## Weekly use
 
@@ -160,7 +160,7 @@ Phones get no updates or phone settings (those stay on the laptop). Anything a p
 Press **⚙** at the top right (or the **Settings** tile on Home):
 
 - **Look:** Dark, Light or *Same as this device*. Each computer, phone and iPad keeps its own.
-- **Tabs:** drag ☰ or use the arrows to change the tab order, and untick a tab to hide it (from Home too). The order is the same on the laptop, the phone and the iPad. **Reset** brings back the normal order.
+- **Tabs:** drag ☰ or use the arrows to change the order of the tabs in their menu, and untick a tab to hide it (from Home too). The order is the same on the laptop, the phone and the iPad. **Reset** brings back the normal order. A menu with only one tab left shown becomes a plain button.
 - **Google Drive:** whether Google Drive for desktop is installed and signed in, **Open Google Drive** / **Get Google Drive** to sign in or install it, Sync and Import, the My Drive folder if SX Studio can't find it by itself, and the import backups.
 - **Phone & iPad:** turn phone access on, pair, unpair.
 - **ShowXpress:** open ShowXpress again after queued changes, and open the show folder.

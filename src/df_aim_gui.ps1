@@ -728,7 +728,7 @@ $setF = Join-Path $cfgDir 'settings.json'
 # 2026-11-24 (user): pages can be collapsed / hidden (collapsed:[n..], hidden:[n..]), and the player has pages of its own
 # (custom:[{id:"x1", name, swap, buttons:[{id:"x1_b1", title, file, fader, bpm, flash, beats, color}]}]) that play the
 # show's scene / movement files. All of it is SX Studio's settings only - live.ini and the scenes are never written.
-$tabIds = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab', 'scene', 'move', 'look')
+$tabIds = @('rt', 'aim', 'color', 'pre', 'lab', 'auto', 'rig', 'skip', 'apc', 'speed', 'scene', 'move', 'look', 'health')
 $secRx = '^[\w .\-]{1,60}$'
 function Get-TabNames($v) {
   $o = [ordered]@{}
@@ -767,6 +767,11 @@ function Get-Settings {
     try { $j = [IO.File]::ReadAllText($setF) | ConvertFrom-Json; foreach ($k in @($s.Keys)) { if ($null -ne $j.$k) { $s[$k] = $j.$k } } } catch {}
   }
   $o = @(@($s.tabOrder) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
+  # v1.9.7 put the tabs in menus with a new default order. An order still in the old default sequence was never changed
+  # by the user (it was saved with the other settings), so it takes the new one; an order the user set is kept
+  $old = @('rt', 'rig', 'aim', 'skip', 'color', 'apc', 'speed', 'health', 'pre', 'auto', 'lab', 'scene', 'move', 'look'); $k = 0
+  $sub = $true; foreach ($t in $o) { while ($k -lt $old.Count -and $old[$k] -ne $t) { $k++ }; if ($k -ge $old.Count) { $sub = $false; break }; $k++ }
+  if ($sub) { $o = @() }
   $s.tabOrder = @($o + @($tabIds | Where-Object { $o -notcontains $_ }))
   $s.tabHidden = @(@($s.tabHidden) | ForEach-Object { "$_" } | Where-Object { $tabIds -contains $_ } | Select-Object -Unique)
   $s.reopen = [bool]$s.reopen; $s.autoUpd = [bool]$s.autoUpd; $s.driveFolder = "$($s.driveFolder)"
@@ -1316,6 +1321,16 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
 .mvheads .num{width:86px;font-size:13px;padding:4px 6px}.mvheads .num.chg{border-color:var(--blue);color:var(--blue)}
 @media (max-width:760px){.sewrap{grid-template-columns:1fr}.seheads{max-height:260px}.secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.secr select{grid-column:1/3}}
 .ph .sewrap{grid-template-columns:1fr}.ph .seheads{max-height:260px}.ph .secr{grid-template-columns:90px minmax(0,1fr) 58px;row-gap:4px}.ph .secr select{grid-column:1/3}
+.tabs{flex-wrap:wrap!important;overflow:visible!important;align-items:center;gap:3px!important}
+.tg{position:relative}.tgb{display:flex;align-items:center;white-space:nowrap}
+.tgc{color:var(--txt)}.tgc:not(:empty)::before{content:'\00b7';margin:0 7px;color:var(--mute)}.tg.one .tgn,.tg.one .tgv{display:none}.tg.one .tgc::before{display:none}
+.tgv{font-style:normal;font-size:10px;margin-left:7px;opacity:.65;transition:transform .15s}.tg.open .tgv{transform:rotate(180deg)}.tg.open .tgb{color:var(--txt);background:var(--tabon)}
+.tgm{display:none;position:absolute;top:calc(100% + 7px);left:0;min-width:210px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:5px;box-shadow:0 14px 34px rgba(0,0,0,.45);z-index:60;flex-direction:column;gap:2px}
+.tg.open .tgm{display:flex}.tg.r .tgm{left:auto;right:0}
+.tabs .tgm button{text-align:left;padding:9px 13px;border-radius:8px;font-size:13.5px;white-space:nowrap;flex:none}
+.tabs .tgm button:hover{background:var(--tabon);color:var(--txt)}.tabs .tgm button.on{color:var(--amber);background:transparent;box-shadow:inset 3px 0 0 var(--amber)}
+.tabgh{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mute);margin:10px 2px 0}.tabgh:first-child{margin-top:0}
+@media(max-width:620px){.tg.on .tgn{display:none}.tg.on .tgc::before{display:none}.tgm{min-width:190px}}
 </style>
 <script>(function(){try{var m=localStorage.getItem('sxh_theme')||'dark';if(m==='light'||(m==='auto'&&matchMedia('(prefers-color-scheme: light)').matches))document.documentElement.classList.add('light');}catch(e){}})();</script></head><body>
 <svg aria-hidden="true" style="position:absolute;width:0;height:0;border:0;overflow:hidden"><defs>
@@ -1324,7 +1339,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
  <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
 </defs></svg>
 <header><div class="brandmk" id="logo" title="Home"><svg class="mk" viewBox="0 0 778 445" aria-label="SX"><use href="#sxm"/></svg><h1 id="ttl">STUDIO</h1></div>
-  <nav class="tabs"><button data-tab="rt">Rig Test</button><button data-tab="rig">Tonight's Rig</button><button data-tab="aim">Aim Movers</button><button data-tab="skip">Skip Flash</button><button data-tab="color">Tonight's Color</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button><button data-tab="health">Health Check</button><button data-tab="pre">Pre-show Check</button><button data-tab="auto">Auto Show</button><button data-tab="lab">SX Player</button><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button></nav>
+  <nav class="tabs"><button class="tgh" id="tghome">Home</button><div class="tg" data-g="gig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Before the gig</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rt">Rig Test</button><button data-tab="aim">Aim Movers</button><button data-tab="color">Tonight's Color</button><button data-tab="pre">Pre-show Check</button></div></div><div class="tg" data-g="live"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Live</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="lab">SX Player</button><button data-tab="auto">Auto Show</button></div></div><div class="tg" data-g="rig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Rig &amp; Control</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rig">Tonight's Rig</button><button data-tab="skip">Skip Flash</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button></div></div><div class="tg" data-g="edit"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Editors</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button><button data-tab="health">Health Check</button></div></div></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
@@ -1363,7 +1378,7 @@ header h1{font-family:var(--fd);font-size:14px;font-weight:600;letter-spacing:4p
   <section class="card"><h2>&#9881; Settings</h2><p class="sub" style="margin:0">Light or dark is set for each device. The tab order is the same on this computer, the phone and the iPad.</p></section>
   <section class="card setsec"><h2>Look</h2><p class="sub">Light is easier to read in daylight; dark is kinder in a dark venue.</p>
    <div class="seg" id="stheme"><button data-v="dark">&#127769; Dark</button><button data-v="light">&#9728;&#65039; Light</button><button data-v="auto">Same as this device</button></div></section>
-  <section class="card setsec"><div class="row"><div class="grow"><h2>Tabs</h2><p class="sub" style="margin:0">Drag &#9776; or use the arrows to change the order, and click a name to rename the tab (Enter to keep it, empty = its own name again). Untick a tab to hide it (it leaves the Home page too).</p></div><button id="stabreset" class="mini">Reset</button></div><div id="stabs" class="tablist"></div></section>
+  <section class="card setsec"><div class="row"><div class="grow"><h2>Tabs</h2><p class="sub" style="margin:0">The tabs are in four menus along the top. Drag &#9776; or use the arrows to change the order in a menu, and click a name to rename the tab (Enter to keep it, empty = its own name again). Untick a tab to hide it (it leaves the Home page too).</p></div><button id="stabreset" class="mini">Reset</button></div><div id="stabs" class="tablist"></div></section>
   <section class="card setsec" id="gdcard"><div class="row"><div class="grow"><h2>Google Drive</h2><p class="sub" id="gdacct" style="margin:0">Looking for Google Drive&hellip;</p></div>
    <div class="pc-only" style="display:flex;gap:6px;flex-wrap:wrap"><button id="gdapp" class="mini" style="display:none">Open Google Drive</button><button id="gddl" class="mini">Get Google Drive</button></div></div>
    <div class="row" style="margin-top:14px;align-items:flex-start"><div class="grow"><p class="sub" id="gdsub" style="margin:0">&nbsp;</p><div id="gdhint" class="summary"></div></div>
@@ -1819,7 +1834,7 @@ function renderQ(){const b=$('qbar');if(!Q){b.className='qbar';return;}const d=Q
  const qc=$('qclose');if(qc)qc.onclick=sxClose;}
 async function qPoll(){try{const r=await api('/api/sx');Q=r.q;renderQ();}catch(e){}}
 function reloadAll(){// the queue just changed the show: read everything again (unsaved edits are now saved)
- LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE)seOpen(SE.file,true);const b=document.querySelector('.tabs button.on');setTab(b?b.dataset.tab:'home');}
+ LD.floor=0;LD.room=0;load();S=null;R=null;A=null;SP=null;H=null;RT=null;CL=null;SL=null;if(SE)seOpen(SE.file,true);const b=document.querySelector('.tabs button[data-tab].on');setTab(b?b.dataset.tab:'home');}
 async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList.remove('on');const was=sxOpen;sxOpen=r.open;if(!sxOpen)sxCloseT=0;const pd=Q&&Q.done?Q.done.at:'';Q=r.q;
  remPoll(r,was);
  if(Q&&Q.done&&Q.done.at!==pd&&Q.done.at!==QSEEN)reloadAll();renderQ();const p=$('sx');p.className='pill '+(sxOpen?'bad':'ok');
@@ -1833,12 +1848,27 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
 const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab','scene','move','look'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
- document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));
+ document.querySelectorAll('.tabs button[data-tab]').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));tgClose();tgSync();
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
  $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();if(t==='move'){if(!ML&&!MO)loadMoves();mvLiteList();mvAnim(!!MO);}if(t==='look'){if(!LK)loadLooks();lkAnim(true);}$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
-document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+document.querySelectorAll('.tabs button[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+// the tab bar's menus: Home + one drop-down per group. A group with one tab left (the others hidden in Settings) is a plain button
+function tgVis(g){return [...g.querySelectorAll('[data-tab]')].filter(b=>getComputedStyle(b).display!=='none');}
+function tgSync(){document.querySelectorAll('.tg').forEach(g=>{const v=tgVis(g),on=g.querySelector('[data-tab].on'),one=v.length===1;
+  g.style.display=v.length?'':'none';g.classList.toggle('one',one);g.classList.toggle('on',!!on);g.querySelector('.tgb').classList.toggle('on',!!on);
+  g.querySelector('.tgc').textContent=one?v[0].textContent:(on?on.textContent:'');g.querySelector('.tgb').title=one?'':g.querySelector('.tgn').textContent;});
+ $('tghome').classList.toggle('on',lastTab==='home');}
+function tgClose(){document.querySelectorAll('.tg.open').forEach(g=>{g.classList.remove('open');g.querySelector('.tgb').setAttribute('aria-expanded','false');});}
+function tgOpen(g){tgClose();g.classList.remove('r');g.classList.add('open');g.querySelector('.tgb').setAttribute('aria-expanded','true');
+ if(g.querySelector('.tgm').getBoundingClientRect().right>innerWidth-8)g.classList.add('r');}
+document.querySelectorAll('.tg').forEach(g=>{const b=g.querySelector('.tgb');
+ b.onclick=()=>{if(g.classList.contains('one')){const v=tgVis(g)[0];if(v)setTab(v.dataset.tab);return;}g.classList.contains('open')?tgClose():tgOpen(g);};
+ b.onpointerenter=e=>{if(e.pointerType==='mouse'&&document.querySelector('.tg.open')&&!g.classList.contains('open')&&!g.classList.contains('one'))tgOpen(g);};});
+document.addEventListener('click',e=>{if(!e.target.closest('.tg'))tgClose();});
+document.addEventListener('keydown',e=>{const g=document.querySelector('.tg.open');if(g&&e.key==='Escape'){tgClose();g.querySelector('.tgb').focus();}});
+$('tghome').onclick=()=>setTab('home');
 $('logo').onclick=()=>setTab('home');$('cog').onclick=()=>setTab('settings');document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setTab(b.dataset.go));
 
 // ---------------- Skip Flash heads
@@ -2123,7 +2153,7 @@ let PEND=false,REMSEEN=null,REMAT=0,remWait=0,remBusy=false;const REMR={},REMBOX
 function remSets(t){if(t==='rt')return [{label:'RIG ID',titles:['RIG ID']}];
  return aimMode==='room'?[{label:'ROOM AIM (ADJUST)',titles:['ROOM AIM (ADJUST)']},{label:'ROOM CHECK',titles:['ROOM CHECK']}]
   :[{label:'DF AIM (ADJUST)',titles:['DF AIM (ADJUST)']},{label:'DF CHECK 140 + 251',titles:['DF CHECK 140','DF CHECK 251']}];}
-function curTab(){const b=document.querySelector('.tabs button.on');return b?b.dataset.tab:'home';}
+function curTab(){const b=document.querySelector('.tabs button[data-tab].on');return b?b.dataset.tab:'home';}
 const isSetup=p=>/^\s*setup\s*$/i.test(p||'');
 function remRecent(){return PEND||(REMAT&&Date.now()-REMAT<60000);}
 async function remGet(p,b){try{return await api(p,b);}catch(e){return {ok:false,error:'Lost connection.'};}}
@@ -2551,7 +2581,8 @@ window.addEventListener('pagehide',()=>{if((LV||CP||SEP||MVP||LKP)&&PH)navigator
 
 // ---------------- SETTINGS (cogwheel, user 2026-11-22): look (per device), tab order / hidden tabs (shared, settings.json
 // on the computer), Google Drive, phone & iPad, ShowXpress, updates
-const TABDEF=[...document.querySelectorAll('.tabs button')].map(b=>({id:b.dataset.tab,name:b.textContent}));
+const TABDEF=[...document.querySelectorAll('.tabs button[data-tab]')].map(b=>({id:b.dataset.tab,name:b.textContent}));
+const TGOF={},TGNAME=[...document.querySelectorAll('.tg .tgn')].map(x=>x.textContent);document.querySelectorAll('.tg').forEach((g,i)=>g.querySelectorAll('[data-tab]').forEach(b=>TGOF[b.dataset.tab]=i));
 let SET=null,SETV='';
 // ---------------- Lab: SX Player, stages 1+2 (user 2026-11-23). The Helper plays the show's scenes itself (player.ps1).
 let LB=null,LBS=null,LBT=0,LBbo=false,LBreo=false,LBerr='',LBgen=0,LBlastErr='',LBfdT={},LBfdS={},LBtest=false;
@@ -2768,29 +2799,29 @@ function applyTheme(){const m=themeMode(),l=m==='light'||(m==='auto'&&matchMedia
  document.querySelectorAll('#stheme button').forEach(b=>b.classList.toggle('on',b.dataset.v===m));if(typeof draw==='function')try{draw();}catch(e){}}
 try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);}catch(e){}
 document.querySelectorAll('#stheme button').forEach(b=>b.onclick=()=>{try{localStorage.setItem('sxh_theme',b.dataset.v);}catch(e){}applyTheme();});
-function tabOrder(){const o=((SET&&SET.tabOrder)||[]).filter(id=>TABDEF.some(t=>t.id===id));TABDEF.forEach(t=>{if(!o.includes(t.id))o.push(t.id);});return o;}
+function tabOrder(){const o=((SET&&SET.tabOrder)||[]).filter(id=>TABDEF.some(t=>t.id===id));TABDEF.forEach(t=>{if(!o.includes(t.id))o.push(t.id);});return o.map((id,i)=>[id,i]).sort((a,b)=>TGOF[a[0]]-TGOF[b[0]]||a[1]-b[1]).map(x=>x[0]);}
 const tabDef=id=>(TABDEF.find(t=>t.id===id)||{name:id}).name,tabName=id=>((SET&&SET.tabNames&&SET.tabNames[id])||tabDef(id));
 function applyTabs(){const nav=document.querySelector('.tabs'),hid=new Set((SET&&SET.tabHidden)||[]);
- tabOrder().forEach(id=>{const b=nav.querySelector('[data-tab="'+id+'"]'),nm=tabName(id);if(b){nav.appendChild(b);b.style.display=hid.has(id)?'none':'';if(b.textContent!==nm)b.textContent=nm;}
+ tabOrder().forEach(id=>{const b=nav.querySelector('[data-tab="'+id+'"]'),nm=tabName(id);if(b){b.parentElement.appendChild(b);b.style.display=hid.has(id)?'none':'';if(b.textContent!==nm)b.textContent=nm;}
   document.querySelectorAll('.ht[data-go="'+id+'"]').forEach(x=>{x.style.display=hid.has(id)?'none':'';const t=x.querySelector('b');if(t&&t.textContent!==nm)t.textContent=nm;});});
  // a Home group whose tiles are all hidden goes too (with its heading)
- document.querySelectorAll('.htiles.hgrp').forEach(g=>{const v=[...g.children].some(x=>x.style.display!=='none');g.style.display=v?'':'none';const h=g.previousElementSibling;if(h&&h.classList.contains('hgrp'))h.style.display=v?'':'none';});}
+ document.querySelectorAll('.htiles.hgrp').forEach(g=>{const v=[...g.children].some(x=>x.style.display!=='none');g.style.display=v?'':'none';const h=g.previousElementSibling;if(h&&h.classList.contains('hgrp'))h.style.display=v?'':'none';});tgSync();}
 function renderTabs(){const o=tabOrder(),hid=new Set((SET&&SET.tabHidden)||[]),n=o.length;
- $('stabs').innerHTML=o.map((id,i)=>{const d=tabDef(id),nm=tabName(id);return '<div class="tabrow'+(hid.has(id)?' off':'')+'" data-id="'+id+'"><span class="hdl" title="Drag to move">&#9776;</span>'+
+ $('stabs').innerHTML=o.map((id,i)=>{const d=tabDef(id),nm=tabName(id);return (i&&TGOF[o[i-1]]===TGOF[id]?'':'<div class="tabgh">'+TGNAME[TGOF[id]]+'</div>')+'<div class="tabrow'+(hid.has(id)?' off':'')+'" data-id="'+id+'"><span class="hdl" title="Drag to move">&#9776;</span>'+
   '<input type="checkbox" data-show="'+id+'"'+(hid.has(id)?'':' checked')+' title="Show this tab">'+
   '<input class="tname" data-name="'+id+'" value="'+esc(nm)+'" maxlength="24" placeholder="'+esc(d)+'" title="Type a new name for this tab">'+(nm!==d?'<span class="tdef">'+esc(d)+'</span>':'')+
-  '<button class="mini" data-mv="-1" title="Move up"'+(i?'':' disabled')+'>&#9650;</button><button class="mini" data-mv="1" title="Move down"'+(i<n-1?'':' disabled')+'>&#9660;</button></div>';}).join('');}
+  '<button class="mini" data-mv="-1" title="Move up"'+(i&&TGOF[o[i-1]]===TGOF[id]?'':' disabled')+'>&#9650;</button><button class="mini" data-mv="1" title="Move down"'+(i<n-1&&TGOF[o[i+1]]===TGOF[id]?'':' disabled')+'>&#9660;</button></div>';}).join('');}
 async function saveTabs(order,hidden,names){const o={tabOrder:order,tabHidden:hidden};if(names)o.tabNames=names;SET=Object.assign(SET||{},o);applyTabs();renderTabs();
  try{const r=await api('/api/settings/set',o);if(r.ok){SET=r.settings;applyTabs();if(names)renderTabs();}}catch(e){}}
-const rowsNow=()=>[...$('stabs').children].map(r=>r.dataset.id),hidNow=()=>[...$('stabs').querySelectorAll('[data-show]')].filter(c=>!c.checked).map(c=>c.dataset.show);
+const rowsNow=()=>[...$('stabs').querySelectorAll('.tabrow')].map(r=>r.dataset.id),hidNow=()=>[...$('stabs').querySelectorAll('[data-show]')].filter(c=>!c.checked).map(c=>c.dataset.show);
 const namesNow=()=>{const o={};$('stabs').querySelectorAll('.tname').forEach(x=>{const v=x.value.replace(/[<>]/g,'').trim().slice(0,24);if(v&&v!==tabDef(x.dataset.name))o[x.dataset.name]=v;});return o;};
 $('stabs').addEventListener('click',e=>{const b=e.target.closest('[data-mv]');if(!b)return;const o=rowsNow(),i=o.indexOf(b.closest('.tabrow').dataset.id),j=i+(+b.dataset.mv);
- if(j<0||j>=o.length)return;[o[i],o[j]]=[o[j],o[i]];saveTabs(o,hidNow());});
+ if(j<0||j>=o.length||TGOF[o[i]]!==TGOF[o[j]])return;[o[i],o[j]]=[o[j],o[i]];saveTabs(o,hidNow());});
 $('stabs').addEventListener('change',e=>{if(e.target.dataset.show)saveTabs(rowsNow(),hidNow());else if(e.target.dataset.name)saveTabs(rowsNow(),hidNow(),namesNow());});
 $('stabs').addEventListener('keydown',e=>{if(e.target.dataset.name&&e.key==='Enter'){e.preventDefault();e.target.blur();}else if(e.target.dataset.name&&e.key==='Escape'){e.target.value=tabName(e.target.dataset.name);e.target.blur();}});
 $('stabs').addEventListener('pointerdown',e=>{const h=e.target.closest('.hdl');if(!h)return;e.preventDefault();const row=h.closest('.tabrow'),box=$('stabs'),start=rowsNow().join();
  row.classList.add('drag');
- const mv=ev=>{let before=null;for(const r of box.children){if(r===row)continue;const bb=r.getBoundingClientRect();if(ev.clientY<bb.top+bb.height/2){before=r;break;}}
+ const mv=ev=>{let before=null;for(const r of box.children){if(r===row||(r.classList.contains('tabrow')&&TGOF[r.dataset.id]!==TGOF[row.dataset.id]))continue;const bb=r.getBoundingClientRect();if(ev.clientY<bb.top+bb.height/2){before=r;break;}}
   if(before!==row.nextSibling||(!before&&box.lastChild!==row))box.insertBefore(row,before);};
  const up=()=>{window.removeEventListener('pointermove',mv);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);row.classList.remove('drag');
   if(rowsNow().join()!==start)saveTabs(rowsNow(),hidNow());};

@@ -131,7 +131,7 @@ class _SpeedScreenState extends State<SpeedScreen> {
               ),
               ErrorBox(_error),
               if (d == null && _error.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 14),
                   child: Text('Reading the show.', style: Sx.sub),
                 ),
@@ -183,7 +183,7 @@ class _SpeedScreenState extends State<SpeedScreen> {
     final isChanged = _picked[b.sec] != b.fader;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 5),
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         border: Border(top: BorderSide(color: Sx.line)),
       ),
       child: Row(
@@ -233,9 +233,9 @@ class _FaderMenu extends StatelessWidget {
           isExpanded: true,
           isDense: true,
           dropdownColor: Sx.panel,
-          style: const TextStyle(fontFamily: Sx.body, fontSize: 13.5, color: Sx.text),
+          style: TextStyle(fontFamily: Sx.body, fontSize: 13.5, color: Sx.text),
           value: hint == null && faders.any((f) => f.k == value) ? value : null,
-          hint: Text(hint ?? '', style: const TextStyle(color: Sx.dim, fontSize: 13)),
+          hint: Text(hint ?? '', style: TextStyle(color: Sx.dim, fontSize: 13)),
           items: [
             for (final f in faders)
               DropdownMenuItem(

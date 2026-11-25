@@ -144,7 +144,10 @@ function Read-LiveIni($root) {
 function Save-LiveIni($ini) {
   $new = $ini.Lines -join $ini.Nl
   if ($new -eq $ini.Text) { return $false }
-  [IO.File]::WriteAllText($ini.Path, $new, (New-Object Text.UTF8Encoding($ini.Bom)))
+  # write next to it, then swap it in, so a crash halfway never leaves a half-written live.ini (same as scene_edit.ps1)
+  $tmp = "$($ini.Path).sxh-tmp"
+  [IO.File]::WriteAllText($tmp, $new, (New-Object Text.UTF8Encoding($ini.Bom)))
+  try { [IO.File]::Replace($tmp, $ini.Path, $null) } catch { [IO.File]::Copy($tmp, $ini.Path, $true); Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
   $true
 }
 function Find-IniSection($ini, [string]$name) {

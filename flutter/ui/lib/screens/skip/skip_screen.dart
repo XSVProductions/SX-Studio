@@ -6,7 +6,7 @@ import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import '../rig/rig_widgets.dart';
 
-/// Skip Flash: which movers the SKIP FLASH button flashes tonight.
+/// Strobe: which movers the SKIP FLASH button flashes tonight.
 class SkipScreen extends StatefulWidget {
   const SkipScreen(BuildContext _, {super.key});
 
@@ -118,7 +118,7 @@ class _SkipScreenState extends State<SkipScreen> with ShowWatcher, RigReloads {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               RigHeader(
-                'Skip Flash heads',
+                'Strobe heads',
                 sub: 'Tap the movers that are set up tonight. SKIP FLASH will only flash those, so the chase has no dark gaps.',
                 dirty: d == null ? null : dirty,
                 onRefresh: load,

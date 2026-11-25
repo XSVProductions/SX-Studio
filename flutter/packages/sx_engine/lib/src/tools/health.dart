@@ -248,17 +248,20 @@ _Scan _scanShow(ShowEnv env) {
     }
   }
 
-  // APC mini and MIDI.
+  // APC mini and MIDI. Only the APC mini's buttons (MIDI device 0): a button on
+  // another controller (the APC40, device 1 and up) isn't a pad, so it isn't
+  // checked against the 8x8 grid.
+  bool otherDevice(LiveButton b) => iniInt(b.keys['trigger_midi_device'], 0) != 0;
   final taken = <int>{};
   for (final b in info.buttons) {
-    if (iniInt(b.keys['trigger_midi_type'], 0) != 0) continue;
+    if (otherDevice(b) || iniInt(b.keys['trigger_midi_type'], 0) != 0) continue;
     final n = iniInt(b.keys['trigger_midi_note']);
     if (n >= 0 && n <= 63) taken.add(n);
   }
   final byNote = <String, List<LiveButton>>{};
   for (final b in info.buttons) {
     final k = b.keys;
-    if (!k.containsKey('trigger_midi_note')) continue;
+    if (!k.containsKey('trigger_midi_note') || otherDevice(b)) continue;
     final n = iniInt(k['trigger_midi_note']), t = iniInt(k['trigger_midi_type'], 0);
     if (t != 0 || n < 0 || n > 63) {
       final midiKey = RegExp(r'^trigger_midi(out)?_', caseSensitive: false);
@@ -327,11 +330,21 @@ _Scan _scanShow(ShowEnv env) {
     }
   }
   final faderNote = RegExp(r'^fader(\d+)_midi_note$', caseSensitive: false);
-  final ccs = _groupBy(info.live.keys.where(faderNote.hasMatch), (k) => info.live[k] ?? '');
-  for (final (cc, faders) in ccs.values) {
+  // Faders clash only when they share a CC on the same controller.
+  final ccs = _groupBy(
+    info.live.keys.where(faderNote.hasMatch),
+    (k) => '${info.live[k.replaceAll(RegExp(r'_note$', caseSensitive: false), '_device')] ?? ''}/${info.live[k] ?? ''}',
+  );
+  for (final (deviceCc, faders) in ccs.values) {
     if (faders.length < 2) continue;
     final names = faders.map((k) => k.replaceAll(RegExp('_midi_note', caseSensitive: false), ''));
-    add('warn', 'midi', 'Faders share CC $cc', '${names.join(', ')} move together.', 'Learn the MIDI of one of the faders again in ShowXpress.');
+    add(
+      'warn',
+      'midi',
+      'Faders share CC ${deviceCc.split('/').last}',
+      '${names.join(', ')} move together.',
+      'Learn the MIDI of one of the faders again in ShowXpress.',
+    );
   }
 
   // Keyboard keys and layout.

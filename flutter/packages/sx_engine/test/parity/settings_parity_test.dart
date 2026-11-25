@@ -137,6 +137,16 @@ void main() {
         'tabNames': {'rt': ' Rig <b>Test</b>\t ', 'aim': 'A' * 25, 'nope': 'x', 'color': '', 'SPEED': 'Fast'},
       }),
     );
+    // The Skip Flash tab is called Strobe now. The user's own name Strobe or Strobes for it is dropped.
+    for (final name in ['Strobes', ' strobe ', 'STROBE', 'Strobe lights']) {
+      _case(
+        'a Strobe tab name of "$name"',
+        file: jsonEncode({
+          'tabNames': {'SKIP': name, 'rt': 'Strobes'},
+        }),
+      );
+    }
+    _case('a custom order without the APC40 tab gets it at the end', file: '{"tabOrder":["apc","rt","aim"]}');
     _case('the player layout is cleaned', file: jsonEncode({'playerLayout': messyLayout}));
     _case(
       'an old Windows file with escapes and CRLF',
@@ -179,6 +189,13 @@ void main() {
         'tabHidden': ['rt'],
       },
       fromPhone: true,
+    );
+    _case(
+      'a Strobes tab name is saved but not answered',
+      file: before,
+      body: {
+        'tabNames': {'skip': 'Strobes', 'apc40': 'Big APC'},
+      },
     );
     _case('the player layout', body: {'playerLayout': messyLayout});
     _case('no settings file and an empty change', body: {});

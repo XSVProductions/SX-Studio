@@ -143,7 +143,7 @@ class _Skip {
   final int stepCs;
 }
 
-/// What the Skip Flash screen shows. Writes nothing.
+/// What the Strobe screen shows. Writes nothing.
 SkipPreview skipPreview(ShowEnv env) {
   final s = _Skip.read(env);
   final known = {for (final m in s.movers) m.id};

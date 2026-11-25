@@ -333,6 +333,39 @@ void main() {
     await _compare(show, ops);
   });
 
+  test('a pad and a fader on another controller do nothing', () async {
+    // Device 1 is another controller (the APC40). The player only listens to the APC mini, device 0.
+    final copy = Directory.systemTemp.createTempSync('sx_device1_');
+    addTearDown(() => copy.deleteSync(recursive: true));
+    for (final f in Directory(show).listSync(recursive: true).whereType<File>()) {
+      final to = File(p.join(copy.path, p.relative(f.path, from: show)));
+      to.parent.createSync(recursive: true);
+      f.copySync(to.path);
+    }
+    final env = ShowEnv(copy.path);
+    final padded = playable.where((b) => (b['pad']! as int) >= 0).take(2).toList();
+    final ini = LiveIni.read(env);
+    final cc = iniInt(ini.keys('live')['fader1_midi_note']);
+    ini
+      ..setKey(padded[0]['sec']! as String, 'trigger_midi_device', '1')
+      ..setKey(padded[0]['sec']! as String, 'trigger_midiout_device', '1')
+      ..setKey('live', 'fader1_midi_device', '1')
+      ..save();
+    await _compare(copy.path, [
+      ['leds', false],
+      ['status'],
+      for (final (i, b) in padded.indexed) ...[
+        ['midi', 0x90 | (b['pad']! as int) << 8 | 127 << 16, i * 300],
+        ..._frames(i * 300 + 5, i * 300 + 290, 35),
+        ['leds', false],
+        ['status'],
+      ],
+      ['midi', 0xB0 | cc << 8 | 30 << 16, 700],
+      ['midi', 0xB0 | (cc + 1) << 8 | 30 << 16, 710],
+      ['status'],
+    ]);
+  });
+
   test('refusals and the show check', () async {
     await _compare(show, [
       ['check'],

@@ -49,7 +49,7 @@ const tabs = [
   TabDef('lab', 'SX Player', TabGroup.live, LabScreen.new),
   TabDef('auto', 'Auto Show', TabGroup.live, AutoScreen.new),
   TabDef('rig', "Tonight's Rig", TabGroup.rig, RigScreen.new),
-  TabDef('skip', 'Skip Flash', TabGroup.rig, SkipScreen.new),
+  TabDef('skip', 'Strobe', TabGroup.rig, SkipScreen.new),
   TabDef('apc', 'APC mini', TabGroup.rig, ApcScreen.new),
   TabDef('speed', 'Speed Faders', TabGroup.rig, SpeedScreen.new),
   TabDef('scene', 'Scene Editor', TabGroup.edit, SceneScreen.new),

@@ -198,7 +198,7 @@ class _RtScreenState extends State<RtScreen> with ShowWatcher, RigReloads {
                   spacing: 12,
                   children: [
                     _Check('Bigger event: 2 extra towers (top middle and bottom middle)', _extra, (v) => _edit(() => _extra = v)),
-                    _Check("Also update Tonight's Rig and Skip Flash (heads not on a truss = not hung)", _rig, (v) => setState(() => _rig = v)),
+                    _Check("Also update Tonight's Rig and Strobe (heads not on a truss = not hung)", _rig, (v) => setState(() => _rig = v)),
                   ],
                 ),
                 if (d.saved case final s? when s.isNotEmpty)

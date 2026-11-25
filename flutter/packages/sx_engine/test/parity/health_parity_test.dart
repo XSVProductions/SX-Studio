@@ -34,7 +34,9 @@ class _Picks {
     padLight = pads[1];
     padDup = pads[2];
     padTarget = pads[3];
-    final rest = info.buttons.where((b) => !pads.take(4).contains(b) && b.name.isNotEmpty).toList();
+    farPad = pads[4];
+    offGrid = pads[5];
+    final rest = info.buttons.where((b) => !pads.take(6).contains(b) && b.name.isNotEmpty).toList();
     scene = rest[0];
     missing = rest[1];
     beat = rest[2];
@@ -54,7 +56,7 @@ class _Picks {
   }
 
   late final List<Mover> movers;
-  late final LiveButton padOff, padLight, padDup, padTarget, scene, missing, beat, speed, spotA, spotB;
+  late final LiveButton padOff, padLight, padDup, padTarget, farPad, offGrid, scene, missing, beat, speed, spotA, spotB;
   late final List<String> faders;
 
   /// Fixes already in the show's own log.
@@ -83,6 +85,41 @@ void _breakShow(ShowEnv env, _Picks k) {
     ..setKey('page${k.spotA.page}', 'nb_buttons', '99');
   if (k.faders.length > 1) ini.setKey('live', k.faders[1], live[k.faders[0]]!);
   ini.save();
+}
+
+/// Puts buttons and a fader on a second MIDI controller (device 1), which
+/// the APC mini checks leave alone. [Picks.padDup] joins [Picks.padTarget] on
+/// one pad, and [Picks.farPad] moves to device 1 on the pad the fix would
+/// otherwise skip as taken. [Picks.offGrid] goes to device 1 off the grid, and
+/// two faders share a CC on different controllers. Returns the pad the fix
+/// should pick.
+int _secondController(ShowEnv env, _Picks k) {
+  final n = iniInt(k.padTarget.keys['trigger_midi_note']);
+  var ini = LiveIni.read(env)
+    ..setKey(k.padDup.sec, 'trigger_midi_note', '$n')
+    ..setKey(k.farPad.sec, 'trigger_midi_device', '1')
+    ..setKey(k.offGrid.sec, 'trigger_midi_device', '1')
+    ..setKey(k.offGrid.sec, 'trigger_midi_note', '70');
+  if (k.faders.length > 1) {
+    ini
+      ..setKey('live', k.faders[1], ini.keys('live')[k.faders[0]]!)
+      ..setKey('live', k.faders[1].replaceFirst('_note', '_device'), '1');
+  }
+  ini.save();
+  // The nearest pad no APC mini button is on.
+  final taken = {
+    for (final b in LiveInfo.read(env).buttons)
+      if (iniInt(b.keys['trigger_midi_device'], 0) == 0 && iniInt(b.keys['trigger_midi_type'], 0) == 0) iniInt(b.keys['trigger_midi_note']),
+  };
+  var best = -1;
+  var bd = 1e9;
+  for (var q = 0; q < 64; q++) {
+    final dr = q ~/ 8 - n ~/ 8, dc = q % 8 - n % 8, d = dr * dr * 1.01 + dc * dc;
+    if (!taken.contains(q) && d < bd) (bd, best) = (d, q);
+  }
+  ini = LiveIni.read(env)..setKey(k.farPad.sec, 'trigger_midi_note', '$best');
+  ini.save();
+  return best;
 }
 
 /// Applies a fix with the port and gives it the id [id], so both sides of a
@@ -174,6 +211,24 @@ void main() {
         return r;
       },
     );
+
+    var freed = -1;
+    parityTest(
+      'check leaves a second controller alone',
+      script: 'health.ps1',
+      args: {'Action': 'Check'},
+      setup: (env) => freed = _secondController(env, k),
+      dart: (env) {
+        final r = healthCheck(env);
+        final fixes = r.issues.map((i) => i.fix?.key).toSet();
+        expect(fixes, isNot(contains('midiout|${k.offGrid.sec}')));
+        expect(r.issues.where((i) => i.title.startsWith('Faders share CC')), isEmpty);
+        final pad = r.issues.firstWhere((i) => i.fix?.key == 'pad|${k.padTarget.keys['trigger_midi_note']}');
+        expect(pad.advice, contains('row ${8 - freed ~/ 8} col ${freed % 8 + 1}'));
+        return r;
+      },
+    );
+    fix('fix: two buttons on one pad, next to a second controller', 'pad|${k.padTarget.keys['trigger_midi_note']}', setup: (env) => _secondController(env, k));
 
     fix('fix: speed fader that does not exist', 'speed|${k.speed.sec}');
     fix('fix: mapping outside the pads', 'midiout|${k.padOff.sec}');

@@ -73,6 +73,7 @@ final _xbRx = RegExp(r'^x\d{1,3}_b\d{1,3}$', caseSensitive: false);
 final _fileRx = RegExp(r'^[^\\/:*?"<>|\x00-\x1f]{1,120}\.(scex|gpj)$', caseSensitive: false);
 final _extRx = RegExp(r'\.(scex|gpj)$', caseSensitive: false);
 final _colorRx = RegExp(r'^\d{1,8}$');
+final _strobeRx = RegExp(r'^\s*strobes?\s*$', caseSensitive: false);
 
 /// Tab names the user typed, cleaned. Port of `Get-TabNames`.
 Map<String, String> cleanTabNames(Object? v) {
@@ -215,7 +216,9 @@ class SettingsStore {
     s['reopen'] = _psBool(s['reopen']);
     s['autoUpd'] = _psBool(s['autoUpd']);
     s['driveFolder'] = _psStr(s['driveFolder']);
-    s['tabNames'] = cleanTabNames(s['tabNames']);
+    s['tabNames'] = cleanTabNames(s['tabNames'])
+      // The Skip Flash tab is called Strobe now, so a name of Strobe or Strobes the user gave it isn't needed any more.
+      ..removeWhere((id, name) => id.toLowerCase() == 'skip' && _strobeRx.hasMatch(name));
     s['playerLayout'] = cleanPlayerLayout(s['playerLayout']);
     return s;
   }

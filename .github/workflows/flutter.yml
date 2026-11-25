@@ -1,12 +1,19 @@
-name: Build installers
+name: Flutter app
 
+# Tests and builds the Flutter port in flutter/. It never publishes: releases are signed and uploaded from the
+# maintainer's computer (flutter/RELEASE_SETUP.md). It answers flutter-v* tags so it can't meet build.yml, which
+# publishes the PowerShell app on v* tags. flutter/RELEASE_SETUP.md says when and how the two swap.
 on:
   push:
-    tags: ['v*']
+    tags: ['flutter-v*']
   workflow_dispatch:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    working-directory: flutter
 
 jobs:
   windows:
@@ -17,6 +24,7 @@ jobs:
         with:
           channel: stable
           cache: true
+      # the old-versus-new checks need a real show folder, which is never in git, so they skip themselves here
       - name: Tests
         shell: pwsh
         run: |
@@ -26,7 +34,7 @@ jobs:
       - name: Build Windows installer
         shell: pwsh
         run: |
-          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME.TrimStart('v') } else { '0.0.0' }
+          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^(flutter-)?v', '' } else { '0.0.0' }
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress | Out-Null }
           ui\tool\release.ps1 -Version $ver -NoSign
       - name: Smoke test (install it, open the app, call its engine)
@@ -35,7 +43,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: build/windows/*.exe
+          path: flutter/build/windows/*.exe
 
   mac:
     runs-on: macos-latest
@@ -51,14 +59,14 @@ jobs:
           (cd ui && flutter test)
       - name: Build Mac installer
         run: |
-          VER=0.0.0; [ "$GITHUB_REF_TYPE" = tag ] && VER="${GITHUB_REF_NAME#v}"
+          VER=0.0.0; [ "$GITHUB_REF_TYPE" = tag ] && { VER="${GITHUB_REF_NAME#flutter-}"; VER="${VER#v}"; }
           bash packaging/mac/build_pkg.sh "$VER"
       - name: Smoke test (install the pkg, open the app, call its engine)
         run: bash packaging/mac/smoke.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mac
-          path: build/mac/*.pkg
+          path: flutter/build/mac/*.pkg
 
   # live output on the Mac uses ShowXpress's own driver (efk_hardware.dylib, one download per chip): check each
   # loads and runs on its chip (no interface on the build machine -> "ERR none"). Informational: never blocks a release.
@@ -85,6 +93,3 @@ jobs:
           grep -q "^ERR none" /tmp/probe.txt
           # the real protocol, with no interface: it must answer and exit cleanly
           printf 'z\nq\n' | /tmp/sxh_dmx --dir /tmp/sxapp
-
-  # No release job: the maintainer signs release.json on their own computer with the release key, which never
-  # goes to GitHub. They take the Mac .pkg from this run's "mac" artifact. See RELEASE_SETUP.md.

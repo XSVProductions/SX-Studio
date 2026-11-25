@@ -268,9 +268,14 @@ class _Dashes extends CustomPainter {
   bool shouldRepaint(_Dashes old) => old.color != color || old.radius != radius || old.fill != fill;
 }
 
-/// Loads the screen again each time its tab comes back into view, unless it
-/// holds unsaved edits. Saves in one rig tab change what the others show.
-mixin ReloadWhenShown<T extends StatefulWidget> on State<T> {
+/// When the rig tabs read the show again, as the old page's poll did:
+///
+/// - the queue saved into the show (`reloadAll`): always, unsaved edits
+///   included, since the queue just saved them;
+/// - ShowXpress closed: unless the screen holds unsaved edits;
+/// - the tab comes back into view: unless it holds unsaved edits. Saves in
+///   one rig tab change what the others show.
+mixin RigReloads<T extends StatefulWidget> on ShowWatcher<T> {
   String get tabId;
   bool get dirty;
   Future<void> load();
@@ -292,6 +297,14 @@ mixin ReloadWhenShown<T extends StatefulWidget> on State<T> {
     final shown = _app!.tab == tabId;
     if (shown && !_wasShown && !dirty) load();
     _wasShown = shown;
+  }
+
+  @override
+  void onQueueRan() => load();
+
+  @override
+  void onSxClosed() {
+    if (!dirty) load();
   }
 
   @override

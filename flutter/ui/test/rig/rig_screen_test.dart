@@ -96,4 +96,12 @@ void main() {
     expect(e.posts, isEmpty);
     await finish(tester, app);
   });
+
+  testWidgets('reads the show again when ShowXpress closes or the queue saves', (tester) async {
+    final e = _engine()..sxOpen = true;
+    final app = await pumpScreen(tester, e, 'rig', RigScreen.new);
+    await checkReloads(tester, e, app, 'rig', '/api/rig', () => tap(tester, find.text('#3').first));
+    expect(find.text('2 of 3 hung'), findsOneWidget);
+    await finish(tester, app);
+  });
 }

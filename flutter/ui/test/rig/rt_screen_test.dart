@@ -81,4 +81,12 @@ void main() {
     expect(barButton<FilledButton>(tester, 'Save to 2D view').onPressed, isNull);
     await finish(tester, app);
   });
+
+  testWidgets('reads the show again when ShowXpress closes or the queue saves', (tester) async {
+    final e = _engine()..sxOpen = true;
+    final app = await pumpScreen(tester, e, 'rt', RtScreen.new);
+    await checkReloads(tester, e, app, 'rt', '/api/rt', () => _place(tester, 0, 1));
+    expect(find.text('tap to set'), findsNWidgets(12));
+    await finish(tester, app);
+  });
 }

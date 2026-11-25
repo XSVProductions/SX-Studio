@@ -15,7 +15,7 @@ class RigScreen extends StatefulWidget {
   State<RigScreen> createState() => _RigScreenState();
 }
 
-class _RigScreenState extends State<RigScreen> with ReloadWhenShown {
+class _RigScreenState extends State<RigScreen> with ShowWatcher, RigReloads {
   RigPreview? _data;
   var _error = '';
 

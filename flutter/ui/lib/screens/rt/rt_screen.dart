@@ -17,7 +17,7 @@ class RtScreen extends StatefulWidget {
   State<RtScreen> createState() => _RtScreenState();
 }
 
-class _RtScreenState extends State<RtScreen> with ReloadWhenShown {
+class _RtScreenState extends State<RtScreen> with ShowWatcher, RigReloads {
   RtPreview? _data;
   var _error = '';
 

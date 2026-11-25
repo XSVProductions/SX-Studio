@@ -14,7 +14,7 @@ class SkipScreen extends StatefulWidget {
   State<SkipScreen> createState() => _SkipScreenState();
 }
 
-class _SkipScreenState extends State<SkipScreen> with ReloadWhenShown {
+class _SkipScreenState extends State<SkipScreen> with ShowWatcher, RigReloads {
   SkipPreview? _data;
   var _error = '';
 

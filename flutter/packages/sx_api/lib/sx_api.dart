@@ -1,7 +1,10 @@
 /// Wire types and the HTTP client shared by the SX Studio engine and UI.
 library;
 
+export 'src/apc.dart';
 export 'src/client.dart';
+export 'src/health.dart';
 export 'src/json.dart';
+export 'src/preshow.dart';
 export 'src/speed.dart';
 export 'src/status.dart';

@@ -170,6 +170,7 @@ Press **⚙** at the top right (or the **Settings** tile on Home):
 - **Phone & iPad:** turn phone access on, pair, unpair.
 - **ShowXpress:** open ShowXpress again after queued changes, and open the show folder.
 - **Updates:** the version, **Check now**, and whether to check when SX Studio opens.
+- **Export & import settings** (computer only): **Export settings** saves one file (`SX Studio settings <date>.json`, in Downloads) with the tabs, the SX Player pages, the APC40 pads and faders, the Auto Show, the options above and this computer's light or dark look. **Import settings** loads such a file - on this computer or another one - after asking; what you had is backed up first (`backups\settings before import ...`, newest 5) and a part that can't be read is left as it was. The show itself and the phone pairing aren't in the file.
 
 They're kept in `%APPDATA%\ShowXpress Helper\settings.json` (Mac: `~/AwaazTools/settings.json`). SX Studio can't sign in to Google itself: signing in is done in the Google Drive app.
 

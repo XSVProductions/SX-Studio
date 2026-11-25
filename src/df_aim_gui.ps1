@@ -864,6 +864,72 @@ function Save-Settings($s) {
   if (-not (Test-Path -LiteralPath $cfgDir)) { [void](New-Item -ItemType Directory -Path $cfgDir -Force) }
   [IO.File]::WriteAllText($setF, ($s | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding($false)))
 }
+# ---- EXPORT / IMPORT SETTINGS (user 2026-11-25). One JSON file: { app:'SX Studio', kind:'settings', format:1, version,
+# saved, settings, apc40, autoShow, device }. Import checks every part the way its own tab does (Get-PlayerLayout,
+# apc40.ps1 -Action Save, sx_remote.ps1 -Action AutoSave) and backs up what it replaces first.
+function Get-AutoConfig {
+  $r = Invoke-Engine '-Action AutoGet' $remoteEngine
+  $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+  if ($j) { try { return ($j | ConvertFrom-Json).config } catch {} }
+  $null
+}
+function Get-ConfigExport {
+  $ap = $null; $f = Get-Apc40Lay
+  if (Test-Path -LiteralPath $f) { try { $ap = [IO.File]::ReadAllText($f) | ConvertFrom-Json } catch {} }
+  [ordered]@{ app = 'SX Studio'; kind = 'settings'; format = 1; version = $appVer; saved = (Get-Date -Format 's')
+              settings = (Get-Settings); apc40 = $ap; autoShow = (Get-AutoConfig) }
+}
+function Invoke-WithJson($obj, [string]$engineArgs, [string]$script) {
+  $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+  [IO.File]::WriteAllText($cf, ($obj | ConvertTo-Json -Depth 8 -Compress), (New-Object Text.UTF8Encoding($false)))
+  try { Invoke-Engine "$engineArgs -ConfigFile `"$cf`"" $script } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+}
+function Import-Config($d) {
+  if (-not $d -or "$($d.app)" -ne 'SX Studio' -or "$($d.kind)" -ne 'settings') { return @{ ok = $false; error = "That file isn't an SX Studio settings file. Nothing was changed." } }
+  if ("$($d.format)" -notmatch '^\d+$' -or [int]$d.format -gt 1) { return @{ ok = $false; error = 'That file is from a newer SX Studio - update SX Studio first. Nothing was changed.' } }
+  # back up what is there now (newest 5 kept)
+  $bd = Get-BackupDir; $bk = Join-Path $bd ('settings before import ' + (Get-Date -Format 'yyyy-MM-dd HHmmss'))
+  try {
+    [void](New-Item -ItemType Directory -Path $bk -Force)
+    $cur = Get-ConfigExport
+    [IO.File]::WriteAllText((Join-Path $bk 'SX Studio settings.json'), ($cur | ConvertTo-Json -Depth 10), (New-Object Text.UTF8Encoding($false)))
+    @(Get-ChildItem -LiteralPath $bd -Directory -Filter 'settings before import *' | Sort-Object Name -Descending | Select-Object -Skip 5) | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+  } catch { return @{ ok = $false; error = "Couldn't back up the settings you have now, so nothing was changed: $($_.Exception.Message)" } }
+  $done = New-Object Collections.Generic.List[string]; $warn = New-Object Collections.Generic.List[string]
+  if ($d.settings -and -not ($d.settings -is [pscustomobject])) { $warn.Add("The tabs and SX Player pages in the file couldn't be read, so they were kept as they were.") }
+  elseif ($d.settings) {
+    $n = $d.settings; $st = Get-Settings
+    if ($null -ne $n.tabOrder) { $st.tabOrder = @($n.tabOrder | ForEach-Object { "$_" }) }
+    if ($null -ne $n.tabHidden) { $st.tabHidden = @($n.tabHidden | ForEach-Object { "$_" }) }
+    if ($null -ne $n.tabNames) { $st.tabNames = Get-TabNames $n.tabNames }
+    if ($null -ne $n.playerLayout) { $st.playerLayout = Get-PlayerLayout $n.playerLayout }
+    if ($null -ne $n.reopen) { $st.reopen = [bool]$n.reopen; $script:qReopen = $st.reopen }
+    if ($null -ne $n.autoUpd) { $st.autoUpd = [bool]$n.autoUpd }
+    if ($null -ne $n.driveFolder) {
+      $g = "$($n.driveFolder)".Trim()
+      if (-not $g -or (Test-Path -LiteralPath $g -PathType Container)) { $st.driveFolder = $g }
+      else { $warn.Add("The Google Drive folder in the file isn't on this computer, so that one setting was kept as it was.") }
+    }
+    Save-Settings $st; Sync-PlayerExtras
+    $done.Add('the tabs and the SX Player pages')
+  }
+  $ap = @(if ($d.apc40) { $d.apc40.pages })
+  if ($d.apc40 -and -not ($ap.Count -and -not @($ap | Where-Object { -not ($_ -is [pscustomobject] -and $_.pads -is [pscustomobject]) }).Count)) {
+    $warn.Add("The APC40 pages in the file couldn't be read, so they were kept as they were.")
+  } elseif ($d.apc40) {
+    $r = Invoke-WithJson $d.apc40 "-Action Save -Layout `"$(Get-Apc40Lay)`"" $apc40Engine
+    $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+    $ok = $false; if ($j) { try { $ok = [bool]($j | ConvertFrom-Json).ok } catch {} }
+    if ($ok) { [void](Send-Apc40 'reload'); $done.Add('the APC40 pads and faders') } else { $warn.Add("The APC40 pages in the file couldn't be read, so they were kept as they were.") }
+  }
+  if ($d.autoShow -and -not ($d.autoShow -is [pscustomobject] -and $null -ne $d.autoShow.looks)) {
+    $warn.Add("The Auto Show in the file couldn't be read, so it was kept as it was.")
+  } elseif ($d.autoShow) {
+    $r = Invoke-WithJson $d.autoShow '-Action AutoSave' $remoteEngine
+    if ($r.ok) { [void](Send-Auto 'reload'); $done.Add('the Auto Show') } else { $warn.Add("The Auto Show couldn't be imported ($($r.error)), so it was kept as it was.") }
+  }
+  @{ ok = $true; done = @($done); warn = @($warn); settings = (Get-Settings); backup = $bk }
+}
 function Get-BackupDir { if ($TestRoot) { Join-Path (Split-Path (Split-Path $TestRoot)) 'HelperBackups' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/backups' } else { Join-Path $env:APPDATA 'ShowXpress Helper/backups' } }
 function Open-OnComputer([string]$what) {
   $t = switch ($what) {
@@ -1465,7 +1531,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
    <button class="ht" data-go="scene"><i>SHOW</i><b>Scene Editor</b><span>Change a scene and see it on the lights</span></button>
    <button class="ht" data-go="move"><i>SHOW</i><b>Movement Editor</b><span>Change a movement&rsquo;s shape and speed</span></button>
    <button class="ht" data-go="look"><i>SHOW</i><b>One-click Looks</b><span>Make a new scene from a template</span></button>
-   <button class="ht" data-go="settings"><i>SETUP</i><b>&#9881; Settings</b><span>Google Drive, phone &amp; iPad, tabs, light mode</span></button>
+   <button class="ht" data-go="settings"><i>SETUP</i><b>&#9881; Settings</b><span>Google Drive, phone &amp; iPad, tabs, light mode, export &amp; import</span></button>
   </div>
  </div>
 
@@ -1489,6 +1555,8 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
    <div class="row" style="margin-top:12px"><button id="sopenshow" class="mini">Open the show folder</button><span class="summary" id="sshow"></span></div></section>
   <section class="card setsec pc-only"><h2>Updates</h2><div class="row"><div class="grow summary" id="supd">&nbsp;</div><button id="supdchk" class="mini">Check now</button></div>
    <label class="link" style="margin-top:10px"><input type="checkbox" id="sautoupd"> Check for a new version when SX Studio opens</label></section>
+  <section class="card setsec pc-only"><h2>Export &amp; import settings</h2><p class="sub">Save SX Studio&rsquo;s settings in one file, and load them again later or on another computer: the tabs, the SX Player pages, the APC40 pads and faders, the Auto Show, the options above and this computer&rsquo;s light or dark look. The show itself (scenes, aims, ShowXpress&rsquo;s buttons) and the phone pairing aren&rsquo;t in it.</p>
+   <div class="row"><button id="sexp" class="primary">&#11015; Export settings</button><button id="simp">&#11014; Import settings</button><input type="file" id="simpf" accept=".json,application/json" style="display:none"><span class="summary grow" id="scfg"></span></div></section>
  </div>
 
  <div class="view" id="v-lab">
@@ -3070,6 +3138,25 @@ async function setOne(o,what){let r;try{r=await api('/api/settings/set',o);}catc
  if(r.ok){SET=r.settings;renderSet();if(what==='gd')loadGd();}else showResult({ok:false,error:r.error||'Not saved.'},'sx');return r;}
 $('sreopen').onchange=e=>setOne({reopen:e.target.checked});$('sautoupd').onchange=e=>setOne({autoUpd:e.target.checked});
 async function openOn(what){let r;try{r=await api('/api/open',{what});}catch(e){r={ok:false,error:'Lost connection.'};}if(!r.ok)showResult(r,'sx');}
+// export / import settings: the server gives SX Studio's settings, the page adds this device's own (light/dark etc.)
+const andList=a=>a.length>1?a.slice(0,-1).join(', ')+' and '+a[a.length-1]:a.join('');
+const devKeys=()=>{const o={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(/^sxh_/.test(k)&&k!=='sxh_phone_key')o[k]=localStorage.getItem(k);}return o;};
+$('sexp').onclick=async()=>{const r=await getJ('/api/config/export');if(!r.ok){$('scfg').innerHTML='<span style="color:var(--red)">'+esc(r.error||'Could not read the settings.')+'</span>';return;}
+ const d=r.data;d.device=devKeys();const p=n=>String(n).padStart(2,'0'),dt=new Date(),a=document.createElement('a');
+ a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,1)],{type:'application/json'}));a.download='SX Studio settings '+dt.getFullYear()+'-'+p(dt.getMonth()+1)+'-'+p(dt.getDate())+'.json';
+ document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
+ $('scfg').innerHTML='&#10003; Saved <b>'+esc(a.download)+'</b> in your Downloads folder.';};
+$('simp').onclick=()=>{$('simpf').value='';$('simpf').click();};
+$('simpf').onchange=async e=>{const f=e.target.files[0];if(!f)return;let d=null;try{d=JSON.parse(await f.text());}catch(x){}
+ if(!d||d.app!=='SX Studio'||d.kind!=='settings'){$('scfg').innerHTML='<span style="color:var(--red)">That file isn&rsquo;t an SX Studio settings file.</span>';return;}
+ const dev=d.device&&typeof d.device==='object'?d.device:null,what=[d.settings&&'the tabs and the SX Player pages',d.apc40&&'the APC40 pads and faders',d.autoShow&&'the Auto Show',dev&&'this computer&rsquo;s look'].filter(Boolean);
+ if(!what.length){$('scfg').innerHTML='<span style="color:var(--amber)">That file has no settings in it.</span>';return;}
+ if(!await ask('Import these settings?','<b>'+esc(f.name)+'</b>'+(d.saved?' (saved '+esc(String(d.saved).slice(0,10))+(d.version?' by version '+esc(d.version):'')+')':'')+' replaces '+andList(what)+'. What you have now is backed up first.','Import'))return;
+ busy(true,'Importing the settings…');let r;try{r=await api('/api/config/import',{data:d});}catch(x){r={ok:false,error:'Lost connection to SX Studio.'};}busy(false);
+ if(!r.ok){$('scfg').innerHTML='<span style="color:var(--red)">'+esc(r.error||'Nothing was imported.')+'</span>';return;}
+ const done=r.done||[];if(dev){Object.keys(dev).forEach(k=>{if(/^sxh_/.test(k)&&k!=='sxh_phone_key'&&typeof dev[k]==='string')localStorage.setItem(k,dev[k]);});done.push('this computer&rsquo;s look');}
+ SET=r.settings;Q4=null;L4=null;AU=null;applyTheme();applyTabs();renderSet();if(LB&&LB.ok)renderLab();
+ $('scfg').innerHTML=(done.length?'&#10003; Imported '+andList(done)+'.':'Nothing was imported.')+((r.warn||[]).length?' <span style="color:var(--amber)">'+r.warn.map(esc).join(' ')+'</span>':'');};
 $('sopenshow').onclick=()=>openOn('show');$('gdbk').onclick=()=>openOn('backups');$('gdapp').onclick=()=>openOn('gdapp');$('gddl').onclick=()=>openOn('gddl');
 $('gdfoldset').onclick=async()=>{const v=$('gdfold').value.trim();if(!v)return;const r=await setOne({driveFolder:v},'gd');if(r.ok)$('gdfold').value=SET.driveFolder;};
 $('gdfoldauto').onclick=async()=>{$('gdfold').value='';await setOne({driveFolder:''},'gd');};
@@ -4059,6 +4146,16 @@ try {
           Save-Settings $st
           if ($lay) { Sync-PlayerExtras }   # a button added to / changed on one of the player's own pages plays straight away
           Send-Json $ctx @{ ok = $true; settings = (Get-Settings) }
+        }
+        '/api/config/export' {
+          # SX Studio's settings in one file (user 2026-11-25): settings.json, the APC40 pages (apc40.json) and the Auto Show
+          # (<show>/auto_show.json). Not the phone pairing key and nothing of the show itself. The page adds this device's look.
+          if ($fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Export the settings on the computer.' }; break }
+          Send-Json $ctx @{ ok = $true; data = (Get-ConfigExport) }
+        }
+        '/api/config/import' {
+          if ($fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Import the settings on the computer.' }; break }
+          Send-Json $ctx (Import-Config $body.data)
         }
         '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }
         '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }

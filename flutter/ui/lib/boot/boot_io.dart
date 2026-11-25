@@ -87,6 +87,11 @@ Future<void> _quit(QuitReason why) async {
   exit(0);
 }
 
+/// Downloads, or SX Studio's own `exports` folder: the first place Export
+/// settings saves in that exists. Without it the Windows dialog opens in the
+/// app's working folder, which can be `System32`.
+String? settingsFileFolder() => downloadFolders(settingsDir).where((d) => Directory(d).existsSync()).firstOrNull;
+
 /// The web build shipped with the app: `web` next to the program on Windows
 /// and Linux, `Contents/Resources/web` in the Mac app. The usual place when
 /// neither is there, so the engine knows the phone page is missing.

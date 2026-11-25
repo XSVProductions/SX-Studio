@@ -38,7 +38,7 @@ void _case(String name, {String? file, Object? save, String Function(String text
   test(name, skip: paritySkip, () async {
     final dir = Directory(p.join(_tmp.path, name.replaceAll(RegExp(r'\W+'), '_')))..createSync();
     final show = p.join(dir.path, 'show');
-    await Process.run('cp', ['-r', _show, show]);
+    copyDir(Directory(_show), Directory(show));
     if (liveIni != null) {
       final f = File(p.join(show, 'Live', 'live.ini'));
       f.writeAsStringSync(liveIni(f.readAsStringSync()));

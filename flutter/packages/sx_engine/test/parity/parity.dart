@@ -343,7 +343,8 @@ Future<OldRun> runOld(String script, Map<String, Object> args, {String? sxOpenSh
   return OldRun(r.exitCode, r.stdout as String, r.stderr as String, r.exitCode == 0 ? null : err);
 }
 
-void _copyDir(Directory from, Directory to) {
+/// Copies a folder and everything in it. Plain Dart, so it works on Windows too.
+void copyDir(Directory from, Directory to) {
   to.createSync(recursive: true);
   for (final e in from.listSync(recursive: true, followLinks: false)) {
     final target = p.join(to.path, p.relative(e.path, from: from.path));
@@ -391,7 +392,7 @@ void _dump(String rel, List<int> old, List<int> now) {
 void dumpTree(String label, Directory dir) {
   final to = _env['SX_PARITY_DUMP'];
   if (to == null || to.isEmpty || !dir.existsSync()) return;
-  _copyDir(dir, Directory(p.join(to, label)));
+  copyDir(dir, Directory(p.join(to, label)));
 }
 
 /// A readable account of how two folders differ, or '' when they match.
@@ -483,7 +484,7 @@ void parityTest(
     final show = Directory(p.join(tmp.path, 'show'));
     void fresh() {
       if (show.existsSync()) show.deleteSync(recursive: true);
-      _copyDir(Directory(realShowPath!), show);
+      copyDir(Directory(realShowPath!), show);
       setup?.call(ShowEnv(show.path));
     }
 

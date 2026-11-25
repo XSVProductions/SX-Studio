@@ -13,3 +13,7 @@ Future<SxClient> boot() => impl.boot();
 /// the player and the Auto Show, as the old app did on exit. Does nothing in
 /// a browser.
 Future<void> shutdown() => impl.shutdown();
+
+/// The folder Import settings opens in: where Export settings saves. Null in
+/// a browser, which has no such card.
+String? settingsFileFolder() => impl.settingsFileFolder();

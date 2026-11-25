@@ -18,6 +18,30 @@ String? _above(String rel) {
   return null;
 }
 
+/// [exe] on PATH, or null.
+String? _onPath(String exe) {
+  final win = Platform.isWindows;
+  for (final d in (Platform.environment['PATH'] ?? '').split(win ? ';' : ':')) {
+    final f = '$d${Platform.pathSeparator}$exe${win ? '.exe' : ''}';
+    if (File(f).existsSync()) return f;
+  }
+  return null;
+}
+
+/// Copies a folder and everything in it.
+void _copyDir(Directory from, Directory to) {
+  to.createSync(recursive: true);
+  for (final e in from.listSync(recursive: true, followLinks: false)) {
+    final target = '${to.path}${e.path.substring(from.path.length)}';
+    if (e is Directory) {
+      Directory(target).createSync(recursive: true);
+    } else if (e is File) {
+      File(target).parent.createSync(recursive: true);
+      e.copySync(target);
+    }
+  }
+}
+
 /// Numbers compare by value: PowerShell writes 1 where Dart writes 1.0.
 bool same(Object? a, Object? b) => switch ((a, b)) {
   (final num x, final num y) => x == y,
@@ -33,7 +57,7 @@ void main() {
   // SX_PWSH, SX_OLD_SRC and SX_SHOW name them, as for the engine's parity tests. Otherwise they are looked for above
   // this folder: the old app cloned next to the port (`repo/`), or the port inside the SX-Studio repository (`src/`).
   final env = Platform.environment;
-  final pwsh = env['SX_PWSH'] ?? _above('tools/pwsh/pwsh');
+  final pwsh = env['SX_PWSH'] ?? _above('tools/pwsh/pwsh') ?? _onPath('pwsh') ?? _onPath('powershell');
   final player = env['SX_OLD_SRC'] == null ? _above('repo/src/player.ps1') ?? _above('src/player.ps1') : '${env['SX_OLD_SRC']}/player.ps1';
   final show = env['SX_SHOW'] ?? _above('real-show/Awaaz Lightshow');
 
@@ -43,8 +67,7 @@ void main() {
       final tmp = Directory.systemTemp.createTempSync('sx_lab_wire');
       try {
         final copy = '${tmp.path}/show';
-        final cp = await Process.run('cp', ['-r', show!, copy]);
-        expect(cp.exitCode, 0);
+        _copyDir(Directory(show!), Directory(copy));
         final r = await Process.run(pwsh!, ['-NoProfile', '-File', player!, '-List', '-TestRoot', copy]);
         expect(r.exitCode, 0, reason: '${r.stderr}');
         final raw = jsonDecode((r.stdout as String).trim().split('\n').last);

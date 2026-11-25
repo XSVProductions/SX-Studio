@@ -110,8 +110,7 @@ void main() {
     oldShow = p.join(tmp.path, 'old', 'LightShows', 'Awaaz Lightshow');
     newShow = p.join(tmp.path, 'new', 'show');
     for (final to in [oldShow, newShow]) {
-      Directory(to).createSync(recursive: true);
-      await Process.run('cp', ['-r', '$realShowPath/.', to]);
+      copyDir(Directory(realShowPath!), Directory(to));
     }
     old = await _OldServer.start(oldShow);
     e = Engine(

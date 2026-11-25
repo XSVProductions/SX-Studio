@@ -223,3 +223,6 @@ Future<({bool works, bool turnedOff})> _keyWorks(SxClient client) async {
 
 /// Nothing to stop: the engine is the laptop, and it keeps running.
 Future<void> shutdown() async {}
+
+/// A browser never opens the settings file dialog.
+String? settingsFileFolder() => null;

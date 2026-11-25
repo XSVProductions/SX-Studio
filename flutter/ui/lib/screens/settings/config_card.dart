@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../boot/boot.dart';
 import '../../page_store.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
@@ -49,7 +50,7 @@ typedef PickedFile = ({String name, String text});
 /// The open dialog for a settings file, or null when the user cancels.
 Future<PickedFile?> pickSettingsFile() async {
   const json = XTypeGroup(label: 'SX Studio settings', extensions: ['json'], mimeTypes: ['application/json'], uniformTypeIdentifiers: ['public.json']);
-  final f = await openFile(acceptedTypeGroups: const [json]);
+  final f = await openFile(acceptedTypeGroups: const [json], initialDirectory: settingsFileFolder());
   if (f == null) return null;
   return (name: f.name, text: await f.readAsString());
 }

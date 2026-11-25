@@ -2826,7 +2826,9 @@ async function gdImport(){if(!G||!G.srcFound)return;
  if(!await ask('Import the show from Google Drive?','The show on this computer is <b>replaced</b> by the Google Drive copy'+(G.srcTime?' (saved '+fmtT(G.srcTime)+')':'')+' &mdash; anything changed here since then is lost. The old show is kept as a backup.'+(sxOpen?'<br><br>ShowXpress is open: this waits until you close it.':''),'Import'))return;
  await saveTo('/api/gdrive/import',{},'Copying the show from Google Drive…',async()=>{reloadAll();},'gimport');}
 $('gdimp').onclick=()=>gdImport();
-async function sxLaunch(){busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
+async function sxLaunch(){// only one program can use the DMX interface: stop this window's previews first (each does nothing if it isn't on)
+ await cpStop(false);await sePvStop(false);await mvPvStop(false);await lkPvStop(false);
+ busy(true,'Starting ShowXpress…');let r;try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}
  if(r.ok&&r.already){busy(false);
   if(!await ask('ShowXpress is still running','SX Studio sees ShowXpress running on the laptop. If you can see its window there, just use it.<br><br>If you <b>can&rsquo;t</b> see it, it got stuck while closing: <b>Force close</b> stops it and opens it again (anything not saved is lost).','Force close and open'))return;
   if(!await sxForce())return;busy(true,'Starting ShowXpress…');try{r=await api('/api/sx/launch',{});}catch(e){r={ok:false,error:'Lost connection.'}}}
@@ -4270,7 +4272,7 @@ try {
         }
         '/api/open' { Send-Json $ctx (Open-OnComputer "$($body.what)") }
         '/api/queue/seen'   { $script:qDone = $null; Send-Json $ctx @{ ok = $true } }
-        '/api/sx/launch' { Stop-Player; Send-Json $ctx (Start-Sx) }
+        '/api/sx/launch' { Stop-Player; Stop-Live; Send-Json $ctx (Start-Sx) }   # also stops a preview a phone or another window is running
         '/api/sx/close' {
           if ($body -and $body.live) { $script:liveHold = Get-Date }   # live aim asked: the queue must not reopen ShowXpress now
           $ps = @(Get-SxProcess)

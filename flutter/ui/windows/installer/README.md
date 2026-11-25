@@ -17,11 +17,11 @@ It builds the phone page (web), the Windows app (which takes the web build into 
 
 Upload them all (and the Mac `.pkg`) to a GitHub release of `XSVProductions/SX-Studio` tagged `v<version>`. The script prints the files and a `gh release create` line. A release holds exactly one `.exe`, the installer: the PowerShell SX Studio installs the first `.exe` of the newest release. A release without a `.pkg` gives Macs no update.
 
-Pushing a `v*` tag runs `.github/workflows/build.yml` instead: it builds both installers and, if the repository secret `SX_RELEASE_KEY` holds the key file's text, signs and publishes. Without the secret it stops before publishing.
+Signing happens only here, on the maintainer's computer. Pushing a `v*` tag runs `.github/workflows/build.yml`: it tests and builds both installers and never signs or publishes. Take the Mac `.pkg` from its `mac` artifact (`gh run download --name mac`). First time: `RELEASE_SETUP.md` at the top of the repository.
 
 ## The release key
 
-`release.json` is trusted only with a signature by the release key. Its public half is built into the app and the setup program (`packages/sx_release/lib/src/release_key.dart`). The private half is `%USERPROFILE%\.sx-release\release_key`, outside every repository; `SX_RELEASE_KEY` points elsewhere. Keep a copy offline. Anyone holding it can ship an update every SX Studio installs; lose it and installed apps take no update until they are reinstalled with a new key.
+`release.json` is trusted only with a signature by the release key. Its public half is built into the app and the setup program (`packages/sx_release/lib/src/release_key.dart`). The private half is `%USERPROFILE%\.sx-release\release_key`, outside every repository and never on GitHub; `SX_RELEASE_KEY` points elsewhere. Keep a copy offline. Anyone holding it can ship an update every SX Studio installs; lose it and installed apps take no update until they are reinstalled with a new key.
 
 New key, only if the old one is lost or leaked: `cd packages/sx_release && dart run sx_release:release_tool keygen`, put the public key it prints into `release_key.dart`, rebuild and re-sign the setup program, and reinstall SX Studio everywhere.
 

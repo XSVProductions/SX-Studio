@@ -6,3 +6,5 @@ The Flutter port of SX Studio. `CLAUDE.md` explains how it is put together and h
 cd packages/sx_engine && dart test        # engine tests, including old-versus-new checks
 cd ui && flutter run -d windows           # the app
 ```
+
+Publishing a release: `RELEASE_SETUP.md` (first time) and `ui/windows/installer/README.md`.

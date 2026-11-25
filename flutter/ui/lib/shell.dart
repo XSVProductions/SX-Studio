@@ -3,6 +3,8 @@ import 'package:sx_api/sx_api.dart';
 
 import 'app_state.dart';
 import 'queue_bar.dart';
+import 'screens/settings/settings_model.dart';
+import 'screens/settings/update_card.dart';
 import 'tabs.dart';
 import 'theme.dart';
 import 'widgets/sx_widgets.dart';
@@ -74,6 +76,8 @@ class _Header extends StatelessWidget {
     final gutter = sxGutter(context);
     final mark = Image.asset('assets/img/sx_mark.png', height: gutter < 22 ? 30 : 38, filterQuality: FilterQuality.medium);
     final state = open ? Sx.amber : Sx.green;
+    final auto = app.status?.auto;
+    final waiting = app.status?.queue.items.length ?? 0;
     return Container(
       decoration: BoxDecoration(
         color: Sx.bg,
@@ -109,6 +113,11 @@ class _Header extends StatelessWidget {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
+                  if (auto != null && auto.running)
+                    Tooltip(
+                      message: 'Auto Show is playing',
+                      child: MiniButton('AUTO  ·  ${auto.name}', icon: Icons.circle, on: true, onPressed: () => app.go('auto')),
+                    ),
                   if (app.status != null) ...[
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -117,7 +126,7 @@ class _Header extends StatelessWidget {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            open ? 'ShowXpress is open' : 'ShowXpress closed',
+                            open ? 'ShowXpress open${waiting > 0 ? '  ·  $waiting waiting' : ''}' : 'ShowXpress closed',
                             style: TextStyle(color: state, fontSize: 12.5, fontWeight: FontWeight.w600),
                           ),
                           if (!open)
@@ -132,6 +141,7 @@ class _Header extends StatelessWidget {
                         ? MiniButton('Close ShowXpress', icon: Icons.stop, onPressed: () => runSave(context, () => app.client.sxClose(), quiet: true))
                         : MiniButton('Launch ShowXpress', icon: Icons.play_arrow, onPressed: () => runSave(context, app.client.sxLaunch, quiet: true)),
                   ],
+                  const UpdateButton(),
                   Tooltip(
                     message: 'Settings',
                     child: InkWell(
@@ -161,7 +171,8 @@ class _Header extends StatelessWidget {
 }
 
 /// Home, then one menu per group. A group that holds the tab on show says
-/// which one ("Rig & Control · Speed Faders").
+/// which one ("Rig & Control · Speed Faders"). Settings decides the tabs'
+/// order and names and which are hidden.
 class _TabBar extends StatelessWidget {
   const _TabBar();
 
@@ -170,6 +181,12 @@ class _TabBar extends StatelessWidget {
     final app = AppScope.of(context);
     final width = MediaQuery.sizeOf(context).width;
     final pad = EdgeInsets.symmetric(horizontal: width >= 1300 ? 14 : 10, vertical: 7);
+    final m = SettingsModel.of(app);
+    return ListenableBuilder(listenable: m, builder: (context, _) => _bar(app, m, width, pad));
+  }
+
+  Widget _bar(AppState app, SettingsModel m, double width, EdgeInsets pad) {
+    final shown = m.visible();
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
@@ -186,7 +203,7 @@ class _TabBar extends StatelessWidget {
             MenuAnchor(
               alignmentOffset: const Offset(0, 7),
               menuChildren: [
-                for (final t in tabs.where((t) => t.group == g))
+                for (final t in shown.where((t) => t.group == g))
                   MenuItemButton(
                     onPressed: () => app.go(t.id),
                     style: MenuItemButton.styleFrom(
@@ -197,7 +214,7 @@ class _TabBar extends StatelessWidget {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       textStyle: const TextStyle(fontFamily: Sx.body, fontSize: 13.5, fontWeight: FontWeight.w600, letterSpacing: .3),
                     ),
-                    child: Text(app.dirtyTabs.contains(t.id) ? '${t.name}  (unsaved)' : t.name),
+                    child: Text(app.dirtyTabs.contains(t.id) ? '${m.nameOf(t)}  (unsaved)' : m.nameOf(t)),
                   ),
               ],
               builder: (context, menu, _) {
@@ -212,7 +229,7 @@ class _TabBar extends StatelessWidget {
                       // A phone has no room for both, so it shows the tab's name only.
                       if (current == null || width > 620) Text(g.title, style: current == null ? null : TextStyle(color: Sx.dim)),
                       if (current != null && width > 620) Text('  ·  ', style: TextStyle(color: Sx.mute)),
-                      if (current != null) Text(current.name),
+                      if (current != null) Text(m.nameOf(current)),
                       Icon(Icons.arrow_drop_down, size: 16, color: Sx.mute),
                     ],
                   ),

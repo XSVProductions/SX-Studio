@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -78,6 +79,17 @@ class SxClient {
   /// `ok == false`, so screens can show the reason next to the button.
   Future<ToolResult> run(String path, [Object? body]) async =>
       ToolResult.fromJson(await _send(() => _http.post(_uri(path, null), headers: _headers, body: jsonEncode(body ?? const {}))));
+
+  /// GET a file the engine serves next to the API (`/brand.png`). Null when
+  /// it isn't there or the engine can't be reached.
+  Future<Uint8List?> bytes(String path) async {
+    try {
+      final r = await _http.get(_uri(path, null), headers: _headers);
+      return r.statusCode == 200 ? r.bodyBytes : null;
+    } on http.ClientException {
+      return null;
+    }
+  }
 
   Future<Json> _send(Future<http.Response> Function() call) async {
     final http.Response r;

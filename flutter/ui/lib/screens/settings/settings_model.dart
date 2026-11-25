@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:sx_api/sx_api.dart';
 
@@ -32,6 +34,12 @@ class SettingsModel extends ChangeNotifier {
   bool loaded = false;
   String error = '';
 
+  /// What GitHub said about a newer version, or null before the answer.
+  /// Asked once when the app opens, on the laptop, unless the user turned
+  /// that off. Home's version line and the header's Update button read it.
+  UpdateInfo? update;
+  var _askedUpdate = false;
+
   Future<void> load() async {
     try {
       final info = await client.settings();
@@ -40,10 +48,23 @@ class SettingsModel extends ChangeNotifier {
       phone = info.phone;
       loaded = true;
       error = '';
+      if (!phone && settings.autoUpd && !_askedUpdate) {
+        _askedUpdate = true;
+        unawaited(_checkUpdate());
+      }
     } on ApiException catch (e) {
       error = e.message;
     }
     notifyListeners();
+  }
+
+  Future<void> _checkUpdate() async {
+    try {
+      update = await client.update();
+      notifyListeners();
+    } on ApiException {
+      return;
+    }
   }
 
   /// Saves [change]. Answers '' or the reason it wasn't saved.

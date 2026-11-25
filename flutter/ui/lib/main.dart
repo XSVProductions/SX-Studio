@@ -1,3 +1,5 @@
+import 'dart:ui' show AppExitResponse;
+
 import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
@@ -27,9 +29,18 @@ class _SxStudioState extends State<SxStudio> with WidgetsBindingObserver {
   // In a browser `?tab=speed` opens straight on a tab.
   late final _state = AppState(widget.client, tab: Uri.base.queryParameters['tab'] ?? 'home', themeMode: widget.themeMode);
 
+  /// Closing the window stops the lights the engine is driving first.
+  late final _exit = AppLifecycleListener(
+    onExitRequested: () async {
+      await shutdown();
+      return AppExitResponse.exit;
+    },
+  );
+
   @override
   void initState() {
     super.initState();
+    _exit; // a late field starts listening only once it is read
     WidgetsBinding.instance.addObserver(this);
     _state.addListener(_applyTheme);
     _applyTheme();
@@ -37,6 +48,7 @@ class _SxStudioState extends State<SxStudio> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _exit.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _state.dispose();
     super.dispose();

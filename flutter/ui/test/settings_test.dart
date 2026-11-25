@@ -119,7 +119,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(engine.posts['/api/update/install'], hasLength(1));
     expect(find.text('Download failed: no network'), findsOneWidget);
-    expect(find.text('Downloading the update.'), findsNothing);
+    expect(find.text('Downloading the update...'), findsNothing);
   });
 
   _test('unticking a tab hides it everywhere', (tester) async {

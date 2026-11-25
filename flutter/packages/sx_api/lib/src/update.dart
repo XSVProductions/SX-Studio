@@ -57,6 +57,10 @@ extension UpdateApi on SxClient {
   /// Asks GitHub once per run. [fresh] asks again.
   Future<UpdateInfo> update({bool fresh = false}) => get('/api/update', UpdateInfo.fromJson, query: fresh ? const {'fresh': '1'} : null);
 
-  /// Opens the newest release's page in the laptop's browser. Laptop only.
+  /// Downloads the newest installer and checks it against the release's
+  /// signed manifest. On success the answer has `restarting: true` and the
+  /// app quits and runs the installer, which opens the new version. Without
+  /// an installer (the engine on its own) it opens the release page instead.
+  /// Laptop only. The old `/api/update/install`.
   Future<ToolResult> updateInstall() => run('/api/update/install');
 }

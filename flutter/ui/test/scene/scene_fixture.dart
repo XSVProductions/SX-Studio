@@ -7,11 +7,11 @@ import 'package:sx_api/sx_api.dart';
 /// A small scene: two Spot heads, three steps. Step 1 has head 1 lit and
 /// head 2 dark, step 2 only head 1 with a closed shutter and a fading
 /// dimmer, step 3 both heads.
-Map<String, Object?> sceneJson() => {
+Map<String, Object?> sceneJson([String file = 'TEST SCENE.scex']) => {
   'ok': true,
   'show': '/show',
-  'file': 'TEST SCENE.scex',
-  'name': 'TEST SCENE',
+  'file': file,
+  'name': file.replaceAll('.scex', ''),
   'sha': 'abc123',
   'used': ['PAGE: TEST'],
   'trimmed': false,
@@ -99,13 +99,16 @@ SceneOpen testScene() => SceneOpen.fromJson(jsonDecode(jsonEncode(sceneJson())) 
 /// A request the fake engine got: its path and JSON body.
 typedef Sent = ({String path, Map<String, Object?> body});
 
-/// A fake engine. [answers] gives the reply per path; [sent] collects every
-/// POST in order.
+/// A fake engine. [answers] gives the reply per path, from the POST body or
+/// the GET query; [sent] collects every POST in order.
 SxClient fakeEngine(List<Sent> sent, Map<String, Object? Function(Map<String, Object?> body)> answers) => SxClient(
   Uri.parse('http://engine'),
   token: 't',
   client: MockClient((req) async {
-    final body = req.method == 'POST' && req.body.isNotEmpty ? (jsonDecode(req.body) as Map).cast<String, Object?>() : <String, Object?>{};
+    // a GET's query stands in for the body
+    final body = req.method == 'POST'
+        ? (req.body.isEmpty ? <String, Object?>{} : (jsonDecode(req.body) as Map).cast<String, Object?>())
+        : <String, Object?>{...req.url.queryParameters};
     if (req.method == 'POST') sent.add((path: req.url.path, body: body));
     final a = answers[req.url.path];
     final out = a == null ? {'ok': false, 'error': 'no route'} : a(body);

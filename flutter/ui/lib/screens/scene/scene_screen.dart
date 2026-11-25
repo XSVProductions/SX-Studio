@@ -21,7 +21,7 @@ class SceneScreen extends StatefulWidget {
   State<SceneScreen> createState() => _SceneScreenState();
 }
 
-class _SceneScreenState extends State<SceneScreen> {
+class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   static const _tab = 'scene';
   static const _reoNote = ' ShowXpress is closed now - press Launch ShowXpress at the top to open it again.';
 
@@ -53,6 +53,31 @@ class _SceneScreenState extends State<SceneScreen> {
     _app.addListener(_onApp);
     _loadList();
   }
+
+  /// Another tab asked for a scene (the SX Player's "Edit scene", Looks'
+  /// "Change it in the Scene Editor"). Opens it as the old `seOpen(f)` did:
+  /// unsaved edits to the scene on screen are asked about first.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final f = AppScope.of(context).takeFile(_tab);
+    if (f == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _open(f);
+    });
+  }
+
+  /// The queue saved into the show: read the list again, and the open scene
+  /// from disk, keeping the step and picked heads. The old `reloadAll`.
+  /// (When ShowXpress closes the old page left the Scene Editor alone.)
+  @override
+  void onQueueRan() => WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!mounted) return;
+    _list = null;
+    unawaited(_loadList());
+    final w = _work;
+    if (w != null) unawaited(_open(w.scene.file, keep: true));
+  });
 
   @override
   void dispose() {

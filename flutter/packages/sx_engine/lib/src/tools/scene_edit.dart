@@ -7,7 +7,6 @@ import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
 import '../ps_compat.dart';
-import '../show/find_show.dart';
 import '../show/fixtures.dart';
 import '../show/live_ini.dart';
 import '../show/show_env.dart';
@@ -37,9 +36,10 @@ import 'scene_edit/scene_xml.dart';
 /// How many earlier versions of a scene are kept.
 const maxSceneBackups = 20;
 
-/// Where scene backups go: outside the show folder, so Google Drive never
+/// Where scene backups go, given the engine's settings folder
+/// (`Engine.settingsFolder`): outside the show folder, so Google Drive never
 /// gets them. Each show and scene has its own folder below this one.
-String get defaultSceneBackupBase => p.join(settingsDir, 'scene_backups');
+String sceneBackupBase(String settingsFolder) => p.join(settingsFolder, 'scene_backups');
 
 final _sceneName = RegExp(r'^[^\\/:*?"<>|\x00-\x1f]{1,120}\.scex$', caseSensitive: false);
 final _scexEnd = RegExp(r'\.scex$', caseSensitive: false);
@@ -416,7 +416,7 @@ SceneCheck sceneCheck(ShowEnv env) {
 
 /// A scene for the editor: steps, heads, channels, named ranges, DMX
 /// addresses. Port of `-Action Open`.
-SceneOpen sceneOpen(ShowEnv env, String scene, {String? backupBase}) {
+SceneOpen sceneOpen(ShowEnv env, String scene, {required String backupBase}) {
   _requireScenes(env);
   final path = _sceneFile(env, scene);
   final o = _Opened(path);
@@ -431,7 +431,7 @@ SceneOpen sceneOpen(ShowEnv env, String scene, {String? backupBase}) {
     trimmed: _trimmed(_rigTrimmed(env), scene, path),
     readonly: o.why,
     structural: sc?.structural ?? false,
-    backups: _backups(env, backupBase ?? defaultSceneBackupBase, scene).length,
+    backups: _backups(env, backupBase, scene).length,
   );
   if (sc == null) return base;
   final patch = _patch(env), names = _channelNames(env, o), defs = FixtureDefs(env);
@@ -477,12 +477,12 @@ SceneOpen sceneOpen(ShowEnv env, String scene, {String? backupBase}) {
 }
 
 /// The backups of a scene, newest first. Port of `-Action Backups`.
-SceneBackups sceneBackups(ShowEnv env, String scene, {String? backupBase}) {
+SceneBackups sceneBackups(ShowEnv env, String scene, {required String backupBase}) {
   _requireScenes(env);
   _sceneFile(env, scene);
   return SceneBackups(
     file: scene,
-    backups: [for (final b in _backups(env, backupBase ?? defaultSceneBackupBase, scene)) SceneBackup(id: b.id, at: b.at, what: b.what)],
+    backups: [for (final b in _backups(env, backupBase, scene)) SceneBackup(id: b.id, at: b.at, what: b.what)],
   );
 }
 
@@ -491,10 +491,10 @@ SceneBackups sceneBackups(ShowEnv env, String scene, {String? backupBase}) {
 typedef SceneRevertResult = ({bool conflict, String out});
 
 /// Puts a backup back. The current file is backed up first. Port of `-Action Revert`.
-SceneRevertResult sceneRevert(ShowEnv env, String scene, String backup, {bool force = false, String? backupBase}) {
+SceneRevertResult sceneRevert(ShowEnv env, String scene, String backup, {bool force = false, required String backupBase}) {
   _requireScenes(env);
   env.requireSxClosed();
-  final base = backupBase ?? defaultSceneBackupBase;
+  final base = backupBase;
   final path = _sceneFile(env, scene);
   final bk = _backups(env, base, scene).where((b) => b.id == backup).firstOrNull;
   if (bk == null) throw ToolError('That backup is not there any more. NOTHING was changed.');
@@ -510,10 +510,10 @@ SceneRevertResult sceneRevert(ShowEnv env, String scene, String backup, {bool fo
 }
 
 /// Writes a scene's changes. Returns the report. Port of `-Action Save`.
-String sceneSave(ShowEnv env, SceneChanges changes, {String? backupBase}) {
+String sceneSave(ShowEnv env, SceneChanges changes, {required String backupBase}) {
   _requireScenes(env);
   env.requireSxClosed();
-  final base = backupBase ?? defaultSceneBackupBase;
+  final base = backupBase;
   final scene = changes.scene, bare = _bareName(scene);
   final path = _sceneFile(env, scene);
   final o = _Opened(path);

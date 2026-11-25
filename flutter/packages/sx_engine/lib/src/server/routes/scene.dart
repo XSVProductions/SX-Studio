@@ -16,20 +16,20 @@ void registerSceneRoutes(Engine e) {
   e.api.get('/api/scene', (req) {
     final f = req.query['f'] ?? '';
     if (!_sceneRx.hasMatch(f)) throw ToolError('Unknown scene.');
-    return sceneOpen(e.show(), f);
+    return sceneOpen(e.show(), f, backupBase: sceneBackupBase(e.settingsFolder));
   });
 
   e.api.get('/api/scene/backups', (req) {
     final f = req.query['f'] ?? '';
     if (!_sceneRx.hasMatch(f)) throw ToolError('Unknown scene.');
-    return sceneBackups(e.show(), f);
+    return sceneBackups(e.show(), f, backupBase: sceneBackupBase(e.settingsFolder));
   });
 
   e.api.post('/api/scene/revert', (req) {
     final f = req.body.str('f'), id = req.body.str('id');
     if (!_sceneRx.hasMatch(f) || !RegExp(r'^\d{8}-\d{6}-\d{3}$').hasMatch(id)) throw ToolError('Unknown backup.');
     if (e.sx.running) throw ToolError('ShowXpress is open. Close it (save first), then press Revert again.');
-    final r = sceneRevert(e.show(), f, id, force: req.body['force'] == true);
+    final r = sceneRevert(e.show(), f, id, force: req.body['force'] == true, backupBase: sceneBackupBase(e.settingsFolder));
     return r.conflict ? {'ok': true, 'conflict': true, 'out': ''} : r.out;
   });
 
@@ -49,7 +49,7 @@ void registerSceneRoutes(Engine e) {
       } on FormatException catch (x) {
         throw ToolError(x.message);
       }
-      return sceneSave(e.show(), changes);
+      return sceneSave(e.show(), changes, backupBase: sceneBackupBase(e.settingsFolder));
     },
   );
 }

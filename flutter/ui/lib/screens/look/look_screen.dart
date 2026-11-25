@@ -3,10 +3,10 @@ import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../page_store.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import '../color/on_the_lights.dart';
@@ -92,7 +92,7 @@ class _LookScreenState extends State<LookScreen> {
     if (!_prefsRead) {
       _prefsRead = true;
       try {
-        final kept = (await SharedPreferences.getInstance()).getString(lookPrefsKey);
+        final kept = (await openPageStore()).get(lookPrefsKey);
         final j = kept == null ? null : jsonDecode(kept);
         if (j is Map) _o = LookOptions.fromJson(j.cast<String, Object?>());
       } on FormatException {
@@ -121,7 +121,7 @@ class _LookScreenState extends State<LookScreen> {
       _syncName();
     });
     final kept = jsonEncode(_o.toJson());
-    unawaited(SharedPreferences.getInstance().then((p) => p.setString(lookPrefsKey, kept)));
+    unawaited(openPageStore().then((p) => p.set(lookPrefsKey, kept)));
   }
 
   /// The look's channels now, for the lights. Port of `lkFrame`.

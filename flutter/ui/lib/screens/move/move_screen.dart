@@ -3,10 +3,10 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
+import '../../page_store.dart';
 import '../../sx_control.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
@@ -139,7 +139,7 @@ class _MoveScreenState extends State<MoveScreen> {
 
   /// The scenes for "Light it with". Port of `mvLiteList`.
   Future<void> _loadScenes() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await openPageStore();
     List<_Scene> got;
     try {
       got = await _app.client.get('/api/scenes', (j) => j.list('scenes', (s) => (file: s.str('file'), name: s.str('name'))));
@@ -149,7 +149,7 @@ class _MoveScreenState extends State<MoveScreen> {
       got = const [];
     }
     if (!mounted) return;
-    final cur = _lite.isNotEmpty ? _lite : prefs.getString(_liteKey) ?? '';
+    final cur = _lite.isNotEmpty ? _lite : prefs.get(_liteKey) ?? '';
     setState(() {
       _scenes = got;
       _lite = got.any((s) => s.file == cur) ? cur : '';
@@ -524,7 +524,7 @@ class _MoveScreenState extends State<MoveScreen> {
   /// Loads the scene picked in "Light it with". Port of `mvLiteLoad`.
   Future<void> _liteLoad() async {
     final f = _lite;
-    unawaited(SharedPreferences.getInstance().then((p) => p.setString(_liteKey, f)));
+    unawaited(openPageStore().then((p) => p.set(_liteKey, f)));
     if (f.isEmpty) {
       _liteV = null;
       _pv?.push();

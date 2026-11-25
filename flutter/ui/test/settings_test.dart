@@ -109,6 +109,7 @@ void main() {
   _test('an update asks first, then says why it failed', (tester) async {
     final engine = _Engine();
     await _pump(tester, engine);
+    await tester.ensureVisible(find.text('Check now'));
     await tester.tap(find.text('Check now'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Update to 2.1.0'));

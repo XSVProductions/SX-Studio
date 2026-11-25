@@ -30,6 +30,7 @@ $quitEngine = Join-Path $here 'sx_quit.ps1'
 $sceneEngine = Join-Path $here 'scene_edit.ps1'
 $moveEngine = Join-Path $here 'move_edit.ps1'
 $looksEngine = Join-Path $here 'looks.ps1'
+$apc40Engine = Join-Path $here 'apc40.ps1'
 $repo   = 'XSVProductions/SX-Studio'   # was showxpress-helper (renamed 2026-11-24; GitHub redirects the old name)
 $verF   = Join-Path $here 'version.txt'
 $appVer = if (Test-Path -LiteralPath $verF) { ([IO.File]::ReadAllText($verF)).Trim() } else { '0.0.0' }
@@ -742,6 +743,46 @@ function Start-Auto([string]$look) {
   @{ ok = $true; status = $s }
 }
 
+# ---- APC40 mk2 (user 2026-11-25): apc40.ps1 runs as a child process for as long as SX Studio does (Windows). It waits for
+# the APC40 to be plugged in, then plays the user's own pages of pads (apc40.json, SX Studio's settings - never a show file)
+# through ShowXpress's remote. SX Studio doesn't quit while the APC40 is in use, so it works with the window closed.
+$script:a40P = $null; $script:a40Next = [datetime]::MinValue; $a40Stat = Join-Path ([IO.Path]::GetTempPath()) "sxh_apc40_$PID.json"
+function Test-Apc40 { [bool]($script:a40P -and -not $script:a40P.HasExited) }
+function Get-Apc40Lay { Join-Path $cfgDir 'apc40.json' }
+function Get-Apc40Status {
+  $s = $null
+  if (Test-Path -LiteralPath $a40Stat) { try { $s = [IO.File]::ReadAllText($a40Stat) | ConvertFrom-Json } catch {} }
+  if ($s -and -not (Test-Apc40)) { $s.running = $false }
+  $s
+}
+function Test-Apc40Busy { if (-not (Test-Apc40)) { return $false }; $s = Get-Apc40Status; [bool]($s -and $s.apc -eq 'ok') }
+function Stop-Apc40 {
+  $p = $script:a40P; $script:a40P = $null
+  if (-not $p) { return }
+  try { if (-not $p.HasExited) { $p.StandardInput.WriteLine('q'); if (-not $p.WaitForExit(4000)) { $p.Kill() } } } catch { try { $p.Kill() } catch {} }
+}
+function Send-Apc40([string]$c) { if (Test-Apc40) { try { $script:a40P.StandardInput.WriteLine($c); return $true } catch {} }; $false }
+function Step-Apc40 {
+  # (re)start it - not on a Mac, not in a test copy with -TestRoot (that would take the real APC40)
+  if ($onMac -or $TestRoot -or (Test-Apc40) -or (Get-Date) -lt $script:a40Next) { return }
+  $script:a40Next = (Get-Date).AddSeconds(20)
+  Remove-Item -LiteralPath $a40Stat -ErrorAction SilentlyContinue
+  $psi = New-Object Diagnostics.ProcessStartInfo
+  $psi.FileName = $psExe
+  $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$apc40Engine`" -Layout `"$(Get-Apc40Lay)`" -StatusFile `"$a40Stat`""
+  $psi.UseShellExecute = $false; $psi.CreateNoWindow = $true
+  $psi.RedirectStandardInput = $true; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+  $p = [Diagnostics.Process]::Start($psi); $p.StandardInput.AutoFlush = $true
+  $script:a40Err = $p.StandardError.ReadToEndAsync(); $script:a40Out = $p.StandardOutput.ReadToEndAsync()
+  $script:a40P = $p
+}
+function Send-Apc40Json($ctx, $r) {
+  $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 } else { $null }
+  if (-not $j) { Send-Json $ctx @{ ok = $false; error = $(if ($r.error) { "$($r.error)" } else { 'No answer from the helper script.' }) }; return }
+  $s = Get-Apc40Status
+  Send-Text $ctx 200 'application/json; charset=utf-8' ($j.Substring(0, $j.Length - 1) + ',"windows":' + $(if ($onMac) { 'false' } else { 'true' }) + ',"status":' + $(if ($s) { $s | ConvertTo-Json -Depth 4 -Compress } else { 'null' }) + '}')
+}
+
 # ---- PHONE / iPAD (user 2026-11-22): the phone opens http://<this computer>:47322 on the same Wi-Fi and gets this same page,
 # phone-sized. The page above stays on localhost; a small relay (C#, no admin needed) takes the phone's requests on the
 # Wi-Fi port and hands them to it with the header X-SXH-Phone. A phone is let in once with a 6-digit code (shown on the
@@ -767,7 +808,7 @@ $setF = Join-Path $cfgDir 'settings.json'
 # 2026-11-24 (user): pages can be collapsed / hidden (collapsed:[n..], hidden:[n..]), and the player has pages of its own
 # (custom:[{id:"x1", name, swap, buttons:[{id:"x1_b1", title, file, fader, bpm, flash, beats, color}]}]) that play the
 # show's scene / movement files. All of it is SX Studio's settings only - live.ini and the scenes are never written.
-$tabIds = @('rt', 'aim', 'color', 'pre', 'lab', 'auto', 'rig', 'skip', 'apc', 'speed', 'scene', 'move', 'look', 'health')
+$tabIds = @('rt', 'aim', 'color', 'pre', 'lab', 'auto', 'rig', 'skip', 'apc', 'apc40', 'speed', 'scene', 'move', 'look', 'health')
 $secRx = '^[\w .\-]{1,60}$'
 function Get-TabNames($v) {
   $o = [ordered]@{}
@@ -1089,6 +1130,13 @@ header{flex-wrap:wrap}.tabs{flex-wrap:wrap}.tabs button{padding:7px 12px}
 .apside{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;font-size:13px}
 .apside h3{margin:0 0 6px;font-size:14px}.kv{display:grid;grid-template-columns:72px 1fr;gap:3px 8px;color:var(--dim);font-size:12.5px;margin:8px 0 12px}.kv b{color:var(--txt);font-weight:500}
 .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:4px;border:1px solid rgba(255,255,255,.2)}
+.a4conn{margin-top:12px;font-size:13px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.a4conn .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;background:var(--amber);vertical-align:0}.a4conn .dot.green{background:var(--green)}.a4conn .dot.red{background:var(--red)}
+.a4pages{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}.a4pages .mini.on{border-color:var(--acc);color:var(--acc)}
+.a4list{max-height:360px;overflow:auto;margin:8px 0 10px;border:1px solid var(--line);border-radius:8px;padding:2px 4px}
+.a4g{font-size:11px;color:var(--dim);margin:8px 4px 2px;text-transform:uppercase;letter-spacing:.04em}
+.a4b{padding:4px 6px;border-radius:6px;cursor:pointer;font-size:12.5px}.a4b:hover{background:var(--hover)}.a4b.cur{color:var(--acc);font-weight:650}
+.apside input[type=text]{width:100%;box-sizing:border-box;background:var(--well);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:inherit;font-size:13px}
 .faders{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:8px;margin-top:14px}
 .fd{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12.5px}.fd b{display:block;font-size:13px}.fd span{color:var(--dim)}
 .iss{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px solid var(--line);font-size:13px}.iss:first-child{border-top:none}
@@ -1384,7 +1432,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
  <symbol id="sxm" viewBox="0 0 778 445"><polygon points="85.1,132 244,132 288,124 214,174 122.1,174 100,206 152.5,232.2 129.1,253.5 34,206"/><polygon points="202.9,357 44,357 0,365 74,315 165.9,315 188,283 135.5,256.8 158.9,235.5 254,283"/><polygon points="324,132 451,132 521,233 288,445 451,240 384,145"/><polygon points="778,0 524,158 476,133 538,218"/><polygon points="533,252 598,343 656,355 538,357 504,313 449,327"/></symbol>
 </defs></svg>
 <header><div class="brandmk" id="logo" title="Home"><img class="mk" data-img="mark" alt="SX"><h1 id="ttl">STUDIO</h1></div>
-  <nav class="tabs"><button class="tgh" id="tghome">Home</button><div class="tg" data-g="gig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Before the gig</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rt">Rig Test</button><button data-tab="aim">Aim Movers</button><button data-tab="color">Tonight's Color</button><button data-tab="pre">Pre-show Check</button></div></div><div class="tg" data-g="live"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Live</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="lab">SX Player</button><button data-tab="auto">Auto Show</button></div></div><div class="tg" data-g="rig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Rig &amp; Control</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rig">Tonight's Rig</button><button data-tab="skip">Strobe</button><button data-tab="apc">APC mini</button><button data-tab="speed">Speed Faders</button></div></div><div class="tg" data-g="edit"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Editors</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button><button data-tab="health">Health Check</button></div></div></nav>
+  <nav class="tabs"><button class="tgh" id="tghome">Home</button><div class="tg" data-g="gig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Before the gig</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rt">Rig Test</button><button data-tab="aim">Aim Movers</button><button data-tab="color">Tonight's Color</button><button data-tab="pre">Pre-show Check</button></div></div><div class="tg" data-g="live"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Live</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="lab">SX Player</button><button data-tab="auto">Auto Show</button></div></div><div class="tg" data-g="rig"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Rig &amp; Control</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="rig">Tonight's Rig</button><button data-tab="skip">Strobe</button><button data-tab="apc">APC mini</button><button data-tab="apc40">APC40</button><button data-tab="speed">Speed Faders</button></div></div><div class="tg" data-g="edit"><button class="tgb" aria-haspopup="true" aria-expanded="false"><span class="tgn">Editors</span><span class="tgc"></span><i class="tgv">&#9662;</i></button><div class="tgm"><button data-tab="scene">Scene Editor</button><button data-tab="move">Movement Editor</button><button data-tab="look">Looks</button><button data-tab="health">Health Check</button></div></div></nav>
   <div class="hright"><button id="aupill" class="mini" style="display:none" title="Auto Show is playing"></button><div id="sx" class="pill ok">Checking ShowXpress&hellip;</div><button id="sxgo" class="mini" style="display:none">&#9654; Launch ShowXpress</button><button id="sxstop" class="mini" style="display:none">&#9632; Close ShowXpress</button><button id="upd" class="mini primary" style="display:none"></button><button id="cog" class="mini cog" title="Settings">&#9881;</button></div></header>
 <div id="qbar" class="qbar"></div>
 <main>
@@ -1591,6 +1639,22 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
   <section class="card"><h2>Pad problems</h2><div id="apissues"></div></section>
  </div>
 
+ <div class="view" id="v-apc40">
+  <section class="card">
+    <div class="row"><div class="grow"><h2>APC40 pads</h2>
+      <p class="sub" style="margin-bottom:0">Up to 8 pages of your own, 40 pads each &mdash; put any ShowXpress button on any pad. On the APC40 the numbered <b>Track Select</b> buttons under the pads switch pages. A pad turns its button on (press again for off) and shows its ShowXpress colour, bright while it&rsquo;s on. The top <b>Scene Launch</b> button is green while ShowXpress is connected. The APC mini, ShowXpress&rsquo;s pages and the show aren&rsquo;t changed.</p></div>
+      <span id="a4state" class="state ok" style="display:none"></span><button id="a4refresh">&#8635; Refresh</button></div>
+    <div id="a4err" class="warnbox"></div>
+    <div id="a4conn" class="a4conn"></div>
+    <div id="a4pages" class="a4pages"></div>
+    <div class="apcwrap"><div id="a4grid" class="apc a4grid"></div><div id="a4side" class="apside"></div></div>
+  </section>
+  <section class="card"><h2>APC40 faders</h2>
+    <p class="sub">What each fader moves in ShowXpress (its master faders). A speed fader&rsquo;s middle is normal speed: down = slower, up = faster.</p>
+    <div id="a4faders" class="faders"></div>
+  </section>
+ </div>
+
  <div class="view" id="v-speed">
   <section class="card">
     <div class="row"><div class="grow"><h2>Speed faders</h2>
@@ -1746,6 +1810,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
   <div class="in" data-for="skip"><button id="sksave" class="primary">Save to SKIP FLASH</button><button id="skundo">Undo changes</button><div class="hint grow" id="skhint"></div></div>
   <div class="in" data-for="rig"><button id="rgsave" class="primary">Save tonight's rig</button><button id="rgall">All heads (put back)</button><button id="rgundo">Undo changes</button><div class="hint grow" id="rghint"></div></div>
   <div class="in" data-for="apc"><button id="apsave" class="primary">Save pads</button><button id="apundo">Undo changes</button><div class="hint grow" id="aphint"></div></div>
+  <div class="in" data-for="apc40"><button id="a4save" class="primary">Save APC40 pages</button><button id="a4undo">Undo changes</button><div class="hint grow" id="a4hint"></div></div>
   <div class="in" data-for="speed"><button id="spsave" class="primary">Save speed faders</button><button id="spundo">Undo changes</button><div class="hint grow" id="sphint"></div></div>
   <div class="in" data-for="auto"><button id="ausave" class="primary">Save Auto Show</button><button id="auundo">Undo changes</button><div class="hint grow" id="auhint"></div></div>
   <div class="in" data-for="scene"><button id="sesave" class="primary">Save scene</button><button id="seundo">Undo changes</button><div class="hint grow" id="sehint"></div></div>
@@ -1890,13 +1955,13 @@ async function poll(){try{const r=await api('/api/sx');if(PH)$('offl').classList
   if(PH){$('offl').classList.add('on');setTimeout(poll,3000);return;}$('gone').style.display='flex';return;}setTimeout(poll,2000);}
 
 // ---------------- tabs
-const TABS=['home','rt','rig','aim','skip','color','apc','speed','health','pre','auto','settings','lab','scene','move','look'];
+const TABS=['home','rt','rig','aim','skip','color','apc','apc40','speed','health','pre','auto','settings','lab','scene','move','look'];
 let lastTab='';
 function setTab(t){if(!TABS.includes(t))t='home';window.scrollTo(0,0);const fresh=t!==lastTab;lastTab=t;
  document.querySelectorAll('.tabs button[data-tab]').forEach(b=>b.classList.toggle('on',b.dataset.tab===t));tgClose();tgSync();
  document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id==='v-'+t));
  document.querySelectorAll('.bar .in').forEach(v=>v.classList.toggle('on',v.dataset.for===t));
- $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();if(t==='move'){if(!ML&&!MO)loadMoves();mvLiteList();mvAnim(!!MO);}if(t==='look'){if(!LK)loadLooks();lkAnim(true);}$('cog').classList.toggle('on',t==='settings');
+ $('result').className='card result';if(t==='skip'&&!S)loadSkip();if(t==='rig'&&!R)loadRig();if(t==='apc'&&!A)loadApc();if(t==='apc40'){if(!Q4)loadA40();a4Poll();}if(t==='speed'&&!SP)loadSpeed();if(t==='health'&&!H)loadHealth();if(t==='rt'&&!RT)loadRt();if(t==='pre')loadPre();if(t==='color'&&!CL)loadColor();if(t==='settings'){loadGd();loadSet();if(!PH)loadPhone();}if(t==='lab'){if(!LB)loadLab();else labPoll();}if(t==='scene'&&!SL&&!SE)loadScenes();if(t==='move'){if(!ML&&!MO)loadMoves();mvLiteList();mvAnim(!!MO);}if(t==='look'){if(!LK)loadLooks();lkAnim(true);}$('cog').classList.toggle('on',t==='settings');
  if(t==='auto'&&(!AU||!auDirty()))loadAuto();if(REMBOX[t]&&fresh)remRefresh(t,sxOpen&&!remRecent());}
 document.querySelectorAll('.tabs button[data-tab]').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
 // the tab bar's menus: Home + one drop-down per group. A group with one tab left (the others hidden in Settings) is a plain button
@@ -2056,6 +2121,77 @@ function updApc(){const ok=!!(A&&A.ok),d=apDirty();$('apsave').disabled=!ok||!d;
  $('aphint').innerHTML=!ok?'':sxHint('save')??(d?A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).length+' button(s) changed. Only the pad notes and pad colours in live.ini change.':'Pads match the show.');}
 $('aprefresh').onclick=loadApc;$('apundo').onclick=()=>{A.pads.forEach(p=>apN[p.sec]=p.note);apC={};apSel=null;apMsg='';renderApc();};
 $('apsave').onclick=()=>saveTo('/api/apc/apply',{changes:A.pads.filter(p=>apN[p.sec]!==p.note||colChg(p)).map(p=>{const c={sec:p.sec,title:p.title,note:apN[p.sec]};if(colChg(p)&&apN[p.sec]>=0){c.on=apC[p.sec].on;c.off=apC[p.sec].off;}return c;})},'Saving pads…',async()=>{await loadApc();SP=null;H=null;},'apc');
+
+// ---------------- APC40 mk2 (user 2026-11-25): pages of the user's own pads, played through ShowXpress's remote by apc40.ps1
+let Q4=null,L4=null,a4Pg=0,a4Sel=-1,a4Q='',a4St=null,a4T=null,a4Msg='',a4MsgT=null;
+const a4Copy=l=>JSON.parse(JSON.stringify(l));
+function a4Fix(l){l=a4Copy(l||{});if(!Array.isArray(l.pages))l.pages=l.pages?[l.pages]:[];if(!l.pages.length)l.pages=[{name:'Dancefloor',pads:{}}];l.pages.forEach(p=>{if(!p.pads||Array.isArray(p.pads))p.pads={};});if(!l.faders||Array.isArray(l.faders))l.faders={};return l;}
+const a4Norm=l=>JSON.stringify({p:l.pages.map(p=>[p.name,Object.keys(p.pads).map(Number).sort((a,b)=>a-b).map(k=>[k,p.pads[k]])]),f:Object.keys(l.faders).map(Number).sort((a,b)=>a-b).map(k=>[k,+l.faders[k]])});
+function a4Dirty(){return !!(Q4&&Q4.ok&&L4&&a4Norm(L4)!==a4Norm(a4Fix(Q4.layout)));}
+function a4B(){const m={};(Q4.buttons||[]).forEach(b=>{if(!b.dup&&!m[b.title])m[b.title]=b;});return m;}
+const a4rc=n=>'row '+(5-Math.floor(n/8))+', column '+(n%8+1);
+function a4Next(n){const i=(4-Math.floor(n/8))*8+n%8+1;return i>=40?-1:(4-Math.floor(i/8))*8+i%8;}
+async function loadA40(){Q4=await getJ('/api/apc40');if(Q4.ok){L4=a4Fix(Q4.layout);if(Q4.status)a4St=Q4.status;}a4Pg=L4?Math.min(a4Pg,L4.pages.length-1):0;a4Sel=-1;renderA40();}
+function a4Say(m){a4Msg=m;clearTimeout(a4MsgT);a4MsgT=setTimeout(()=>{a4Msg='';updA40();},5000);updA40();}
+function a4Poll(){clearTimeout(a4T);if(curTab()!=='apc40')return;api('/api/apc40/status').then(r=>{a4St=r.status;a4Conn();}).catch(()=>{}).finally(()=>{a4T=setTimeout(a4Poll,1500);});}
+function a4Conn(){const e=$('a4conn'),s=a4St;if(!e||!Q4||!Q4.ok)return;
+ if(Q4.windows===false){e.innerHTML='<span class="dot"></span>The APC40 works with SX Studio on Windows. You can still set up its pages here.';return;}
+ let a,x='',cl='';
+ if(!s||!s.running)a='Starting the APC40 part of SX Studio&hellip;';
+ else if(s.apc==='ok'){a='<b>APC40 connected</b> &middot; on page '+s.page+(s.pageName?' ('+esc(s.pageName)+')':'');
+  x=s.sx==='ok'?'ShowXpress connected':s.sx==='closed'?'ShowXpress is closed &mdash; the pads light up once it&rsquo;s open':(s.sx==='off'||s.sx==='refused')?esc(s.error):'connecting to ShowXpress&hellip;';cl=s.sx==='ok'?'green':'';}
+ else if(s.apc==='missing')a='APC40 not plugged in &mdash; plug it in and it&rsquo;s ready in a couple of seconds';
+ else if(s.apc==='busy'){a=esc(s.error||'Another program has the APC40.');cl='red';}
+ else a='Starting&hellip;';
+ e.innerHTML=`<span class="dot ${cl}"></span>${a}${x?' &middot; '+x:''}${s&&s.apc==='ok'&&s.last?' <span class="sub" style="margin:0 0 0 8px">last pad: '+esc(s.last)+'</span>':''}`;}
+function renderA40(){if(!Q4)return;
+ if(showErr('a4err',Q4)){['a4grid','a4side','a4faders','a4pages','a4conn'].forEach(i=>$(i).innerHTML='');$('a4state').style.display='none';updA40();return;}
+ const B=a4B(),pg=L4.pages[a4Pg];
+ $('a4pages').innerHTML=L4.pages.map((p,i)=>`<button class="mini${i===a4Pg?' on':''}" data-a4p="${i}" title="Track Select ${i+1}">${i+1} &middot; ${esc(p.name)}</button>`).join('')+(L4.pages.length<8?'<button class="mini" id="a4add">+ Add a page</button>':'');
+ document.querySelectorAll('[data-a4p]').forEach(b=>b.onclick=()=>{a4Pg=+b.dataset.a4p;a4Sel=-1;renderA40();});
+ if($('a4add'))$('a4add').onclick=()=>{L4.pages.push({name:'Page '+(L4.pages.length+1),pads:{}});a4Pg=L4.pages.length-1;a4Sel=-1;renderA40();setTimeout(()=>{const i=$('a4name');if(i){i.focus();i.select();}},0);};
+ let h='';
+ for(let r=0;r<5;r++)for(let c=0;c<8;c++){const n=(4-r)*8+c,t=pg.pads[n];
+  if(!t){h+=`<div class="pad empty${a4Sel===n?' sel':''}" data-a4="${n}" title="${a4rc(n)} - empty"><div class="t">empty</div></div>`;continue;}
+  const b=B[t];
+  h+=`<div class="pad${a4Sel===n?' sel':''}${b?'':' miss'}" data-a4="${n}" style="background:linear-gradient(180deg,rgba(0,0,0,0) 35%,rgba(0,0,0,.6)),#${b?PAL[b.off]:'151820'}" title="${esc(t)} - ${a4rc(n)}${b?'':' - not in ShowXpress!'}"><div class="on" style="background:#${b?PAL[b.on]:'444444'}"></div><div class="t">${esc(t)}</div><div class="p">${b?esc(b.pageName):'not in ShowXpress!'}</div></div>`;}
+ $('a4grid').innerHTML=h;document.querySelectorAll('[data-a4]').forEach(e=>e.onclick=()=>{const n=+e.dataset.a4;a4Sel=a4Sel===n?-1:n;renderA40();if(a4Sel>=0){const q=$('a4q');if(q)q.focus();}});
+ if(a4Sel>=0){const cur=pg.pads[a4Sel];
+  $('a4side').innerHTML=`<h3>Pad: ${a4rc(a4Sel)}</h3><div class="kv"><span>Plays</span><b>${cur?esc(cur)+(B[cur]?' <span class="tag">'+esc(B[cur].pageName)+'</span>':' <span style="color:var(--red)">&mdash; not in ShowXpress!</span>'):'nothing yet'}</b></div>`+
+   `<input type="text" id="a4q" placeholder="Search ShowXpress buttons&hellip;" value="${esc(a4Q)}"><div class="a4list" id="a4list"></div>`+
+   `<p class="sub" style="margin:0 0 10px">Tap a button to put it on this pad &mdash; then it moves on to the next pad, so you can fill a row quickly.</p><div class="row"><button id="a4clr"${cur?'':' disabled'}>Clear this pad</button><button id="a4done">Done</button></div>`;
+  $('a4q').oninput=e=>{a4Q=e.target.value;a4List();};a4List();
+  $('a4clr').onclick=()=>{delete pg.pads[a4Sel];renderA40();};$('a4done').onclick=()=>{a4Sel=-1;renderA40();};}
+ else{const used=Object.keys(pg.pads).length,pn=[...new Set((Q4.buttons||[]).map(b=>b.pageName))];
+  $('a4side').innerHTML=`<h3>Page ${a4Pg+1}</h3><div class="kv"><span>Name</span><b><input type="text" id="a4name" maxlength="30" value="${esc(pg.name)}"></b><span>Pads</span><b>${used} of 40 used</b><span>On the APC40</span><b>Track Select ${a4Pg+1}</b></div>`+
+   `<p class="sub" style="margin:0 0 6px">Tap a pad to choose what it plays.</p>`+
+   `<div style="margin:10px 0"><select id="a4fill"><option value="">Fill the empty pads from a ShowXpress page&hellip;</option>${pn.map(n=>`<option>${esc(n)}</option>`).join('')}</select></div>`+
+   `<div class="row">${a4Pg>0?'<button class="mini" id="a4left">&larr; Move page left</button>':''}${a4Pg<L4.pages.length-1?'<button class="mini" id="a4right">Move page right &rarr;</button>':''}${L4.pages.length>1?'<button class="mini" id="a4del">Delete this page</button>':''}${used?'<button class="mini" id="a4clear">Clear all pads</button>':''}</div>`;
+  $('a4name').oninput=e=>{pg.name=e.target.value;const b=document.querySelector('[data-a4p="'+a4Pg+'"]');if(b)b.innerHTML=(a4Pg+1)+' &middot; '+esc(pg.name);updA40();};
+  $('a4name').onchange=e=>{if(!pg.name.trim()){pg.name='Page '+(a4Pg+1);renderA40();}};
+  $('a4fill').onchange=e=>{const nm=e.target.value;if(!nm)return;const have=new Set(Object.values(pg.pads));let n=32,add=0,left=0;
+   (Q4.buttons||[]).filter(b=>b.pageName===nm&&!b.dup&&!have.has(b.title)).forEach(b=>{while(n>=0&&pg.pads[n])n=a4Next(n);if(n<0){left++;return;}pg.pads[n]=b.title;add++;n=a4Next(n);});
+   renderA40();a4Say(add+' button(s) from '+esc(nm)+' put on the pads'+(left?' &mdash; '+left+' didn&rsquo;t fit':'')+'.');};
+  const sw=(a,b)=>{const x=L4.pages[a];L4.pages[a]=L4.pages[b];L4.pages[b]=x;a4Pg=b;renderA40();};
+  if($('a4left'))$('a4left').onclick=()=>sw(a4Pg,a4Pg-1);if($('a4right'))$('a4right').onclick=()=>sw(a4Pg,a4Pg+1);
+  if($('a4del'))$('a4del').onclick=()=>{if(!confirm('Delete page '+(a4Pg+1)+' ('+pg.name+')?'))return;L4.pages.splice(a4Pg,1);a4Pg=Math.max(0,a4Pg-1);renderA40();};
+  if($('a4clear'))$('a4clear').onclick=()=>{if(!confirm('Clear every pad on '+pg.name+'?'))return;pg.pads={};renderA40();};}
+ const FD=['1','2','3','4','5','6','7','8','9'];
+ $('a4faders').innerHTML=FD.map(f=>`<div class="fd"><b>${f==='9'?'Master fader':'Fader '+f}</b><select data-a4f="${f}"><option value="">nothing</option>${(Q4.faders||[]).map(x=>`<option value="${x.k}"${L4.faders[f]!==undefined&&+L4.faders[f]===x.k?' selected':''}>${esc(x.caption||'Fader '+(x.k+1))} ${x.type}</option>`).join('')}</select></div>`).join('');
+ document.querySelectorAll('[data-a4f]').forEach(s=>s.onchange=()=>{if(s.value==='')delete L4.faders[s.dataset.a4f];else L4.faders[s.dataset.a4f]=+s.value;updA40();});
+ a4Conn();updA40();}
+function a4List(){const e=$('a4list');if(!e)return;const pg=L4.pages[a4Pg],cur=pg.pads[a4Sel],q=a4Q.trim().toLowerCase();let h='',g=null;
+ (Q4.buttons||[]).filter(b=>!b.dup&&(!q||b.title.toLowerCase().includes(q)||b.pageName.toLowerCase().includes(q))).forEach(b=>{if(b.pageName!==g){g=b.pageName;h+=`<div class="a4g">${esc(g)}</div>`;}
+  h+=`<div class="a4b${b.title===cur?' cur':''}" data-a4t="${esc(b.title)}"><span class="sw" style="background:#${PAL[b.on]}"></span>${esc(b.title)}</div>`;});
+ e.innerHTML=h||'<p class="sub" style="margin:8px">No button matches.</p>';
+ e.querySelectorAll('[data-a4t]').forEach(x=>x.onclick=()=>{pg.pads[a4Sel]=x.dataset.a4t;a4Sel=a4Next(a4Sel);const st=e.scrollTop;renderA40();const l=$('a4list');if(l)l.scrollTop=st;});}
+function updA40(){if(!$('a4save'))return;const ok=!!(Q4&&Q4.ok),d=a4Dirty();$('a4save').disabled=!ok||!d;$('a4undo').disabled=!ok||!d;if(ok){stateTag('a4state',d);if(!d)$('a4state').textContent='✓ Saved';}
+ $('a4hint').innerHTML=a4Msg||(!ok?'':d?'Not saved yet. Saving only changes SX Studio&rsquo;s own APC40 settings &mdash; ShowXpress can stay open.':'The APC40 is using these pages.');}
+$('a4refresh').onclick=loadA40;
+$('a4undo').onclick=()=>{L4=a4Fix(Q4.layout);a4Pg=Math.min(a4Pg,L4.pages.length-1);a4Sel=-1;renderA40();};
+$('a4save').onclick=async()=>{busy(true,'Saving the APC40 pages…');let r;try{r=await api('/api/apc40/save',{layout:L4});}catch(e){r={ok:false,error:'Lost connection to SX Studio.'};}busy(false);
+ if(r.ok){Q4=r;L4=a4Fix(r.layout);if(r.status)a4St=r.status;a4Pg=Math.min(a4Pg,L4.pages.length-1);renderA40();a4Say('&#10003; Saved &mdash; the APC40 uses it straight away.');}
+ else a4Say('<span style="color:var(--red)">Not saved: '+esc(r.error||'unknown problem')+'</span>');};
 
 // ---------------- Speed faders
 let SP=null,spF={},spOnly=-1;
@@ -3586,7 +3722,8 @@ try {
       Step-PlayerKeep
       try { Step-PlayerWatch } catch {}
       try { Step-Taskbar } catch {}
-      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto) -and -not (Test-Player)) { $l.Stop(); break }
+      try { Step-Apc40 } catch {}
+      if (((Get-Date) - $last).TotalSeconds -gt $idleMax -and -not $queue.Count -and -not (Test-Auto) -and -not (Test-Player) -and -not (Test-Apc40Busy)) { $l.Stop(); break }
     }
     if (-not $l.IsListening) { break }
     $ctx = $task.Result; $req = $ctx.Request
@@ -3681,6 +3818,16 @@ try {
           $st = Get-AutoStatus; Send-Text $ctx 200 'application/json; charset=utf-8' ($j.Substring(0, $j.Length - 1) + ',"player":' + $(if (Test-Player) { 'true' } else { 'false' }) + ',"status":' + $(if ($st) { $st | ConvertTo-Json -Depth 4 -Compress } else { 'null' }) + '}')
         }
         '/api/auto/status' { Send-Json $ctx @{ ok = $true; status = (Get-AutoStatus) } }
+        '/api/apc40'        { Send-Apc40Json $ctx (Invoke-Engine "-Action Info -Layout `"$(Get-Apc40Lay)`"" $apc40Engine) }
+        '/api/apc40/status' { Send-Json $ctx @{ ok = $true; status = (Get-Apc40Status) } }
+        '/api/apc40/save' {
+          if (-not $body -or -not $body.layout) { Send-Json $ctx @{ ok = $false; error = 'Nothing to save.' }; break }
+          $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
+          [IO.File]::WriteAllText($cf, ($body.layout | ConvertTo-Json -Depth 6 -Compress), (New-Object Text.UTF8Encoding($false)))
+          try { $r = Invoke-Engine "-Action Save -ConfigFile `"$cf`" -Layout `"$(Get-Apc40Lay)`"" $apc40Engine } finally { Remove-Item -LiteralPath $cf -ErrorAction SilentlyContinue }
+          if ($r.ok) { [void](Send-Apc40 'reload') }
+          Send-Apc40Json $ctx $r
+        }
         '/api/auto/save' {
           if (-not $body -or -not $body.config) { Send-Json $ctx @{ ok = $false; error = 'Nothing to save.'; out = '' }; break }
           $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
@@ -4001,7 +4148,8 @@ try {
   Stop-Live
   Stop-Player
   Stop-Auto
-  Remove-Item -LiteralPath $autoStat -ErrorAction SilentlyContinue
+  Stop-Apc40
+  Remove-Item -LiteralPath $autoStat, $a40Stat -ErrorAction SilentlyContinue
   try { $l.Close() } catch {}
   if (Test-Path $infoF) { try { $i = Get-Content $infoF -Raw | ConvertFrom-Json; if ($i.pid -eq $PID) { Remove-Item $infoF } } catch {} }
 }

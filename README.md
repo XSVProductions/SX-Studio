@@ -10,6 +10,7 @@ Its main tabs:
 - **Aim Movers:** you aim each head at the center of tonight's dancefloor (and, optionally, at one corner) in a single scene. The app writes the per-head offsets and sizes into every dancefloor movement scene, so all the patterns land on the floor. It also keeps the pattern shapes symmetrical.
 - **Strobe:** you tap the heads that are set up tonight, and the **SKIP FLASH** scene is rebuilt with only those heads. A head that isn't hung leaves a dark gap in the chase, so leaving it out keeps the flash smooth.
 - **APC mini:** shows the 8x8 pad grid in each pad's own colours, with the scene and page each pad plays and what the four faders do. Tap a pad, then tap another one to move it there (or swap the two). It flags pads that fire two buttons, mappings outside the 64 pads, and pads whose scene is missing.
+- **APC40 (Windows):** your own pages of pads for an APC40 mk2 - up to 8 pages of 40 pads (say Dancefloor, Formalities, Colours), each pad any ShowXpress button. The Track Select buttons switch pages, each pad lights in its button's colour (bright while on), and the faders can move ShowXpress's master faders. SX Studio plays the pads through ShowXpress's remote connection, so the APC40 stays out of ShowXpress's MIDI settings and the APC mini keeps working as it is. Nothing in the show changes.
 - **Speed Faders:** lists every live button with the master speed fader it follows (MOVEMENTS, COLORS, STROBES, CHASES...). You can change any button, or a whole page at once.
 - **Auto Show:** SX Studio presses your looks in ShowXpress one after another, each for a number of bars at your BPM, while you're busy mixing. You build the looks yourself from your ShowXpress buttons.
 - **Scene Editor:** open any scene, change its steps (values, step times, fades; copy, move or delete steps; add or take out a channel) and see it on the lights as you go, then save. Only what you changed is written into the scene file; everything else stays exactly as ShowXpress wrote it.
@@ -87,7 +88,9 @@ The flash order follows the original 16-head skip order, with any 251s spread in
 
 **APC mini / Speed Faders:** make your changes, then press **Save**. Only the pad notes or the `masterspeedfader` setting in `live.ini` change.
 
-**A second MIDI controller (e.g. an APC40 mk2):** add it in ShowXpress as a *new* line in the MIDI settings and leave the APC mini as the first line. The APC mini is MIDI device 0; buttons and faders learned on the other controller are left alone by the APC mini tab, the Health Check and the SX Player. A button has one MIDI trigger, so learning a button on the APC40 takes it off its APC mini pad.
+**APC40 mk2:** leave it out of ShowXpress's MIDI settings - SX Studio drives it (APC40 tab). Plug it in while SX Studio is running; the top Scene Launch button turns green once ShowXpress is connected (its remote has to be on - see Auto Show). Pages are saved in SX Studio's own settings (`apc40.json`), never in the show. SX Studio keeps running in the background while the APC40 is plugged in, even with its window closed.
+
+**Another MIDI controller in ShowXpress:** add it in ShowXpress as a *new* line in the MIDI settings and leave the APC mini as the first line. The APC mini is MIDI device 0; buttons and faders learned on the other controller are left alone by the APC mini tab, the Health Check and the SX Player. A button has one MIDI trigger, so learning a button on the other controller takes it off its APC mini pad.
 
 **Health Check**
 1. Close ShowXpress and go to the **Health Check** tab. Each problem shows a **Fix:** line with the recommended fix.

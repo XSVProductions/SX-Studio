@@ -1,6 +1,9 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'efk_dmx.dart';
+import 'helper_dmx.dart';
+
 /// DMX channels in one frame: 16 universes of 512.
 const dmxFrameSize = 512 * 16;
 
@@ -44,7 +47,9 @@ class FakeDmxSpec extends DmxSpec {
 }
 
 /// Chauvet's own driver (`efk_hardware`) from the ShowXpress install in
-/// [driverDir], driving the D512S USB interface.
+/// [driverDir], driving the D512S USB interface. On Windows the driver is
+/// loaded in-process. On the Mac it runs in the `sxh_dmx` helper, and
+/// [driverDir] is '' when ShowXpress wasn't found.
 class EfkDmxSpec extends DmxSpec {
   const EfkDmxSpec(this.driverDir);
 
@@ -52,9 +57,20 @@ class EfkDmxSpec extends DmxSpec {
 }
 
 /// Opens the output [spec] describes. Throws [DmxError] when it can't.
+///
+/// The Mac's driver runs in a helper program, which can only be started
+/// asynchronously: use [openDmxAsync] there.
 DmxOutput openDmx(DmxSpec spec) => switch (spec) {
   FakeDmxSpec(:final logPath) => FakeDmx(logPath),
-  EfkDmxSpec() => throw DmxError('The DMX driver is not ported yet.'),
+  EfkDmxSpec(:final driverDir) when Platform.isWindows => EfkDmx.open(driverDir),
+  EfkDmxSpec() when Platform.isMacOS => throw DmxError("The DMX output didn't start: on the Mac it has to be opened with openDmxAsync."),
+  EfkDmxSpec() => throw DmxError("The DMX output didn't start: there is no interface driver for this computer."),
+};
+
+/// [openDmx] for every platform, the Mac's helper included.
+Future<DmxOutput> openDmxAsync(DmxSpec spec) async => switch (spec) {
+  EfkDmxSpec(:final driverDir) when Platform.isMacOS => await HelperDmx.open(helper: macHelperPath(), driverDir: driverDir),
+  _ => openDmx(spec),
 };
 
 class FakeDmx implements DmxOutput {

@@ -873,11 +873,63 @@ function Get-AutoConfig {
   if ($j) { try { return ($j | ConvertFrom-Json).config } catch {} }
   $null
 }
+function Get-EngineObj([string]$script) {
+  $r = Invoke-Engine '-Action Preview' $script
+  $j = if ($r.ok) { ($r.out -split "`r?`n") | Where-Object { $_ -match '^\{' } | Select-Object -Last 1 }
+  if ($j) { try { return ($j | ConvertFrom-Json) } catch {} }
+  $null
+}
+# 2026-11-25 (user: "save everything customizable"): the APC mini pads (note + colours) and each button's speed fader,
+# as the APC mini / Speed faders tabs set them. Import matches buttons by place AND title, so another show is safe.
+function Get-ApcMiniExport {
+  $a = Get-EngineObj $apcEngine; if (-not $a -or -not $a.ok) { return $null }
+  @{ pads = @(foreach ($p in @($a.pads)) { if ([int]$p.type -eq 0) { [ordered]@{ sec = "$($p.sec)"; title = "$($p.title)"; note = [int]$p.note; on = [int]$p.on; off = [int]$p.off } } }) }
+}
+function Get-SpeedExport {
+  $a = Get-EngineObj $speedEngine; if (-not $a -or -not $a.ok) { return $null }
+  @{ buttons = @(foreach ($b in @($a.buttons)) { [ordered]@{ sec = "$($b.sec)"; title = "$($b.title)"; fader = [int]$b.fader } }) }
+}
 function Get-ConfigExport {
   $ap = $null; $f = Get-Apc40Lay
   if (Test-Path -LiteralPath $f) { try { $ap = [IO.File]::ReadAllText($f) | ConvertFrom-Json } catch {} }
   [ordered]@{ app = 'SX Studio'; kind = 'settings'; format = 1; version = $appVer; saved = (Get-Date -Format 's')
-              settings = (Get-Settings); apc40 = $ap; autoShow = (Get-AutoConfig) }
+              settings = (Get-Settings); apc40 = $ap; autoShow = (Get-AutoConfig); apcMini = (Get-ApcMiniExport)
+              speedFaders = (Get-SpeedExport); phone = @{ on = [bool]$script:ph.on } }
+}
+# this device's own choices (light/dark etc.) that the page sends along: sxh_* strings only, never the phone key
+function Get-DeviceKeys($v) {
+  $o = [ordered]@{}
+  if ($v -is [pscustomobject]) { foreach ($q in @($v.PSObject.Properties | Select-Object -First 50)) {
+    if ($q.Name -match '^sxh_[\w\-]{1,60}$' -and $q.Name -ne 'sxh_phone_key' -and $q.Value -is [string] -and $q.Value.Length -le 20000) { $o[$q.Name] = $q.Value } } }
+  $o
+}
+function Get-DownloadsDir {
+  $c = @()
+  if ($onMac) { $c += Join-Path $HOME 'Downloads' }
+  else {
+    try { $c += (New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path } catch {}
+    $c += Join-Path $env:USERPROFILE 'Downloads'
+  }
+  @($c | Where-Object { $_ -and (Test-Path -LiteralPath $_ -PathType Container) }) + @(Join-Path $cfgDir 'exports')
+}
+$script:cfgExport = ''
+function Save-ConfigExport($device) {
+  try {
+    $d = Get-ConfigExport; $d['device'] = Get-DeviceKeys $device
+    $js = $d | ConvertTo-Json -Depth 12; $base = 'SX Studio settings ' + (Get-Date -Format 'yyyy-MM-dd'); $err = ''
+    # Downloads first; a Mac may not let SX Studio write there (Privacy & Security) -> its own folder (exports)
+    foreach ($dir in $(if ($TestRoot) { @($TestRoot) } else { Get-DownloadsDir })) {
+      try {
+        if (-not (Test-Path -LiteralPath $dir)) { [void](New-Item -ItemType Directory -Path $dir -Force) }
+        $f = Join-Path $dir "$base.json"; $k = 2
+        while (Test-Path -LiteralPath $f) { $f = Join-Path $dir "$base ($k).json"; $k++ }
+        [IO.File]::WriteAllText($f, $js, (New-Object Text.UTF8Encoding($false)))
+        $script:cfgExport = $f
+        return @{ ok = $true; path = $f; name = (Split-Path $f -Leaf); folder = $dir }
+      } catch { $err = $_.Exception.Message }
+    }
+    @{ ok = $false; error = "The settings couldn't be saved: $err" }
+  } catch { @{ ok = $false; error = "The settings couldn't be saved: $($_.Exception.Message)" } }
 }
 function Invoke-WithJson($obj, [string]$engineArgs, [string]$script) {
   $cf = Join-Path ([IO.Path]::GetTempPath()) ('sxh_changes_' + [guid]::NewGuid().ToString('N') + '.json')
@@ -928,6 +980,55 @@ function Import-Config($d) {
     $r = Invoke-WithJson $d.autoShow '-Action AutoSave' $remoteEngine
     if ($r.ok) { [void](Send-Auto 'reload'); $done.Add('the Auto Show') } else { $warn.Add("The Auto Show couldn't be imported ($($r.error)), so it was kept as it was.") }
   }
+  $sxOpen = Test-SxOpen
+  $toShow = {
+    param([string]$path, [object[]]$items, [string]$what)   # an array: an empty List as a script block argument throws in PS 5.1
+    if (-not $items.Count) { $done.Add("$what (already the same)"); return }
+    if ($sxOpen) { [void](Add-Queue $path @{ changes = $items }); $done.Add("$what (saved as soon as ShowXpress is closed)"); return }
+    $r = try { Invoke-Action $path @{ changes = $items } } catch { @{ ok = $false; error = $_.Exception.Message } }
+    if ($r.ok) { $done.Add($what) } else { $warn.Add("$what couldn't be imported ($($r.error)), so they were kept as they were.") }
+  }
+  if ($d.apcMini -and $d.apcMini.pads) {
+    $cur = Get-EngineObj $apcEngine
+    if (-not $cur -or -not $cur.ok) { $warn.Add("The show's APC mini pads couldn't be read, so they were kept as they were.") }
+    else {
+      $now = @{}; foreach ($p in @($cur.pads)) { $now["$($p.sec)"] = $p }
+      $ch = New-Object Collections.Generic.List[object]; $miss = 0
+      foreach ($p in @($d.apcMini.pads | Select-Object -First 300)) {
+        if (-not $p -or "$($p.sec)" -notmatch '^page\d+_button\d+$' -or "$($p.note)" -notmatch '^-?\d+$') { continue }
+        $n = [int]$p.note; $c = $now["$($p.sec)"]
+        if (-not $c -or "$($c.title)" -ne "$($p.title)" -or [int]$c.type -ne 0 -or $n -lt -1 -or $n -gt 63) { $miss++; continue }
+        $o = [ordered]@{ sec = "$($p.sec)"; title = "$($p.title)"; note = $n }
+        $colOk = "$($p.on)" -match '^\d+$' -and "$($p.off)" -match '^\d+$' -and [int]$p.on -le 127 -and [int]$p.off -le 127
+        $colCh = $colOk -and $n -ge 0 -and ([int]$p.on -ne [int]$c.on -or [int]$p.off -ne [int]$c.off)
+        if ($colCh) { $o.on = [int]$p.on; $o.off = [int]$p.off }
+        if ($n -ne [int]$c.note -or $colCh) { $ch.Add($o) }
+      }
+      & $toShow '/api/apc/apply' $ch.ToArray() 'the APC mini pads'
+      if ($miss) { $warn.Add($(if ($miss -eq 1) { "1 APC mini pad in the file isn't the same button in this show, so it was left out." } else { "$miss APC mini pads in the file aren't the same buttons in this show, so they were left out." })) }
+    }
+  }
+  if ($d.speedFaders -and $d.speedFaders.buttons) {
+    $cur = Get-EngineObj $speedEngine
+    if (-not $cur -or -not $cur.ok) { $warn.Add("The show's speed faders couldn't be read, so they were kept as they were.") }
+    else {
+      $now = @{}; foreach ($b in @($cur.buttons)) { $now["$($b.sec)"] = $b }
+      $nf = @($cur.faders).Count; $ch = New-Object Collections.Generic.List[object]; $miss = 0
+      foreach ($b in @($d.speedFaders.buttons | Select-Object -First 2000)) {
+        if (-not $b -or "$($b.sec)" -notmatch '^page\d+_button\d+$' -or "$($b.fader)" -notmatch '^\d+$') { continue }
+        $c = $now["$($b.sec)"]
+        if (-not $c -or "$($c.title)" -ne "$($b.title)" -or [int]$b.fader -ge [Math]::Max($nf, 1)) { $miss++; continue }
+        if ([int]$b.fader -ne [int]$c.fader) { $ch.Add([ordered]@{ sec = "$($b.sec)"; title = "$($b.title)"; fader = [int]$b.fader }) }
+      }
+      & $toShow '/api/speed/apply' $ch.ToArray() 'the speed faders'
+      if ($miss) { $warn.Add($(if ($miss -eq 1) { "1 button in the file isn't in this show (or follows a fader it doesn't have), so its speed fader was left out." } else { "$miss buttons in the file aren't in this show (or follow a fader it doesn't have), so their speed faders were left out." })) }
+    }
+  }
+  if ($d.phone -and $null -ne $d.phone.on -and [bool]$d.phone.on -ne [bool]$script:ph.on) {
+    $script:ph.on = [bool]$d.phone.on; Save-Phone
+    if ($script:ph.on) { Start-PhoneRelay } else { Stop-PhoneRelay; $script:pin = '' }
+    $done.Add("phone access $(if ($script:ph.on) { 'on (phones still pair here with a code)' } else { 'off' })")
+  }
   @{ ok = $true; done = @($done); warn = @($warn); settings = (Get-Settings); backup = $bk }
 }
 function Get-BackupDir { if ($TestRoot) { Join-Path (Split-Path (Split-Path $TestRoot)) 'HelperBackups' } elseif ($onMac) { Join-Path $HOME 'AwaazTools/backups' } else { Join-Path $env:APPDATA 'ShowXpress Helper/backups' } }
@@ -935,6 +1036,7 @@ function Open-OnComputer([string]$what) {
   $t = switch ($what) {
     'show'    { $j = (Invoke-Engine '-Action Preview' $gdEngine).out -split "`r?`n" | Where-Object { $_ -match '^\{' } | Select-Object -Last 1; if ($j) { ($j | ConvertFrom-Json).show } else { '' } }
     'backups' { Get-BackupDir }
+    'export'  { $script:cfgExport }
     'gddl'    { 'https://www.google.com/drive/download/' }
     'gdapp'   { if ($onMac) { '/Applications/Google Drive.app' } else { Join-Path $env:ProgramFiles 'Google/Drive File Stream/launch.bat' } }
     default   { '' }
@@ -944,7 +1046,8 @@ function Open-OnComputer([string]$what) {
     return @{ ok = $false; out = ''; error = $(switch ($what) { 'backups' { 'No import backups yet - one is made each time you import from Google Drive.' } 'gdapp' { "Google Drive for desktop isn't installed - press Get Google Drive." } default { "Not found: $t" } }) }
   }
   if ($TestRoot) { return @{ ok = $true; out = "  (test) would open $t"; error = '' } }
-  if ($onMac) { & open $t }
+  if ($what -eq 'export') { if ($onMac) { & open -R $t } else { Start-Process explorer.exe -ArgumentList "/select,`"$t`"" } }
+  elseif ($onMac) { & open $t }
   elseif ($what -eq 'gdapp') { Start-Process -FilePath $t -WindowStyle Hidden }
   elseif ($t -match '^https://') { Start-Process $t }
   else { Start-Process explorer.exe -ArgumentList "`"$t`"" }
@@ -1555,7 +1658,7 @@ html.light header .brandmk img.mk{filter:brightness(.62) contrast(1.25) drop-sha
    <div class="row" style="margin-top:12px"><button id="sopenshow" class="mini">Open the show folder</button><span class="summary" id="sshow"></span></div></section>
   <section class="card setsec pc-only"><h2>Updates</h2><div class="row"><div class="grow summary" id="supd">&nbsp;</div><button id="supdchk" class="mini">Check now</button></div>
    <label class="link" style="margin-top:10px"><input type="checkbox" id="sautoupd"> Check for a new version when SX Studio opens</label></section>
-  <section class="card setsec pc-only"><h2>Export &amp; import settings</h2><p class="sub">Save SX Studio&rsquo;s settings in one file, and load them again later or on another computer: the tabs, the SX Player pages, the APC40 pads and faders, the Auto Show, the options above and this computer&rsquo;s light or dark look. The show itself (scenes, aims, ShowXpress&rsquo;s buttons) and the phone pairing aren&rsquo;t in it.</p>
+  <section class="card setsec pc-only"><h2>Export &amp; import settings</h2><p class="sub">Save everything you set up in SX Studio in one file, and load it again later or on another computer: the tabs (order, names, hidden), the SX Player pages and your own player pages, the APC40 pads and faders, the APC mini pads and their colours, which speed fader each button follows, the Auto Show, the options above, phone access on or off, and this computer&rsquo;s own choices (light or dark, Looks options, live-aim view). Not in it: the show itself (scenes, movements, aims, Tonight&rsquo;s Rig and Color &mdash; Google Drive sync keeps those) and the phone pairing code. The APC mini pads and speed faders are saved in ShowXpress&rsquo;s live board, so while ShowXpress is open they wait until it&rsquo;s closed.</p>
    <div class="row"><button id="sexp" class="primary">&#11015; Export settings</button><button id="simp">&#11014; Import settings</button><input type="file" id="simpf" accept=".json,application/json" style="display:none"><span class="summary grow" id="scfg"></span></div></section>
  </div>
 
@@ -3141,20 +3244,18 @@ async function openOn(what){let r;try{r=await api('/api/open',{what});}catch(e){
 // export / import settings: the server gives SX Studio's settings, the page adds this device's own (light/dark etc.)
 const andList=a=>a.length>1?a.slice(0,-1).join(', ')+' and '+a[a.length-1]:a.join('');
 const devKeys=()=>{const o={};for(let i=0;i<localStorage.length;i++){const k=localStorage.key(i);if(/^sxh_/.test(k)&&k!=='sxh_phone_key')o[k]=localStorage.getItem(k);}return o;};
-$('sexp').onclick=async()=>{const r=await getJ('/api/config/export');if(!r.ok){$('scfg').innerHTML='<span style="color:var(--red)">'+esc(r.error||'Could not read the settings.')+'</span>';return;}
- const d=r.data;d.device=devKeys();const p=n=>String(n).padStart(2,'0'),dt=new Date(),a=document.createElement('a');
- a.href=URL.createObjectURL(new Blob([JSON.stringify(d,null,1)],{type:'application/json'}));a.download='SX Studio settings '+dt.getFullYear()+'-'+p(dt.getMonth()+1)+'-'+p(dt.getDate())+'.json';
- document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),10000);
- $('scfg').innerHTML='&#10003; Saved <b>'+esc(a.download)+'</b> in your Downloads folder.';};
+$('sexp').onclick=async()=>{busy(true,'Exporting the settings…');let r;try{r=await api('/api/config/export',{device:devKeys()});}catch(x){r={ok:false,error:'Lost connection to SX Studio.'};}busy(false);
+ if(!r.ok){$('scfg').innerHTML='<span style="color:var(--red)">'+esc(r.error||'The settings couldn&rsquo;t be saved.')+'</span>';return;}
+ $('scfg').innerHTML='&#10003; Saved <b>'+esc(r.name)+'</b> in '+esc(r.folder)+' <button class="mini" id="scfgshow">Show the file</button>';$('scfgshow').onclick=()=>openOn('export');};
 $('simp').onclick=()=>{$('simpf').value='';$('simpf').click();};
 $('simpf').onchange=async e=>{const f=e.target.files[0];if(!f)return;let d=null;try{d=JSON.parse(await f.text());}catch(x){}
  if(!d||d.app!=='SX Studio'||d.kind!=='settings'){$('scfg').innerHTML='<span style="color:var(--red)">That file isn&rsquo;t an SX Studio settings file.</span>';return;}
- const dev=d.device&&typeof d.device==='object'?d.device:null,what=[d.settings&&'the tabs and the SX Player pages',d.apc40&&'the APC40 pads and faders',d.autoShow&&'the Auto Show',dev&&'this computer&rsquo;s look'].filter(Boolean);
+ const dev=d.device&&typeof d.device==='object'?d.device:null,what=[d.settings&&'the tabs and the SX Player pages',d.apc40&&'the APC40 pads and faders',d.apcMini&&'the APC mini pads',d.speedFaders&&'the speed faders',d.autoShow&&'the Auto Show',d.phone&&'phone access on/off',dev&&'this computer&rsquo;s own choices'].filter(Boolean);
  if(!what.length){$('scfg').innerHTML='<span style="color:var(--amber)">That file has no settings in it.</span>';return;}
  if(!await ask('Import these settings?','<b>'+esc(f.name)+'</b>'+(d.saved?' (saved '+esc(String(d.saved).slice(0,10))+(d.version?' by version '+esc(d.version):'')+')':'')+' replaces '+andList(what)+'. What you have now is backed up first.','Import'))return;
  busy(true,'Importing the settings…');let r;try{r=await api('/api/config/import',{data:d});}catch(x){r={ok:false,error:'Lost connection to SX Studio.'};}busy(false);
  if(!r.ok){$('scfg').innerHTML='<span style="color:var(--red)">'+esc(r.error||'Nothing was imported.')+'</span>';return;}
- const done=r.done||[];if(dev){Object.keys(dev).forEach(k=>{if(/^sxh_/.test(k)&&k!=='sxh_phone_key'&&typeof dev[k]==='string')localStorage.setItem(k,dev[k]);});done.push('this computer&rsquo;s look');}
+ const done=r.done||[];if(dev){Object.keys(dev).forEach(k=>{if(/^sxh_/.test(k)&&k!=='sxh_phone_key'&&typeof dev[k]==='string')localStorage.setItem(k,dev[k]);});done.push('this computer&rsquo;s own choices');}A=null;SP=null;H=null;
  SET=r.settings;Q4=null;L4=null;AU=null;applyTheme();applyTabs();renderSet();if(LB&&LB.ok)renderLab();
  $('scfg').innerHTML=(done.length?'&#10003; Imported '+andList(done)+'.':'Nothing was imported.')+((r.warn||[]).length?' <span style="color:var(--amber)">'+r.warn.map(esc).join(' ')+'</span>':'');};
 $('sopenshow').onclick=()=>openOn('show');$('gdbk').onclick=()=>openOn('backups');$('gdapp').onclick=()=>openOn('gdapp');$('gddl').onclick=()=>openOn('gddl');
@@ -4151,7 +4252,7 @@ try {
           # SX Studio's settings in one file (user 2026-11-25): settings.json, the APC40 pages (apc40.json) and the Auto Show
           # (<show>/auto_show.json). Not the phone pairing key and nothing of the show itself. The page adds this device's look.
           if ($fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Export the settings on the computer.' }; break }
-          Send-Json $ctx @{ ok = $true; data = (Get-ConfigExport) }
+          Send-Json $ctx (Save-ConfigExport $(if ($body) { $body.device } else { $null }))
         }
         '/api/config/import' {
           if ($fromPhone) { Send-Json $ctx @{ ok = $false; error = 'Import the settings on the computer.' }; break }

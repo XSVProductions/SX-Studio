@@ -46,7 +46,9 @@ void main() {
     await engine.start();
     client = SxClient(Uri.parse('http://127.0.0.1:${engine.port}'), token: 'secret');
     // a paired phone, on the network port
-    engine.phones.newPin();
+    engine.phones
+      ..setOn(true)
+      ..newPin();
     final key = engine.phones.pair(engine.phones.pin);
     await engine.setPhoneListener(true);
     phone = SxClient(Uri.parse('http://127.0.0.1:${engine.phonePort}'), token: key);

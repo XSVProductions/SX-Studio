@@ -16,31 +16,9 @@ class LanAddress {
   Json toJson() => {'ip': ip, 'name': name, 'wifi': wifi};
 }
 
-/// A paired phone or tablet. Its key is never sent back, only who it is.
-class PairedPhone {
-  const PairedPhone({required this.id, required this.name, required this.paired, this.lastSeen = '', this.lastIp = ''});
-
-  factory PairedPhone.fromJson(Json j) =>
-      PairedPhone(id: j.str('id'), name: j.str('name'), paired: j.str('paired'), lastSeen: j.str('lastSeen'), lastIp: j.str('lastIp'));
-
-  /// Short id for unpairing.
-  final String id;
-
-  /// What it said it was when it paired ("iPhone", "iPad"...).
-  final String name;
-
-  /// When it paired, `yyyy-MM-ddTHH:mm:ss` laptop time.
-  final String paired;
-
-  /// Its last call since SX Studio started, or ''.
-  final String lastSeen;
-  final String lastIp;
-
-  Json toJson() => {'id': id, 'name': name, 'paired': paired, 'lastSeen': lastSeen, 'lastIp': lastIp};
-}
-
 /// The Phone & iPad card: is phone access on, where a phone connects, the
-/// pairing code while one is showing, and the paired phones.
+/// pairing code while one is showing, and the last phone seen. Port of
+/// `Get-PhoneInfo`.
 class PhoneInfo {
   const PhoneInfo({
     required this.on,
@@ -54,7 +32,6 @@ class PhoneInfo {
     this.pinLeft = 0,
     this.lastSeen = '',
     this.lastIp = '',
-    this.phones = const [],
   });
 
   factory PhoneInfo.fromJson(Json j) => PhoneInfo(
@@ -69,7 +46,6 @@ class PhoneInfo {
     pinLeft: j.integer('pinLeft'),
     lastSeen: j.str('lastSeen'),
     lastIp: j.str('lastIp'),
-    phones: j.list('phones', PairedPhone.fromJson),
   );
 
   /// Phone access is turned on.
@@ -98,7 +74,6 @@ class PhoneInfo {
   /// The last phone call since SX Studio started (`yyyy-MM-ddTHH:mm:ss`), or ''.
   final String lastSeen;
   final String lastIp;
-  final List<PairedPhone> phones;
 
   Json toJson() => {
     'ok': true,
@@ -113,7 +88,6 @@ class PhoneInfo {
     'pinLeft': pinLeft,
     'lastSeen': lastSeen,
     'lastIp': lastIp,
-    'phones': [for (final p in phones) p.toJson()],
   };
 }
 
@@ -124,13 +98,15 @@ extension PhoneApi on SxClient {
   /// Turns phone access on or off. Laptop only.
   Future<PhoneInfo> phoneSet(bool on) => post('/api/phone/set', {'on': on}, PhoneInfo.fromJson);
 
-  /// Shows a new pairing code for 10 minutes. Laptop only.
+  /// Shows a new pairing code for 10 minutes, for any number of phones.
+  /// Laptop only.
   Future<PhoneInfo> phonePin() => post('/api/phone/pin', const {}, PhoneInfo.fromJson);
 
-  /// Unpairs one phone by id, or every phone with `*`. Laptop only.
-  Future<PhoneInfo> phoneUnpair(String id) => post('/api/phone/unpair', {'id': id}, PhoneInfo.fromJson);
+  /// "Unpair all phones": every phone has to pair again. Laptop only.
+  Future<PhoneInfo> phoneUnpair() => post('/api/phone/unpair', const {}, PhoneInfo.fromJson);
 
-  /// Pairs this phone with the code shown on the laptop and answers its key.
-  /// The key goes in every later call instead of the laptop's token.
+  /// Pairs this phone with the code shown on the laptop and answers the
+  /// phones' key. The key goes in every later call instead of the laptop's
+  /// token.
   Future<String> phonePair(String pin) => post('/api/phone/pair', {'pin': pin}, (j) => j.str('key'));
 }

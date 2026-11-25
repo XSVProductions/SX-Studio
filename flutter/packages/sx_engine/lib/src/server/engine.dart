@@ -128,7 +128,7 @@ class Engine {
   int? get phonePort => _phoneServer?.port;
 
   Future<void> start() async {
-    _server = await shelf_io.serve(_withWeb((req) => _handle(req, fromPhone: false)), InternetAddress.loopbackIPv4, config.port);
+    _server = await shelf_io.serve(_withWeb((req) => _handle(req, fromPhone: false), fromPhone: false), InternetAddress.loopbackIPv4, config.port);
     if (phones.on) await setPhoneListener(true);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => queue.step());
   }
@@ -142,7 +142,13 @@ class Engine {
       return;
     }
     if (_phoneServer != null) return;
-    final handler = _withWeb((req) => _handle(req, fromPhone: true));
+    final web = _withWeb((req) => _handle(req, fromPhone: true), fromPhone: true);
+    // every call from a phone is "the last phone", as the old relay noted it
+    FutureOr<Response> handler(Request req) {
+      phones.saw(_ip(req));
+      return web(req);
+    }
+
     try {
       // IPv6 and IPv4 together where the computer has both
       _phoneServer = await shelf_io.serve(handler, InternetAddress.anyIPv6, config.phonePort);
@@ -170,11 +176,19 @@ class Engine {
 
   /// Serves the built web UI next to the API, when there is one. The UI's
   /// files need no key: a phone has to load them to show the pairing screen.
-  Handler _withWeb(Handler api) {
+  /// A phone's page carries its key back when it showed the current one.
+  Handler _withWeb(Handler api, {required bool fromPhone}) {
     final web = config.webDir;
     if (web == null || !Directory(web).existsSync()) return api;
     final files = createStaticHandler(web, defaultDocument: 'index.html');
-    return (req) => req.url.path.startsWith('api/') || req.url.path == _brandPath ? api(req) : files(req);
+    return (req) {
+      final path = req.url.path;
+      if (path.startsWith('api/') || path == _brandPath) return api(req);
+      if (fromPhone && (path == '' || path == 'index.html') && req.method == 'GET') {
+        return phones.on ? phonePage(web, phones, req) : _text(403, 'Phone access is turned off in SX Studio.');
+      }
+      return files(req);
+    };
   }
 
   static const _pairPath = '/api/phone/pair';
@@ -194,16 +208,17 @@ class Engine {
 
   Future<Response> _handle(Request req, {required bool fromPhone}) async {
     final path = '/${req.url.path}';
+    final route = api.find(path);
+    if (fromPhone) {
+      // The phones' key only. The laptop's token means nothing on this port.
+      final no = phones.refuse(req, path: path, laptopOnly: route != null && !route.phone);
+      if (no != null) return _json({'ok': false, 'error': no, 'out': ''}, 403);
+    }
     if (req.url.path == _brandPath) return _brand();
     if (path == _pairPath) return _pair(req, fromPhone: fromPhone);
-    final route = api.find(path);
     if (route == null) return _json({'ok': false, 'error': 'Unknown action.', 'out': ''}, 404);
     final key = req.headers['x-sx-token'] ?? '';
-    if (fromPhone) {
-      // A phone's own key only. The laptop's token means nothing on this port.
-      if (phones.check(key, ip: _ip(req)) == null) return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
-      if (!route.phone) return _json({'ok': false, 'error': 'Only on the laptop.', 'out': ''}, 403);
-    } else if (!sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
+    if (!fromPhone && !sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
       return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
     }
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
@@ -239,9 +254,8 @@ class Engine {
       code = '';
     }
     try {
-      final key = phones.pair(code, name: phoneName(req.headers['user-agent'] ?? ''));
-      phones.check(key, ip: _ip(req));
-      return _json({'ok': true, 'key': key});
+      final key = phones.pair(code);
+      return _json({'ok': true, 'key': key}, 200, phones.cookieHeader);
     } on PairRefused catch (e) {
       // a wrong code answers slowly, so guessing takes longer
       if (e.wrongCode) await Future<void>.delayed(const Duration(milliseconds: 600));
@@ -257,8 +271,10 @@ class Engine {
     return a.address.startsWith('::ffff:') ? a.address.substring(7) : a.address;
   }
 
-  Response _json(Object? value, [int status = 200]) =>
-      Response(status, body: jsonEncode(value), headers: {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store'});
+  Response _json(Object? value, [int status = 200, Map<String, String> more = const {}]) =>
+      Response(status, body: jsonEncode(value), headers: {'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', ...more});
+
+  Response _text(int status, String text) => Response(status, body: text, headers: {'content-type': 'text/plain', 'cache-control': 'no-store'});
 }
 
 /// Runs a route's handler and turns whatever happens into a JSON object.

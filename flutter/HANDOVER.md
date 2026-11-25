@@ -153,4 +153,4 @@ Step 5 is the point of no easy return. An installed PowerShell app that updates 
 - **Oldest Mac.** The Flutter app needs macOS 12 or newer. The PowerShell app's `Info.plist` says 10.15.
 - **The kept bugs** in the list above. Fix them here, in `../src`, or both.
 - **When to switch.** Nothing forces a date. The two apps can sit side by side as long as changes to `../src` keep getting ported.
-- **Fixes for the PowerShell app.** Twelve small fixes to `../src` turned up while porting: write safety, a phone being able to restart the laptop, unescaped show names on the page, and others. They sit on a separate branch, not in this pull request, and can be sent as their own if wanted. The port already behaves the fixed way.
+- **Fixes for the PowerShell app.** Twelve small fixes to `../src` turned up while porting: write safety, a phone being able to restart the laptop, unescaped show names on the page, and others. They are pull request #20 (`audit-fixes`), separate from this folder and safe to take or leave on their own. The port already behaves the fixed way.

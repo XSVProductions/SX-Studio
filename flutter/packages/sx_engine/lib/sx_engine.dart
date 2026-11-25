@@ -14,6 +14,7 @@ export 'src/ps_compat.dart';
 export 'src/server/api.dart';
 export 'src/server/engine.dart';
 export 'src/server/queue.dart';
+export 'src/server/routes/live.dart' show LiveAimSession;
 export 'src/show/find_show.dart';
 export 'src/show/fixtures.dart';
 export 'src/show/live_ini.dart';

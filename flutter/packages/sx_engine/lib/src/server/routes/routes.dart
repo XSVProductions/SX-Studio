@@ -1,5 +1,7 @@
 import '../engine.dart';
+import 'aim.dart';
 import 'lab.dart';
+import 'live.dart';
 import 'speed.dart';
 import 'sx.dart';
 
@@ -8,4 +10,6 @@ void registerRoutes(Engine e) {
   registerSxRoutes(e);
   registerSpeedRoutes(e);
   registerLabRoutes(e);
+  registerAimRoutes(e);
+  registerLiveRoutes(e);
 }

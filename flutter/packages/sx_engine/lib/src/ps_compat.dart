@@ -43,7 +43,7 @@ int psInt(Object? v) {
 ///
 /// PowerShell compares strings by culture rules, which this only approximates
 /// (lowercase, then code units). If a parity test shows a different order for
-/// names with punctuation, that is why.
+/// names with punctuation, that is why. Sort by a [PsText] key instead.
 List<T> psSorted<T>(Iterable<T> items, List<Comparable Function(T)> keys) {
   int cmp(T a, T b) {
     for (final key in keys) {
@@ -57,6 +57,38 @@ List<T> psSorted<T>(Iterable<T> items, List<Comparable Function(T)> keys) {
   final list = items.toList();
   mergeSort(list, compare: cmp);
   return list;
+}
+
+/// Sorts like PowerShell's `Sort-Object` on text: case ignored, and
+/// punctuation before digits before letters, in the order .NET's culture
+/// rules put them (`_ - , ; : ! ? . ' " ( ) [ ] { } @ * / \ & # % ` ^ + < = > | ~ $`).
+int psTextCompare(String a, String b) {
+  const punct = '\t\n\v\f\r _-,;:!?.\'"()[]{}@*/\\&#%`^+<=>|~\$';
+  int weight(int c) {
+    final i = punct.indexOf(String.fromCharCode(c));
+    if (i >= 0) return i;
+    if (c >= 0x30 && c <= 0x39) return 100 + c;
+    if (c >= 0x61 && c <= 0x7a) return 200 + c;
+    if (c >= 0x41 && c <= 0x5a) return 200 + c + 32;
+    return 1000 + c;
+  }
+
+  final n = a.length < b.length ? a.length : b.length;
+  for (var i = 0; i < n; i++) {
+    final d = weight(a.codeUnitAt(i)) - weight(b.codeUnitAt(i));
+    if (d != 0) return d;
+  }
+  return a.length - b.length;
+}
+
+/// A text key for [psSorted] that compares like [psTextCompare].
+class PsText implements Comparable<PsText> {
+  PsText(this.s);
+
+  final String s;
+
+  @override
+  int compareTo(PsText other) => psTextCompare(s, other.s);
 }
 
 /// `yyyy-MM-ddTHH:mm:ss` in local time: .NET's `ToString('s')`, which the old

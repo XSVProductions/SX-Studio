@@ -3,8 +3,8 @@ import 'dart:io';
 import 'package:sx_engine/sx_engine.dart';
 import 'package:test/test.dart';
 
-// The two places where the port means to differ from health.ps1. Parity
-// tests cover everything else on the real show.
+// The places where the port means to differ from health.ps1, and the sort
+// order it copies. Parity tests cover everything else on the real show.
 
 const _liveIni =
     '[live]\r\nmaster_faders = 1\r\n\r\n[master_faders]\r\ncaption_fader0 = MOVEMENTS\r\ntype_fader0 = 1\r\n\r\n'
@@ -76,5 +76,11 @@ void main() {
     final env = _show();
     final open = ShowEnv(env.root, sxRunning: () => true);
     expect(() => healthFix(open, 'speed|page1_button1'), throwsA(isA<ToolError>().having((e) => e.message, 'message', startsWith('ShowXpress is OPEN'))));
+  });
+
+  test('PsText sorts names as Sort-Object does on PowerShell 7', () {
+    // The expected order is what pwsh 7 printed for this list.
+    final names = ['b', 'A', '_x', '1a', 'a-b', 'ab', 'a b', '(x)', 'Zeta', 'a.b', '10', '9'];
+    expect(psSorted<String>(names, [(x) => PsText(x)]), ['_x', '(x)', '10', '1a', '9', 'A', 'a b', 'a-b', 'a.b', 'ab', 'b', 'Zeta']);
   });
 }

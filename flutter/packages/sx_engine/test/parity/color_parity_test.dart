@@ -154,6 +154,8 @@ void main() {
       expect((p.hex, p.name), ('ff0000', 'Red bxb and a much longer name'));
       expect(p.buttons.map((b) => b.there), [true, true]);
       sx.running = true;
+      // the page asks to queue once it has seen ShowXpress open
+      await client.status();
       final q = await client.colorApply('#00A8A8', 'Teal');
       expect((q.extra['queued'], q.extra['label']), (true, "Tonight's Color (#00a8a8)"));
     });

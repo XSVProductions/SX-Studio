@@ -26,6 +26,18 @@ class _FakeSx implements SxApp {
   Future<ToolResult> close({bool force = false}) async => const ToolResult(ok: true);
 }
 
+/// Remembers what the aim routes asked the remote to press.
+class _FakePresses implements ButtonPresses {
+  /// Each request as "titles | label".
+  final asked = <String>[];
+
+  @override
+  void pressWhenOpen(List<String> titles, String label, {Duration within = const Duration(seconds: 1200)}) => asked.add('${titles.join(', ')} | $label');
+
+  @override
+  void cancel({String? label}) {}
+}
+
 void main() {
   late Directory tmp;
   late String show;
@@ -182,6 +194,62 @@ void main() {
       );
       expect((r.ok, r.saved, r.applied, r.applyError), (true, true, false, 'Size must be 20-300%.'));
       expect(r.reopened, isFalse);
+    });
+  });
+
+  group('after a save', skip: realShowPath == null ? 'the real show is not on this machine' : null, () {
+    test('a good apply asks for the CHECK buttons when ShowXpress opens, a refused one does not', () async {
+      final presses = _FakePresses();
+      engine.provide<ButtonPresses>(presses);
+      expect((await client.aimApply(AimMode.floor, w: 100, d: 100)).ok, isTrue);
+      expect((await client.aimApply(AimMode.room, w: 100, d: 100)).ok, isTrue);
+      expect((await client.aimApply(AimMode.floor, w: 10, d: 100)).ok, isFalse);
+      expect(presses.asked, ['DF CHECK 140, DF CHECK 251 | DF CHECK 140 + 251', 'ROOM CHECK | ROOM CHECK']);
+    });
+
+    test('live save with apply asks for the CHECK buttons too', () async {
+      final presses = _FakePresses();
+      engine.provide<ButtonPresses>(presses);
+      final h = (await client.liveStart()).info!.heads.first;
+      final r = await client.liveSave(
+        mode: AimMode.floor,
+        aims: {h.id: LiveAim(c: (h.c.$1 + 300, h.c.$2))},
+        w: 100,
+        d: 100,
+      );
+      expect(r.applied, isTrue);
+      expect(presses.asked, ['DF CHECK 140, DF CHECK 251 | DF CHECK 140 + 251']);
+    });
+
+    /// Moves the first editable shape of [f] 200 steps right, through the Movement Editor's save.
+    Future<ToolResult> saveMove(String f) async {
+      final doc = await client.move(f);
+      final sec = doc.secs.firstWhere((s) => !s.locked && s.pts.isNotEmpty);
+      return client.moveSave(
+        MoveSave(
+          move: f,
+          sha: doc.sha,
+          secs: [
+            MoveSecChange(name: sec.name, pts: [for (final (x, y) in sec.pts) (x + 200, y)]),
+          ],
+        ),
+      );
+    }
+
+    test('saving GRAND ENTRANCE.gpj makes its step scene again', () async {
+      final scex = File(p.join(show, 'scenes/GRAND ENTRANCE.scex'));
+      final before = scex.readAsStringSync();
+      final r = await saveMove('GRAND ENTRANCE.gpj');
+      expect(r.ok, isTrue, reason: r.error);
+      expect(r.out, contains('GRAND ENTRANCE scene made again from the movement.'));
+      expect(scex.readAsStringSync(), isNot(before));
+    });
+
+    test('saving another movement leaves the step scenes alone', () async {
+      final other = (await client.moves()).moves.firstWhere((m) => m.aim.isEmpty && m.readonly.isEmpty && m.file != 'GRAND ENTRANCE.gpj' && m.points > 0);
+      final r = await saveMove(other.file);
+      expect(r.ok, isTrue, reason: r.error);
+      expect(r.out, isNot(contains('GRAND ENTRANCE')));
     });
   });
 }

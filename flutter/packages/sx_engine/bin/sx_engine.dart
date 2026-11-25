@@ -28,7 +28,7 @@ Future<void> main(List<String> argv) async {
       showPath: args.option('show'),
       webDir: args.option('web'),
       phonePort: int.parse(args.option('phone-port')!),
-      settingsDir: args.option('settings'),
+      settingsDir: args.option('settings') ?? settingsDir,
       appVersion: args.option('app-version')!,
       dmx: FakeDmxSpec(args.option('dmx-log')),
     ),

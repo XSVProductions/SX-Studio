@@ -39,16 +39,17 @@ void main() {
     File('${show.path}/scenes/CHASE.scex').writeAsStringSync('<Scene><Fixtures/><Steps/></Scene>');
     sx = _FakeSx();
     laptop = FakeLaptop();
-    engine =
-        Engine(
-            EngineConfig(port: 0, token: 'secret', showPath: show.path),
-            sx: sx,
-          )
-          ..provide<Laptop>(laptop)
-          ..phoneKeys.add('phone-key');
+    engine = Engine(
+      EngineConfig(port: 0, phonePort: 0, token: 'secret', showPath: show.path),
+      sx: sx,
+    )..provide<Laptop>(laptop);
     await engine.start();
     client = SxClient(Uri.parse('http://127.0.0.1:${engine.port}'), token: 'secret');
-    phone = SxClient(client.base, token: 'phone-key');
+    // a paired phone, on the network port
+    engine.phones.newPin();
+    final key = engine.phones.pair(engine.phones.pin);
+    await engine.setPhoneListener(true);
+    phone = SxClient(Uri.parse('http://127.0.0.1:${engine.phonePort}'), token: key);
   });
 
   tearDown(() async {
@@ -100,8 +101,8 @@ void main() {
       expect(ini.readAsStringSync(), _liveIni);
     });
 
-    test('the 251 colour fix is refused by the server, as in the old app', () async {
-      expect((await client.healthFix('color251|page1_button1')).error, 'Unknown fix.');
+    test('the 251 colour fix reaches the tool (the old server refused its key)', () async {
+      expect((await client.healthFix('color251|page1_button1')).error, isNot('Unknown fix.'));
     });
 
     test('ids that are not 8 hex digits are refused', () async {

@@ -56,8 +56,10 @@ class EngineConfig {
   /// (the old relay's port). 0 picks a free one.
   final int phonePort;
 
-  /// SX Studio's settings folder. Null uses the usual one (`settingsDir`).
-  /// Tests pass a temp folder so they never touch the real settings.
+  /// SX Studio's settings folder. The app passes the usual one
+  /// (`settingsDir` in `find_show.dart`). Null gives the engine a throwaway
+  /// folder it deletes when it stops, so a test that forgets this can never
+  /// read or change the real settings.
   final String? settingsDir;
 
   /// SX Studio's version, for the update check.
@@ -92,7 +94,10 @@ class Engine {
   late final phones = PhoneAccess(settingsFolder);
 
   /// SX Studio's settings folder.
-  String get settingsFolder => config.settingsDir ?? settingsDir;
+  late final String settingsFolder = config.settingsDir ?? (_ownSettings = Directory.systemTemp.createTempSync('sx_settings_')).path;
+
+  /// The throwaway settings folder, when the config named none.
+  Directory? _ownSettings;
 
   /// Live output and the player. Only one thing sends DMX at a time.
   final DmxHub dmx;
@@ -148,6 +153,7 @@ class Engine {
     await dmx.stopAll();
     await _phoneServer?.close(force: true);
     await _server?.close(force: true);
+    if (_ownSettings case final own? when own.existsSync()) own.deleteSync(recursive: true);
   }
 
   /// Serves the built web UI next to the API, when there is one. The UI's

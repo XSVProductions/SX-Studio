@@ -93,7 +93,7 @@ class AimScreen extends StatefulWidget {
   State<AimScreen> createState() => _AimScreenState();
 }
 
-class _AimScreenState extends State<AimScreen> {
+class _AimScreenState extends State<AimScreen> with ShowWatcher {
   var _mode = AimMode.floor;
   final _cache = <AimMode, AimPreview>{};
   AimPreview? _p;
@@ -116,6 +116,17 @@ class _AimScreenState extends State<AimScreen> {
     super.initState();
     _load();
   }
+
+  // The old poll: `reloadAll` takes the sizes from the show again for both
+  // modes, and a ShowXpress close reads the show but keeps the typed sizes.
+  @override
+  void onQueueRan() {
+    _sized.clear();
+    _load();
+  }
+
+  @override
+  void onSxClosed() => _load();
 
   Future<void> _load() async {
     final m = _mode;
@@ -940,10 +951,9 @@ class _NumBoxState extends State<_NumBox> {
     super.dispose();
   }
 
-  void _commit() {
-    widget.onChanged(num.tryParse(_c.text) ?? 100);
-    _c.text = '${widget.value}';
-  }
+  // The box shows the clamped value when the screen rebuilds ([didUpdateWidget]).
+  // Enter commits and then the blur commits again, so the text stays as typed until then.
+  void _commit() => widget.onChanged(num.tryParse(_c.text) ?? 100);
 
   @override
   Widget build(BuildContext context) => SizedBox(

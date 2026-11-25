@@ -24,10 +24,10 @@ Map<String, Object?> _tile(String label, {String warn = '', bool is140 = true}) 
   'warn': warn,
 };
 
-Map<String, Object?> _preview({String mode = 'Floor', String warn = '', Map<String, bool>? install}) => {
+Map<String, Object?> _preview({String mode = 'Floor', String warn = '', Map<String, bool>? install, int lastW = 120}) => {
   'ok': true,
   'show': 'Test Show',
-  'lastW': 120,
+  'lastW': lastW,
   'lastD': 90,
   'sceneExists': true,
   'heads': [_tile('140 #1'), _tile('140 #2', warn: warn), _tile('251 #1', is140: false)],
@@ -40,6 +40,14 @@ Map<String, Object?> _preview({String mode = 'Floor', String warn = '', Map<Stri
 
 const _applyOut = '  CHANGED  STAR.gpj  12 values changed\n  -> 9 movement scenes checked\n';
 
+/// What the fake engine reports, changed by a test between polls.
+class _Show {
+  var sxOpen = false;
+  var queueDone = '';
+  var lastW = 120;
+  var reads = 0;
+}
+
 /// The screen on a laptop-sized window, against a fake engine. Returns the
 /// POSTs it makes, by path, and the app state to dispose at the end.
 ///
@@ -51,7 +59,9 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(
   Map<String, bool>? install,
   bool sxOpen = false,
   List<List<Object?>>? presses,
+  _Show? show,
 }) async {
+  final sh = show ?? (_Show()..sxOpen = sxOpen);
   SharedPreferences.setMockInitialValues({});
   tester.view
     ..physicalSize = const Size(1300, 1000)
@@ -65,8 +75,12 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(
       final path = req.url.path;
       Object answer = {
         'ok': true,
-        'open': sxOpen,
-        'q': {'items': <Object>[], 'reopen': true},
+        'open': sh.sxOpen,
+        'q': {
+          'items': <Object>[],
+          'reopen': true,
+          if (sh.queueDone.isNotEmpty) 'done': {'at': sh.queueDone},
+        },
       };
       const titles = ['DF AIM (ADJUST)', 'DF CHECK 140', 'DF CHECK 251', 'ROOM AIM (ADJUST)', 'ROOM CHECK'];
       Map<String, Object?> remote(List<Object?> on) => {
@@ -86,7 +100,10 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(
         presses?.add(on);
         return http.Response(jsonEncode(remote(on)), 200);
       }
-      if (path == '/api/preview') answer = _preview(mode: req.url.queryParameters['mode'] == 'room' ? 'Room' : 'Floor', warn: warn, install: install);
+      if (path == '/api/preview') {
+        sh.reads++;
+        answer = _preview(mode: req.url.queryParameters['mode'] == 'room' ? 'Room' : 'Floor', warn: warn, install: install, lastW: sh.lastW);
+      }
       if (req.method == 'POST') {
         posts[path] = (jsonDecode(req.body) as Map).cast();
         answer = {'ok': true, 'out': _applyOut, 'error': ''};
@@ -168,6 +185,31 @@ void main() {
     await tester.tap(find.text('ROOM CHECK').first);
     await tester.pumpAndSettle();
     expect(presses.last, ['ROOM CHECK']);
+    app.dispose();
+  });
+
+  testWidgets('a ShowXpress close reads the show and keeps the typed size, a queue run takes the size from the show again', (tester) async {
+    final show = _Show()..sxOpen = true;
+    final (_, app) = await _mount(tester, show: show);
+    final reads = show.reads;
+    await tester.enterText(find.widgetWithText(TextField, '120'), '200');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, '200'), findsOneWidget);
+
+    show
+      ..sxOpen = false
+      ..lastW = 150;
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect(show.reads, reads + 1);
+    expect(find.widgetWithText(TextField, '200'), findsOneWidget, reason: 'the old `load()` keeps the sizes once taken');
+
+    show.queueDone = '2026-11-25T01:00:00';
+    await app.refresh();
+    await tester.pumpAndSettle();
+    expect(show.reads, reads + 2);
+    expect(find.widgetWithText(TextField, '150'), findsOneWidget, reason: '`reloadAll` clears `LD`');
     app.dispose();
   });
 }

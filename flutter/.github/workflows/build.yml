@@ -60,8 +60,8 @@ jobs:
           name: mac
           path: build/mac/*.pkg
 
-  # live output on the Mac uses ShowXpress's own driver (efk_hardware.dylib, Intel only): check it loads and runs
-  # (no interface on the build machine -> "ERR none"). Informational: never blocks a release.
+  # live output on the Mac uses ShowXpress's own driver (efk_hardware.dylib, one download per chip): check each
+  # loads and runs on its chip (no interface on the build machine -> "ERR none"). Informational: never blocks a release.
   mac_live_probe:
     strategy:
       fail-fast: false
@@ -73,13 +73,14 @@ jobs:
       - uses: actions/checkout@v4
       - name: Load ShowXpress's Mac interface driver
         run: |
-          curl -fsSL -o /tmp/sx.dmg https://download.thelightingcontroller.com/software/V9/ShowXpress/ShowXpress_Mac.dmg
+          DMG=ShowXpress_Mac.dmg; TARGET=x86_64-apple-macos10.15
+          [ "$(uname -m)" = arm64 ] && { DMG=ShowXpress_Mac_arm.dmg; TARGET=arm64-apple-macos11; }
+          curl -fsSL -o /tmp/sx.dmg "https://download.thelightingcontroller.com/software/V9/ShowXpress/$DMG"
           hdiutil attach -nobrowse -readonly -mountpoint /tmp/sxv /tmp/sx.dmg
           D="$(dirname "$(find /tmp/sxv -maxdepth 4 -name efk_hardware.dylib | head -n 1)")"
           cp -R "$D" /tmp/sxapp; hdiutil detach /tmp/sxv
           ls /tmp/sxapp; lipo -archs /tmp/sxapp/efk_hardware.dylib
-          [ "$(uname -m)" = arm64 ] && { softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true; }
-          xcrun swiftc -O -target x86_64-apple-macos10.15 packaging/mac/dmx/main.swift -o /tmp/sxh_dmx
+          xcrun swiftc -O -target "$TARGET" packaging/mac/dmx/main.swift -o /tmp/sxh_dmx
           /tmp/sxh_dmx --dir /tmp/sxapp --probe | tee /tmp/probe.txt
           grep -q "^ERR none" /tmp/probe.txt
           # the real protocol, with no interface: it must answer and exit cleanly

@@ -6,7 +6,7 @@ sudo installer -pkg "$ROOT"/build/mac/*.pkg -target /
 A="/Applications/SX Studio.app/Contents"
 test -x "$A/MacOS/SX Studio" && test -x "$A/MacOS/sxh_dmx" && test -f "$A/Resources/web/index.html" && test -f "$A/Resources/AppIcon.icns"
 lipo "$A/MacOS/SX Studio" -verify_arch x86_64 arm64
-lipo "$A/MacOS/sxh_dmx" -verify_arch x86_64
+lipo "$A/MacOS/sxh_dmx" -verify_arch x86_64 arm64
 # nothing of the PowerShell app may be left inside
 test ! -e "$A/Resources/df_aim_gui.ps1" && test ! -e "$A/MacOS/SXHelper"
 open -n "/Applications/SX Studio.app" --env SX_PORT=47390

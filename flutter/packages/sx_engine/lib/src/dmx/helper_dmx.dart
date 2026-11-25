@@ -22,7 +22,9 @@ import 'efk_dmx.dart';
 /// and sends it 40 times a second. [send] passes only the channels that
 /// changed, as `b:ch:v`, and a `k` keep-alive when nothing did for a second.
 ///
-/// Not run on a Mac: written from the old source on Linux.
+/// Checked on an Apple Silicon Mac with both ShowXpress downloads and no
+/// interface plugged in: the driver loads and the old "not found" message
+/// comes back. Not checked with an interface.
 class HelperDmx implements DmxOutput {
   HelperDmx._(this.name, this._proc);
 

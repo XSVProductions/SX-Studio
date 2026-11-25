@@ -1,0 +1,9 @@
+#!/bin/bash
+# Runs as root before SX Studio.app is installed in /Applications.
+# Closes a running SX Studio and removes the app, so files the PowerShell
+# version had inside it (its scripts and window program) don't stay behind.
+# Settings live in ~/AwaazTools and stay. Never fails the install.
+pkill -f "/Applications/SX Studio.app/Contents/" 2>/dev/null
+sleep 1
+rm -rf "/Applications/SX Studio.app" 2>/dev/null
+exit 0

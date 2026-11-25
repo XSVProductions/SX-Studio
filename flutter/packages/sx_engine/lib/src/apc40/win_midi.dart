@@ -6,14 +6,21 @@ import 'bridge.dart';
 
 // The APC40's MIDI ports on Windows, through winmm.dll. Nothing here is
 // looked up until it is first used, so importing this file elsewhere costs
-// nothing. Written from the Win32 headers on Linux and not yet run on Windows.
+// nothing. Written from the Win32 headers on Linux. Device lookup, a missing
+// device and the output side (short message, sysex, reset, close) were run
+// against winmm on Windows 11 with the GS Wavetable Synth. The input callback
+// has not run with a real device.
 //
 // Port of the C# class `Apc40Io` in `apc40.ps1`.
 
 /// `MidiInProc(HMIDIIN, UINT wMsg, DWORD_PTR dwInstance, DWORD_PTR dwParam1, DWORD_PTR dwParam2)`.
 typedef _MidiInProc = Void Function(IntPtr h, Uint32 msg, IntPtr inst, IntPtr p1, IntPtr p2);
 
-/// `MIDIHDR`. Dart lays it out as C does: 120 bytes on 64-bit Windows, 64 on 32-bit.
+/// `MIDIHDR`, with natural alignment like the old C# `Hdr`: 120 bytes on
+/// 64-bit Windows. The SDK header packs it to 1 byte (112 bytes), but every
+/// field this file reads or writes (lpData, the two lengths, dwFlags) is at
+/// the same offset either way, and winmm takes the larger size. Don't add
+/// `@Packed` without checking `sysex` on a real device.
 final class _MidiHdr extends Struct {
   external Pointer<Uint8> lpData;
   @Uint32()

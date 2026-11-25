@@ -60,7 +60,8 @@ int _onWindow(int hwnd, int lParam) {
 /// [wait] for them to go. Returns how many it found. Does nothing and
 /// returns 0 off Windows, or when user32.dll can't be used.
 ///
-/// Untested on Windows so far: written from the Win32 signatures.
+/// Checked on Windows 11 with Edge app windows: only the one titled exactly
+/// "SX Studio" closes.
 Future<int> closeOldWindows({Duration wait = const Duration(milliseconds: 1500)}) async {
   if (!Platform.isWindows) return 0;
   try {

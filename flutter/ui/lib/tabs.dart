@@ -4,6 +4,7 @@ import 'screens/color/color_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/lab/lab_screen.dart';
 import 'screens/look/look_screen.dart';
+import 'screens/settings/settings_screen.dart';
 import 'screens/speed/speed_screen.dart';
 import 'widgets/sx_widgets.dart';
 import 'theme.dart';
@@ -57,7 +58,7 @@ const tabs = [
 /// Builds the screen for a tab id. `home` and `settings` are not in [tabs].
 Widget buildTab(BuildContext context, String id) {
   if (id == 'home') return const HomeScreen();
-  if (id == 'settings') return _todo(context);
+  if (id == 'settings') return const SettingsScreen();
   for (final t in tabs) {
     if (t.id == id) return t.build(context);
   }

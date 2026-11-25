@@ -15,30 +15,53 @@ import '../dmx/default_dmx.dart';
 import '../sx/default_sx_app.dart';
 import '../sx/sx_app.dart';
 import 'api.dart';
+import 'phone.dart';
 import 'queue.dart';
 import 'routes/routes.dart';
 
+/// The version this build of SX Studio reports, and compares with GitHub's
+/// newest release.
+const sxStudioVersion = '2.0.0';
+
 /// How to start the engine.
 class EngineConfig {
-  const EngineConfig({this.port = 47321, required this.token, this.showPath, this.webDir, this.lan = false, this.dmx});
+  const EngineConfig({
+    this.port = 47321,
+    required this.token,
+    this.showPath,
+    this.webDir,
+    this.dmx,
+    this.phonePort = 47322,
+    this.settingsDir,
+    this.appVersion = sxStudioVersion,
+  });
 
-  /// Port to listen on. 0 picks a free one.
+  /// Port for the laptop's own UI, on the loopback address. 0 picks a free one.
   final int port;
 
-  /// The laptop UI's secret. Every API call must carry it (or a paired phone's key).
+  /// The laptop UI's secret. Every call on the loopback port must carry it.
+  /// It is never accepted on the network port.
   final String token;
 
   /// Use this show folder instead of looking for one. For development and tests.
   final String? showPath;
 
-  /// The built web UI to serve to phones, or null to serve the API only.
+  /// The built web UI, served on both ports. Null serves the API only.
   final String? webDir;
-
-  /// Listen on the network, not just this computer, so phones can connect.
-  final bool lan;
 
   /// Where DMX goes. Null picks this computer's real interface.
   final DmxSpec? dmx;
+
+  /// Network port phones and tablets connect to while phone access is on
+  /// (the old relay's port). 0 picks a free one.
+  final int phonePort;
+
+  /// SX Studio's settings folder. Null uses the usual one (`settingsDir`).
+  /// Tests pass a temp folder so they never touch the real settings.
+  final String? settingsDir;
+
+  /// SX Studio's version, for the update check.
+  final String appVersion;
 }
 
 /// The laptop side of SX Studio: the tools, the save queue and the HTTP API.
@@ -65,48 +88,94 @@ class Engine {
   /// What an area shared with [provide], or null when it isn't there.
   T? find<T extends Object>() => _parts[T] as T?;
 
-  /// Keys of paired phones. A request carrying one is a phone request.
-  final phoneKeys = <String>{};
+  /// Phone access: on or off, the pairing code and the paired phones.
+  late final phones = PhoneAccess(settingsFolder);
+
+  /// SX Studio's settings folder.
+  String get settingsFolder => config.settingsDir ?? settingsDir;
 
   /// Live output and the player. Only one thing sends DMX at a time.
   final DmxHub dmx;
 
   HttpServer? _server;
+  HttpServer? _phoneServer;
   Timer? _tick;
+
+  /// Why the network listener couldn't start, or ''.
+  String phoneError = '';
 
   /// The show to work on. Throws `ToolError` when there is none.
   ShowEnv show() => ShowEnv(config.showPath ?? findShow(), sxRunning: () => sx.running);
 
-  /// The port the engine is listening on.
+  /// The loopback port the laptop's UI uses.
   int get port => _server!.port;
 
+  /// The network port phones use, or null while phone access is off.
+  int? get phonePort => _phoneServer?.port;
+
   Future<void> start() async {
-    var handler = const Pipeline().addHandler(_handle);
-    final web = config.webDir;
-    if (web != null && Directory(web).existsSync()) {
-      final files = createStaticHandler(web, defaultDocument: 'index.html');
-      final apiHandler = handler;
-      handler = (req) => req.url.path.startsWith('api/') ? apiHandler(req) : files(req);
-    }
-    _server = await shelf_io.serve(handler, config.lan ? InternetAddress.anyIPv4 : InternetAddress.loopbackIPv4, config.port);
+    _server = await shelf_io.serve(_withWeb((req) => _handle(req, fromPhone: false)), InternetAddress.loopbackIPv4, config.port);
+    if (phones.on) await setPhoneListener(true);
     _tick = Timer.periodic(const Duration(seconds: 1), (_) => queue.step());
+  }
+
+  /// Starts or stops the network listener for phones. A failure to start is
+  /// kept in [phoneError] for the Phone & iPad card.
+  Future<void> setPhoneListener(bool on) async {
+    if (!on) {
+      await _phoneServer?.close(force: true);
+      _phoneServer = null;
+      return;
+    }
+    if (_phoneServer != null) return;
+    final handler = _withWeb((req) => _handle(req, fromPhone: true));
+    try {
+      // IPv6 and IPv4 together where the computer has both
+      _phoneServer = await shelf_io.serve(handler, InternetAddress.anyIPv6, config.phonePort);
+      phoneError = '';
+    } on SocketException {
+      try {
+        _phoneServer = await shelf_io.serve(handler, InternetAddress.anyIPv4, config.phonePort);
+        phoneError = '';
+      } on SocketException catch (e) {
+        phoneError = "Port ${config.phonePort} can't be used (${e.osError?.message ?? e.message})";
+      }
+    }
   }
 
   Future<void> stop() async {
     _tick?.cancel();
     await dmx.stopAll();
+    await _phoneServer?.close(force: true);
     await _server?.close(force: true);
   }
 
-  Future<Response> _handle(Request req) async {
+  /// Serves the built web UI next to the API, when there is one. The UI's
+  /// files need no key: a phone has to load them to show the pairing screen.
+  Handler _withWeb(Handler api) {
+    final web = config.webDir;
+    if (web == null || !Directory(web).existsSync()) return api;
+    final files = createStaticHandler(web, defaultDocument: 'index.html');
+    return (req) => req.url.path.startsWith('api/') ? api(req) : files(req);
+  }
+
+  static const _pairPath = '/api/phone/pair';
+
+  Future<Response> _handle(Request req, {required bool fromPhone}) async {
     final path = '/${req.url.path}';
+    if (path == _pairPath) return _pair(req, fromPhone: fromPhone);
     final route = api.find(path);
     if (route == null) return _json({'ok': false, 'error': 'Unknown action.', 'out': ''}, 404);
-    final key = req.headers['x-sx-token'] ?? req.url.queryParameters['t'] ?? '';
-    final fromPhone = key != config.token;
-    if (fromPhone && !phoneKeys.contains(key)) return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
-    if (fromPhone && !route.phone) return _json({'ok': false, 'error': 'Only on the laptop.', 'out': ''}, 403);
+    final key = req.headers['x-sx-token'] ?? '';
+    if (fromPhone) {
+      // A phone's own key only. The laptop's token means nothing on this port.
+      if (phones.check(key, ip: _ip(req)) == null) return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
+      if (!route.phone) return _json({'ok': false, 'error': 'Only on the laptop.', 'out': ''}, 403);
+    } else if (!sameSecret(key.isEmpty ? req.url.queryParameters['t'] ?? '' : key, config.token)) {
+      return _json({'ok': false, 'error': 'Not paired with this laptop.', 'out': ''}, 401);
+    }
     if (req.method != route.method) return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
+    if (fromPhone && (req.contentLength ?? 0) > 4000000) return _json({'ok': false, 'error': 'Too big.', 'out': ''}, 413);
 
     var body = const <String, Object?>{};
     if (req.method == 'POST') {
@@ -123,6 +192,37 @@ class Engine {
     }
     if (route.queue != null && sx.running) return _json(queue.add(route, body));
     return _json(await runRoute(route, ApiRequest(body: body, query: req.url.queryParameters, fromPhone: fromPhone)));
+  }
+
+  /// `/api/phone/pair`: the one call a phone may make without a key.
+  Future<Response> _pair(Request req, {required bool fromPhone}) async {
+    if (req.method != 'POST') return _json({'ok': false, 'error': 'Wrong method.', 'out': ''}, 405);
+    if (!fromPhone) return _json({'ok': false, 'error': 'Pairing is for phones.'});
+    if ((req.contentLength ?? 0) > 10000) return _json({'ok': false, 'error': 'Too big.', 'out': ''}, 413);
+    var code = '';
+    try {
+      final j = jsonDecode(await req.readAsString());
+      if (j is Map) code = '${j['pin'] ?? ''}';
+    } on FormatException {
+      code = '';
+    }
+    try {
+      final key = phones.pair(code, name: phoneName(req.headers['user-agent'] ?? ''));
+      phones.check(key, ip: _ip(req));
+      return _json({'ok': true, 'key': key});
+    } on PairRefused catch (e) {
+      // a wrong code answers slowly, so guessing takes longer
+      if (e.wrongCode) await Future<void>.delayed(const Duration(milliseconds: 600));
+      return _json({'ok': false, 'error': e.message});
+    }
+  }
+
+  String _ip(Request req) {
+    final info = req.context['shelf.io.connection_info'];
+    if (info is! HttpConnectionInfo) return '';
+    final a = info.remoteAddress;
+    // an IPv4 phone on the IPv6 listener shows as ::ffff:a.b.c.d
+    return a.address.startsWith('::ffff:') ? a.address.substring(7) : a.address;
   }
 
   Response _json(Object? value, [int status = 200]) =>

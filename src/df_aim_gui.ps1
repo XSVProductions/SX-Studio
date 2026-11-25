@@ -1217,7 +1217,7 @@ $phoneNever = @('/api/update/install', '/api/phone', '/api/phone/set', '/api/pho
 # on another web page can't set it off (a phone's key is a cookie, and the phone sends it along when such a link is opened)
 $getOk = @('/', '/icon.png', '/brand.png', '/logo.png', '/mark.png', '/fonts/saira.woff2', '/fonts/orbitron.woff2',
   '/api/phone', '/api/sx', '/api/remote', '/api/auto', '/api/auto/status', '/api/lab', '/api/lab/status', '/api/settings', '/api/update',
-  '/api/preview', '/api/color', '/api/gdrive', '/api/skip', '/api/rig', '/api/apc', '/api/speed', '/api/health', '/api/rt', '/api/pre',
+  '/api/preview', '/api/color', '/api/gdrive', '/api/skip', '/api/rig', '/api/apc', '/api/apc40', '/api/apc40/status', '/api/speed', '/api/health', '/api/rt', '/api/pre',
   '/api/scenes', '/api/scene', '/api/scene/backups', '/api/moves', '/api/move', '/api/move/backups', '/api/looks')
 if ($script:ph.on) { Start-PhoneRelay }
 

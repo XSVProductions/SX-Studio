@@ -117,38 +117,6 @@ class _Scan {
   final int scenes;
 }
 
-/// Sorts like PowerShell's `Sort-Object` on text: case ignored, and
-/// punctuation before digits before letters, in the order .NET's culture
-/// rules put them (`_ - , ; : ! ? . ' " ( ) [ ] { } @ * / \ & # % ` ^ + < = > | ~ $`).
-int psTextCompare(String a, String b) {
-  const punct = '\t\n\v\f\r _-,;:!?.\'"()[]{}@*/\\&#%`^+<=>|~\$';
-  int weight(int c) {
-    final i = punct.indexOf(String.fromCharCode(c));
-    if (i >= 0) return i;
-    if (c >= 0x30 && c <= 0x39) return 100 + c;
-    if (c >= 0x61 && c <= 0x7a) return 200 + c;
-    if (c >= 0x41 && c <= 0x5a) return 200 + c + 32;
-    return 1000 + c;
-  }
-
-  final n = min(a.length, b.length);
-  for (var i = 0; i < n; i++) {
-    final d = weight(a.codeUnitAt(i)) - weight(b.codeUnitAt(i));
-    if (d != 0) return d;
-  }
-  return a.length - b.length;
-}
-
-/// A text key for [psSorted] that compares like [psTextCompare].
-class _PsText implements Comparable<_PsText> {
-  _PsText(this.s);
-
-  final String s;
-
-  @override
-  int compareTo(_PsText other) => psTextCompare(s, other.s);
-}
-
 /// Groups [items] by a text key that ignores case. Like a PowerShell
 /// hashtable, each group keeps the key as it was first seen.
 Map<String, (String, List<T>)> _groupBy<T>(Iterable<T> items, String Function(T) keyOf) {
@@ -294,7 +262,7 @@ _Scan _scanShow(ShowEnv env) {
     final n = iniInt(k['trigger_midi_note']), t = iniInt(k['trigger_midi_type'], 0);
     if (t != 0 || n < 0 || n > 63) {
       final midiKey = RegExp(r'^trigger_midi(out)?_', caseSensitive: false);
-      final keys = psSorted<String>(k.keys.where(midiKey.hasMatch), [(x) => _PsText(x)]);
+      final keys = psSorted<String>(k.keys.where(midiKey.hasMatch), [(x) => PsText(x)]);
       add(
         'warn',
         'midi',
@@ -317,7 +285,7 @@ _Scan _scanShow(ShowEnv env) {
       );
     }
   }
-  for (final key in psSorted<String>(byNote.keys, [(x) => _PsText(x)])) {
+  for (final key in psSorted<String>(byNote.keys, [(x) => PsText(x)])) {
     final bs = psSorted<LiveButton>(byNote[key]!, [(b) => b.page, (b) => iniInt(b.keys['line'], 0), (b) => iniInt(b.keys['column'], 0)]);
     if (bs.length < 2) continue;
     final n = int.parse(key.split('/')[2]);
@@ -508,7 +476,7 @@ _Scan _scanShow(ShowEnv env) {
     }
   }
   if (unused.isNotEmpty) {
-    add('info', 'unused', "${unused.length} scenes aren't on any button", psSorted<String>(unused, [(x) => _PsText(x)]).join(', '));
+    add('info', 'unused', "${unused.length} scenes aren't on any button", psSorted<String>(unused, [(x) => PsText(x)]).join(', '));
   }
   return _Scan(info, issues, used.length);
 }
@@ -578,7 +546,7 @@ String _why(Object e) => e is FileSystemException ? '${e.message}: ${e.path}' : 
 HealthReport healthCheck(ShowEnv env) {
   final scan = _scanShow(env);
   const order = {'error': 0, 'warn': 1, 'info': 2};
-  final sorted = psSorted<_Issue>(scan.issues, [(i) => order[i.level]!, (i) => _PsText(i.kind), (i) => _PsText(i.title)]);
+  final sorted = psSorted<_Issue>(scan.issues, [(i) => order[i.level]!, (i) => PsText(i.kind), (i) => PsText(i.title)]);
   return HealthReport(
     show: env.root,
     buttons: scan.info.buttons.length,

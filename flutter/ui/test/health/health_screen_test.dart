@@ -91,4 +91,16 @@ void main() {
     expect(find.text('Fixes you applied (1)'), findsOneWidget);
     await end();
   });
+
+  testWidgets('reads the show again when ShowXpress closes', (t) async {
+    final c = Canned({
+      '/api/sx': [sxStatus(open: true), sxStatus()],
+      '/api/health': _report(),
+    });
+    final (app, end) = await pumpScreen(t, c, HealthScreen.new, tab: 'health');
+    expect(c.gets.where((g) => g == '/api/health'), hasLength(1));
+    await poll(t, app);
+    expect(c.gets.where((g) => g == '/api/health'), hasLength(2));
+    await end();
+  });
 }

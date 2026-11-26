@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import 'hover.dart';
 import 'rig_widgets.dart';
 
 /// Tonight's Rig: which movers are hung tonight, and which heads SX Studio
@@ -128,185 +130,186 @@ class _RigScreenState extends State<RigScreen> with ShowWatcher, RigReloads {
         ],
       ),
       children: [
-        SxCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              RigHeader(
-                "Tonight's rig",
-                sub:
-                    'Tap the movers that are hung tonight. Every chase scene (CHASE, SKIP AROUND, the BEAT scenes, SKIP FLASH...) drops the steps that would be dark without them, so nothing stutters. Tick them all again to put every scene back.',
-                dirty: d == null ? null : dirty,
-                onRefresh: load,
+        SxListCard(
+          stretch: true,
+          children: [
+            RigHeader(
+              "Tonight's rig",
+              sub:
+                  'Tap the movers that are hung tonight. Every chase scene (CHASE, SKIP AROUND, the BEAT scenes, SKIP FLASH...) drops the steps that would be dark without them, so nothing stutters. Tick them all again to put every scene back.',
+              dirty: d == null ? null : dirty,
+              onRefresh: load,
+            ),
+            ErrorBox(_error),
+            if (d == null && _error.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 14),
+                child: Text('Reading the show.', style: Sx.sub),
               ),
-              ErrorBox(_error),
-              if (d == null && _error.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Text('Reading the show.', style: Sx.sub),
-                ),
-              if (d != null) ...[_group(d, true), _group(d, false)],
-            ],
-          ),
+            if (d != null) ...[..._group(d, true), ..._group(d, false)],
+          ],
         ),
         if (d != null) ...[
-          SxCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Reversed heads', style: Sx.title),
-                const SizedBox(height: 4),
-                Text.rich(
-                  TextSpan(
-                    style: Sx.sub,
-                    children: [
-                      const TextSpan(
-                        text: "Use this instead of Pan / Tilt Reverse in a fixture's own menu. A head hung so it moves the same way as its partner? Tap ",
-                      ),
-                      TextSpan(text: 'pan', style: b),
-                      const TextSpan(text: ' (or '),
-                      TextSpan(text: 'tilt', style: b),
-                      const TextSpan(
-                        text:
-                            ') on it: every scene and movement in the show is flipped for that head, exactly what the fixture\'s menu does. Tap again to put it back. Leave the fixture\'s own menu as it is, and set this ',
-                      ),
-                      TextSpan(text: 'before', style: b),
-                      const TextSpan(text: ' you aim the movers.'),
-                    ],
-                  ),
+          SxListCard(
+            stretch: true,
+            children: [
+              Text('Reversed heads', style: Sx.title),
+              const SizedBox(height: 4),
+              Text.rich(
+                TextSpan(
+                  style: Sx.sub,
+                  children: [
+                    const TextSpan(
+                      text: "Use this instead of Pan / Tilt Reverse in a fixture's own menu. A head hung so it moves the same way as its partner? Tap ",
+                    ),
+                    TextSpan(text: 'pan', style: b),
+                    const TextSpan(text: ' (or '),
+                    TextSpan(text: 'tilt', style: b),
+                    const TextSpan(
+                      text:
+                          ') on it: every scene and movement in the show is flipped for that head, exactly what the fixture\'s menu does. Tap again to put it back. Leave the fixture\'s own menu as it is, and set this ',
+                    ),
+                    TextSpan(text: 'before', style: b),
+                    const TextSpan(text: ' you aim the movers.'),
+                  ],
                 ),
-                _flipGroup(d, true),
-                _flipGroup(d, false),
-              ],
-            ),
+              ),
+              ..._flipGroup(d, true),
+              ..._flipGroup(d, false),
+            ],
           ),
-          SxCard(child: _scenes(d, b)),
+          SxListCard(stretch: true, children: _scenes(d, b)),
         ],
       ],
     );
   }
 
-  Widget _group(RigPreview d, bool is140) {
-    final hs = d.heads.where((h) => h.is140 == is140).toList();
-    if (hs.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        HeadGroupHeader(
-          is140 ? '140SR' : '251SR',
-          '${hs.where((h) => _hung.contains(h.id)).length} of ${hs.length} hung',
-          onAll: () => _edit(() => _hung.addAll(hs.map((h) => h.id))),
-          onNone: () => _edit(() => _hung.removeAll(hs.map((h) => h.id))),
+  /// [tiles] cut into rows of equal columns, the old `.heads` grid: 8 across,
+  /// 4 on a narrow screen. One child per row, so the card builds only the
+  /// rows on screen.
+  List<Widget> _rows(List<Widget> tiles) {
+    final cols = rigNarrow(context) ? 4 : 8;
+    final g = MediaQuery.sizeOf(context).width <= 640 ? 6.0 : 8.0;
+    return [
+      for (var i = 0; i < tiles.length; i += cols)
+        Padding(
+          padding: EdgeInsets.only(top: i == 0 ? 0 : g),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (var k = 0; k < cols; k++) ...[if (k > 0) SizedBox(width: g), Expanded(child: i + k < tiles.length ? tiles[i + k] : const SizedBox())],
+            ],
+          ),
         ),
-        HeadGrid(
-          children: [
-            for (final h in hs)
-              HeadTile(
-                title: '#${h.num}',
-                sub: _hung.contains(h.id) ? 'hung' : 'not here',
-                on: _hung.contains(h.id),
-                changed: _hung.contains(h.id) != h.on,
-                onTap: () => _edit(() => _hung.contains(h.id) ? _hung.remove(h.id) : _hung.add(h.id)),
-              ),
-          ],
-        ),
-      ],
-    );
+    ];
   }
 
-  Widget _flipGroup(RigPreview d, bool is140) {
+  List<Widget> _group(RigPreview d, bool is140) {
     final hs = d.heads.where((h) => h.is140 == is140).toList();
-    if (hs.isEmpty) return const SizedBox.shrink();
+    if (hs.isEmpty) return const [];
+    return [
+      HeadGroupHeader(
+        is140 ? '140SR' : '251SR',
+        '${hs.where((h) => _hung.contains(h.id)).length} of ${hs.length} hung',
+        onAll: () => _edit(() => _hung.addAll(hs.map((h) => h.id))),
+        onNone: () => _edit(() => _hung.removeAll(hs.map((h) => h.id))),
+      ),
+      ..._rows([
+        for (final h in hs)
+          HeadTile(
+            title: '#${h.num}',
+            sub: _hung.contains(h.id) ? 'hung' : 'not here',
+            on: _hung.contains(h.id),
+            changed: _hung.contains(h.id) != h.on,
+            onTap: () => _edit(() => _hung.contains(h.id) ? _hung.remove(h.id) : _hung.add(h.id)),
+          ),
+      ]),
+    ];
+  }
+
+  List<Widget> _flipGroup(RigPreview d, bool is140) {
+    final hs = d.heads.where((h) => h.is140 == is140).toList();
+    if (hs.isEmpty) return const [];
     final n = hs.where((h) => (_flip[h.id]?.pan ?? false) || (_flip[h.id]?.tilt ?? false)).length;
     void toggle(String id, bool pan) => _edit(() {
       final f = _flip[id] ?? (pan: false, tilt: false);
       _flip[id] = pan ? (pan: !f.pan, tilt: f.tilt) : (pan: f.pan, tilt: !f.tilt);
     });
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        HeadGroupHeader(is140 ? '140SR' : '251SR', n > 0 ? '$n reversed' : 'none reversed'),
-        HeadGrid(
-          children: [
-            for (final h in hs)
-              () {
-                final f = _flip[h.id] ?? (pan: false, tilt: false);
-                return HeadTile(
-                  title: '#${h.num}',
-                  on: f.pan || f.tilt,
-                  changed: _flipChanged(h),
-                  blue: true,
-                  extra: Wrap(
-                    alignment: WrapAlignment.center,
-                    children: [
-                      _Axis('pan', Icons.swap_horiz, 'Reverse pan (left / right)', f.pan, () => toggle(h.id, true)),
-                      _Axis('tilt', Icons.swap_vert, 'Reverse tilt (up / down)', f.tilt, () => toggle(h.id, false)),
-                    ],
-                  ),
-                );
-              }(),
-          ],
-        ),
-      ],
-    );
+    return [
+      HeadGroupHeader(is140 ? '140SR' : '251SR', n > 0 ? '$n reversed' : 'none reversed'),
+      ..._rows([
+        for (final h in hs)
+          () {
+            final f = _flip[h.id] ?? (pan: false, tilt: false);
+            return HeadTile(
+              title: '#${h.num}',
+              on: f.pan || f.tilt,
+              changed: _flipChanged(h),
+              blue: true,
+              extra: Wrap(
+                alignment: WrapAlignment.center,
+                children: [
+                  _Axis('pan', Icons.swap_horiz, 'Reverse pan (left / right)', f.pan, () => toggle(h.id, true)),
+                  _Axis('tilt', Icons.swap_vert, 'Reverse tilt (up / down)', f.tilt, () => toggle(h.id, false)),
+                ],
+              ),
+            );
+          }(),
+      ]),
+    ];
   }
 
-  Widget _scenes(RigPreview d, TextStyle b) {
+  /// The chase scenes card's rows: the heading, one row per scene, the legend.
+  List<Widget> _scenes(RigPreview d, TextStyle b) {
     final drops = [for (final s in d.scenes) s.dropFor(_hung)];
     final trimmed = drops.where((x) => x != null && x.isNotEmpty).length;
     WidgetSpan sw(Widget box) => WidgetSpan(
       alignment: PlaceholderAlignment.middle,
       child: Padding(padding: const EdgeInsets.only(right: 4), child: box),
     );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: double.infinity,
-          child: Wrap(
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            runSpacing: 4,
-            children: [
-              Text('Chase scenes', style: Sx.title),
-              Text.rich(
-                TextSpan(
-                  style: TextStyle(color: Sx.dim, fontSize: 13),
-                  children: [
-                    TextSpan(text: '${d.scenes.length}', style: b),
-                    const TextSpan(text: ' chase scenes · '),
-                    TextSpan(text: '$trimmed', style: b),
-                    const TextSpan(text: ' trimmed for this rig'),
-                  ],
-                ),
-              ),
-            ],
+    return [
+      Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        runSpacing: 4,
+        children: [
+          Text('Chase scenes', style: Sx.title),
+          Text.rich(
+            TextSpan(
+              style: TextStyle(color: Sx.dim, fontSize: 13),
+              children: [
+                TextSpan(text: '${d.scenes.length}', style: b),
+                const TextSpan(text: ' chase scenes · '),
+                TextSpan(text: '$trimmed', style: b),
+                const TextSpan(text: ' trimmed for this rig'),
+              ],
+            ),
           ),
+        ],
+      ),
+      const SizedBox(height: 10),
+      if (d.scenes.isEmpty) Text('No chase scenes found on your live buttons.', style: Sx.sub),
+      for (final (i, s) in d.scenes.indexed) Padding(padding: const EdgeInsets.only(bottom: 6), child: _SceneRow(s, drops[i])),
+      const SizedBox(height: 4),
+      Text.rich(
+        TextSpan(
+          style: Sx.sub,
+          children: [
+            sw(_Swatch(Sx.accent)),
+            const TextSpan(text: 'movers lit   '),
+            sw(_Swatch(Sx.blue)),
+            const TextSpan(text: 'blinder / uplight only   '),
+            sw(_Swatch(Sx.tabOn)),
+            const TextSpan(text: 'dark   '),
+            sw(DashedBox(color: Sx.red, child: const SizedBox(width: 12, height: 12))),
+            const TextSpan(
+              text:
+                  'taken out tonight. Only whole steps are taken out. Colors and timing stay as they are. A step that also lights a blinder or uplight is always kept.',
+            ),
+          ],
         ),
-        const SizedBox(height: 10),
-        if (d.scenes.isEmpty) Text('No chase scenes found on your live buttons.', style: Sx.sub),
-        for (final (i, s) in d.scenes.indexed) Padding(padding: const EdgeInsets.only(bottom: 6), child: _SceneRow(s, drops[i])),
-        const SizedBox(height: 4),
-        Text.rich(
-          TextSpan(
-            style: Sx.sub,
-            children: [
-              sw(_Swatch(Sx.accent)),
-              const TextSpan(text: 'movers lit   '),
-              sw(_Swatch(Sx.blue)),
-              const TextSpan(text: 'blinder / uplight only   '),
-              sw(_Swatch(Sx.tabOn)),
-              const TextSpan(text: 'dark   '),
-              sw(DashedBox(color: Sx.red, child: const SizedBox(width: 12, height: 12))),
-              const TextSpan(
-                text:
-                    'taken out tonight. Only whole steps are taken out. Colors and timing stay as they are. A step that also lights a blinder or uplight is always kept.',
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
+      ),
+    ];
   }
 }
 
@@ -323,12 +326,11 @@ class _Axis extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(2, 7, 2, 0),
-    child: Tooltip(
+    child: HoverTip(
       message: tip,
-      child: InkWell(
+      child: HoverTap(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
+        builder: (context, _) => Container(
           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
           decoration: BoxDecoration(
             color: on ? Sx.blue.withValues(alpha: .25) : null,
@@ -386,34 +388,7 @@ class _SceneRow extends StatelessWidget {
         if (others.isNotEmpty) Text('button: ${others.join(', ')}', style: TextStyle(color: Sx.dim, fontSize: 11.5)),
       ],
     );
-    final dots = Wrap(
-      spacing: 3,
-      runSpacing: 3,
-      children: [
-        for (final (i, st) in s.steps.indexed)
-          Tooltip(
-            message:
-                'step ${i + 1}: ${out.contains(i)
-                    ? 'taken out tonight'
-                    : st.lit.isNotEmpty
-                    ? '${st.lit.length} mover(s) lit'
-                    : st.other
-                    ? 'blinder / uplight only'
-                    : 'dark'}',
-            child: out.contains(i)
-                ? DashedBox(color: Sx.red, child: const SizedBox(width: 14, height: 14))
-                : _Swatch(
-                    st.lit.isNotEmpty
-                        ? Sx.accent
-                        : st.other
-                        ? Sx.blue
-                        : Sx.tabOn,
-                    size: 14,
-                    edge: false,
-                  ),
-          ),
-      ],
-    );
+    final dots = _Dots(s, out);
     final status = drop == null
         ? Text('none of its heads hung, kept complete', style: TextStyle(color: Sx.amber, fontSize: 12))
         : Text.rich(
@@ -455,7 +430,7 @@ class _Tag extends StatelessWidget {
   final String tip;
 
   @override
-  Widget build(BuildContext context) => Tooltip(
+  Widget build(BuildContext context) => HoverTip(
     message: tip,
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
@@ -471,24 +446,96 @@ class _Tag extends StatelessWidget {
   );
 }
 
-/// A filled square: a step in a scene's row of dots, or a legend swatch.
+/// A legend swatch, the old `.sw`: a filled square with a faint outline.
 class _Swatch extends StatelessWidget {
-  const _Swatch(this.color, {this.size = 12, this.edge = true});
+  const _Swatch(this.color);
 
   final Color color;
-  final double size;
-
-  /// The legend's faint outline (`.sw`). The step dots have none.
-  final bool edge;
 
   @override
   Widget build(BuildContext context) => Container(
-    width: size,
-    height: size,
+    width: 12,
+    height: 12,
     decoration: BoxDecoration(
       color: color,
-      border: edge ? Border.all(color: Sx.text.withValues(alpha: .2)) : null,
+      border: Border.all(color: Sx.text.withValues(alpha: .2)),
       borderRadius: BorderRadius.circular(3),
     ),
   );
+}
+
+/// A scene's steps as a row of squares that wraps, the old `.sc` dots: lit
+/// movers, a blinder or uplight only, dark, or dashed red when taken out
+/// tonight. One painter for the whole row, with the step's tip under the
+/// mouse, where a widget and a tooltip per step was 15 widgets a step.
+class _Dots extends StatelessWidget {
+  const _Dots(this.s, this.out);
+
+  final RigScene s;
+  final Set<int> out;
+
+  static const _size = 14.0, _gap = 3.0;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) {
+      final n = s.steps.length;
+      final per = c.maxWidth.isFinite ? ((c.maxWidth + _gap) / (_size + _gap)).floor().clamp(1, n == 0 ? 1 : n) : n;
+      final rows = n == 0 ? 0 : (n / per).ceil();
+      final size = Size(n == 0 ? 0 : per * (_size + _gap) - _gap, rows == 0 ? 0 : rows * (_size + _gap) - _gap);
+      String? tip(Offset p) {
+        final col = (p.dx / (_size + _gap)).floor(), row = (p.dy / (_size + _gap)).floor();
+        // the gaps between squares say nothing
+        if (col < 0 || col >= per || row < 0 || p.dx - col * (_size + _gap) > _size || p.dy - row * (_size + _gap) > _size) return null;
+        final i = row * per + col;
+        if (i >= n) return null;
+        final st = s.steps[i];
+        return 'step ${i + 1}: ${out.contains(i)
+            ? 'taken out tonight'
+            : st.lit.isNotEmpty
+            ? '${st.lit.length} mover(s) lit'
+            : st.other
+            ? 'blinder / uplight only'
+            : 'dark'}';
+      }
+
+      return HoverTip.at(
+        messageAt: tip,
+        child: CustomPaint(size: size, painter: _DotsPainter(s, out, per, Sx.isLight)),
+      );
+    },
+  );
+}
+
+class _DotsPainter extends CustomPainter {
+  _DotsPainter(this.s, this.out, this.per, this.light);
+
+  final RigScene s;
+  final Set<int> out;
+  final int per;
+
+  /// The theme it was painted in, so a theme switch repaints.
+  final bool light;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const step = _Dots._size + _Dots._gap;
+    final fill = Paint();
+    for (final (i, st) in s.steps.indexed) {
+      final r = RRect.fromRectAndRadius(Rect.fromLTWH(i % per * step, i ~/ per * step, _Dots._size, _Dots._size), const Radius.circular(3));
+      if (out.contains(i)) {
+        paintDashes(canvas, r.deflate(.5), Sx.red);
+        continue;
+      }
+      fill.color = st.lit.isNotEmpty
+          ? Sx.accent
+          : st.other
+          ? Sx.blue
+          : Sx.tabOn;
+      canvas.drawRRect(r, fill);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DotsPainter o) => !identical(o.s, s) || o.per != per || o.light != light || !setEquals(o.out, out);
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import 'hover.dart';
 
 // Pieces shared by Tonight's Rig, Strobe and Rig Test.
 
@@ -33,14 +34,19 @@ class HeadTile extends StatelessWidget {
     return Semantics(
       button: onTap != null,
       selected: on,
-      child: InkWell(
+      child: HoverTap(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
+        builder: (context, hover) => Container(
           padding: blue ? const EdgeInsets.fromLTRB(2, 10, 2, 8) : EdgeInsets.fromLTRB(2, phone ? 11 : 12, 2, phone ? 9 : 10),
           decoration: BoxDecoration(
             color: on ? onColor.withValues(alpha: blue ? .12 : .13) : Sx.panel,
-            border: Border.all(color: on ? onColor : Sx.line),
+            border: Border.all(
+              color: on
+                  ? onColor
+                  : hover
+                  ? Sx.line2
+                  : Sx.line,
+            ),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Stack(
@@ -72,7 +78,7 @@ class HeadTile extends StatelessWidget {
                 Positioned(
                   top: -5,
                   right: 6,
-                  child: Tooltip(
+                  child: HoverTip(
                     message: 'changed - not saved yet',
                     child: Container(
                       width: 7,
@@ -242,6 +248,19 @@ class DashedBox extends StatelessWidget {
   );
 }
 
+/// Draws [r]'s outline dashed, 3 px on and 3 off, 1 px wide.
+void paintDashes(Canvas canvas, RRect r, Color color) {
+  final pen = Paint()
+    ..color = color
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 1;
+  for (final m in (Path()..addRRect(r)).computeMetrics()) {
+    for (var d = 0.0; d < m.length; d += 6) {
+      canvas.drawPath(m.extractPath(d, d + 3), pen);
+    }
+  }
+}
+
 class _Dashes extends CustomPainter {
   _Dashes(this.color, this.radius, this.fill);
 
@@ -253,15 +272,7 @@ class _Dashes extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final r = RRect.fromRectAndRadius((Offset.zero & size).deflate(.5), Radius.circular(radius));
     if (fill != null) canvas.drawRRect(r, Paint()..color = fill!);
-    final pen = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (final m in (Path()..addRRect(r)).computeMetrics()) {
-      for (var d = 0.0; d < m.length; d += 6) {
-        canvas.drawPath(m.extractPath(d, d + 3), pen);
-      }
-    }
+    paintDashes(canvas, r, color);
   }
 
   @override

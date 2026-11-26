@@ -15,8 +15,30 @@ import 'update_card.dart';
 /// Settings (the cogwheel, `#v-settings`): light or dark, the tabs, Google
 /// Drive, phones and tablets, ShowXpress and updates. A phone sees the look,
 /// the tabs and Google Drive. Every change saves straight away.
-class SettingsScreen extends StatelessWidget {
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+/// Holds the tab rows' name fields, so a name being typed survives its row
+/// scrolling away. The Tabs card is a lazy list, one row per tab.
+class _SettingsScreenState extends State<SettingsScreen> {
+  final _names = <String, TextEditingController>{};
+  final _focus = <String, FocusNode>{};
+  var _tabsError = '';
+
+  @override
+  void dispose() {
+    for (final c in _names.values) {
+      c.dispose();
+    }
+    for (final f in _focus.values) {
+      f.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +83,7 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           if (m.loaded) ...[
-            _TabsCard(m),
+            _tabsCard(m),
             const DriveCard(),
             if (!m.phone) ...[const PhoneCard(), _SxCard(m), const UpdateCard(), const ConfigCard()],
           ],
@@ -69,144 +91,109 @@ class SettingsScreen extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Order, show or hide, and rename the tabs (`#stabs`).
-class _TabsCard extends StatefulWidget {
-  const _TabsCard(this.m);
+  // The Tabs card (`#stabs`): order, show or hide, and rename the tabs.
 
-  final SettingsModel m;
-
-  @override
-  State<_TabsCard> createState() => _TabsCardState();
-}
-
-class _TabsCardState extends State<_TabsCard> {
-  final _names = <String, TextEditingController>{};
-  final _focus = <String, FocusNode>{};
-  var _error = '';
-
-  SettingsModel get m => widget.m;
-
-  @override
-  void dispose() {
-    for (final c in _names.values) {
-      c.dispose();
-    }
-    for (final f in _focus.values) {
-      f.dispose();
-    }
-    super.dispose();
-  }
-
-  Future<void> _save(SettingsChange change) async {
+  Future<void> _save(SettingsModel m, SettingsChange change) async {
     final err = await m.save(change);
-    if (mounted) setState(() => _error = err);
+    if (mounted) setState(() => _tabsError = err);
   }
 
-  List<String> get _order => [for (final t in m.ordered()) t.id];
+  List<String> _order(SettingsModel m) => [for (final t in m.ordered()) t.id];
 
-  List<String> get _hidden => [
+  List<String> _hidden(SettingsModel m) => [
     for (final t in m.ordered())
       if (m.hidden(t)) t.id,
   ];
 
-  void _move(int i, int by) {
-    final ids = _order;
+  void _move(SettingsModel m, int i, int by) {
+    final ids = _order(m);
     final a = ids[i];
     ids[i] = ids[i + by];
     ids[i + by] = a;
-    _save(SettingsChange(tabOrder: ids, tabHidden: _hidden));
+    _save(m, SettingsChange(tabOrder: ids, tabHidden: _hidden(m)));
   }
 
-  void _show(TabDef t, bool on) => _save(SettingsChange(tabOrder: _order, tabHidden: on ? [..._hidden.where((id) => id != t.id)] : [..._hidden, t.id]));
+  void _show(SettingsModel m, TabDef t, bool on) =>
+      _save(m, SettingsChange(tabOrder: _order(m), tabHidden: on ? [..._hidden(m).where((id) => id != t.id)] : [..._hidden(m), t.id]));
 
   /// Every typed name that differs from the tab's own, cleaned like the old
   /// page (`namesNow`).
-  void _rename() {
+  void _rename(SettingsModel m) {
     final names = <String, String>{};
     for (final t in tabs) {
       var v = (_names[t.id]?.text ?? '').replaceAll(RegExp('[<>]'), '').trim();
       if (v.length > 24) v = v.substring(0, 24);
       if (v.isNotEmpty && v != t.name) names[t.id] = v;
     }
-    _save(SettingsChange(tabOrder: _order, tabHidden: _hidden, tabNames: names));
+    _save(m, SettingsChange(tabOrder: _order(m), tabHidden: _hidden(m), tabNames: names));
   }
 
-  Future<void> _reset() async {
+  Future<void> _reset(SettingsModel m) async {
     if (m.settings.tabNames.isNotEmpty &&
         !await confirm(context, 'Reset the tabs?', 'Every tab gets its first place and name back, and hidden tabs show again.', 'Reset')) {
       return;
     }
-    await _save(SettingsChange(tabOrder: [for (final t in tabs) t.id], tabHidden: const [], tabNames: const {}));
+    await _save(m, SettingsChange(tabOrder: [for (final t in tabs) t.id], tabHidden: const [], tabNames: const {}));
   }
 
-  @override
-  Widget build(BuildContext context) {
+  /// The card's heading, then a row per menu name and per tab.
+  SxListCard _tabsCard(SettingsModel m) {
     final order = m.ordered();
-    final rows = <Widget>[];
-    for (final (i, t) in order.indexed) {
-      final first = i == 0 || order[i - 1].group != t.group;
-      final last = i == order.length - 1 || order[i + 1].group != t.group;
-      if (first) {
-        rows.add(
-          Padding(
-            padding: EdgeInsets.fromLTRB(2, i == 0 ? 0 : 10, 2, 0),
-            child: Text(
-              t.group.title.toUpperCase(),
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.3, color: Sx.mute),
+    // the rows are at most 520 wide, with 6 under each
+    Widget line(Widget child) => ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 520),
+      child: Padding(padding: const EdgeInsets.only(bottom: 6), child: child),
+    );
+    return SxListCard(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SetTitle('Tabs'),
+                  const SizedBox(height: 4),
+                  Text(
+                    'The tabs are in four menus along the top. Use the arrows to change the order in a menu, and type a new name to rename a tab '
+                    '(Enter to keep it, empty gives it its own name back). Untick a tab to hide it (it leaves the Home page too).',
+                    style: Sx.sub,
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      }
-      rows.add(_row(i, t, first: first, last: last));
-    }
-    return SxCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SetTitle('Tabs'),
-                    const SizedBox(height: 4),
-                    Text(
-                      'The tabs are in four menus along the top. Use the arrows to change the order in a menu, and type a new name to rename a tab '
-                      '(Enter to keep it, empty gives it its own name back). Untick a tab to hide it (it leaves the Home page too).',
-                      style: Sx.sub,
-                    ),
-                  ],
+            const SizedBox(width: 10),
+            MiniButton('Reset', onPressed: () => _reset(m)),
+          ],
+        ),
+        ErrorBox(_tabsError),
+        const SizedBox(height: 12),
+        for (final (i, t) in order.indexed) ...[
+          if (i == 0 || order[i - 1].group != t.group)
+            line(
+              Padding(
+                padding: EdgeInsets.fromLTRB(2, i == 0 ? 0 : 10, 2, 0),
+                child: Text(
+                  t.group.title.toUpperCase(),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 1.3, color: Sx.mute),
                 ),
               ),
-              const SizedBox(width: 10),
-              MiniButton('Reset', onPressed: _reset),
-            ],
-          ),
-          ErrorBox(_error),
-          const SizedBox(height: 12),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [for (final r in rows) Padding(padding: const EdgeInsets.only(bottom: 6), child: r)],
             ),
-          ),
+          line(_row(m, i, t, first: i == 0 || order[i - 1].group != t.group, last: i == order.length - 1 || order[i + 1].group != t.group)),
         ],
-      ),
+      ],
     );
   }
 
   /// One tab, the old `.tabrow`.
-  Widget _row(int i, TabDef t, {required bool first, required bool last}) {
+  Widget _row(SettingsModel m, int i, TabDef t, {required bool first, required bool last}) {
     final c = _names.putIfAbsent(t.id, TextEditingController.new);
     final f = _focus.putIfAbsent(t.id, () {
       final node = FocusNode();
       node.addListener(() {
-        if (!node.hasFocus && _names[t.id]!.text.trim() != m.nameOf(t)) _rename();
+        if (!node.hasFocus && _names[t.id]!.text.trim() != m.nameOf(t)) _rename(m);
       });
       return node;
     });
@@ -233,7 +220,7 @@ class _TabsCardState extends State<_TabsCard> {
               value: !hidden,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
               visualDensity: VisualDensity.compact,
-              onChanged: (v) => _show(t, v ?? true),
+              onChanged: (v) => _show(m, t, v ?? true),
             ),
           ),
           const SizedBox(width: 8),
@@ -263,16 +250,18 @@ class _TabsCardState extends State<_TabsCard> {
               child: Text(t.name, style: TextStyle(color: Sx.mute, fontSize: 11.5)),
             ),
           const SizedBox(width: 8),
-          _Arrow(Icons.arrow_drop_up, 'Move up', first ? null : () => _move(i, -1)),
+          _Arrow(Icons.arrow_drop_up, 'Move up', first ? null : () => _move(m, i, -1)),
           const SizedBox(width: 4),
-          _Arrow(Icons.arrow_drop_down, 'Move down', last ? null : () => _move(i, 1)),
+          _Arrow(Icons.arrow_drop_down, 'Move down', last ? null : () => _move(m, i, 1)),
         ],
       ),
     );
   }
 }
 
-/// The small up and down buttons of a tab row (`.tabrow .mini`).
+/// The small up and down buttons of a tab row (`.tabrow .mini`). Drawn
+/// plainly: an `OutlinedButton` with a `Tooltip` is some 45 widgets, and
+/// there are two on every row. [tip] is for screen readers.
 class _Arrow extends StatelessWidget {
   const _Arrow(this.icon, this.tip, this.onPressed);
 
@@ -281,24 +270,29 @@ class _Arrow extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
-  Widget build(BuildContext context) => Tooltip(
-    message: tip,
-    child: OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        padding: EdgeInsets.zero,
-        minimumSize: const Size(32, 26),
-        fixedSize: const Size(32, 26),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: const StadiumBorder(),
-        backgroundColor: Sx.hover,
-        foregroundColor: Sx.text,
-        disabledForegroundColor: Sx.mute,
-        side: BorderSide(color: Sx.line),
+  Widget build(BuildContext context) {
+    final on = onPressed != null;
+    return MouseRegion(
+      cursor: on ? SystemMouseCursors.click : MouseCursor.defer,
+      child: GestureDetector(
+        onTap: onPressed,
+        child: Semantics(
+          button: true,
+          enabled: on,
+          label: tip,
+          child: Container(
+            width: 32,
+            height: 26,
+            decoration: ShapeDecoration(
+              color: on ? Sx.hover : null,
+              shape: StadiumBorder(side: BorderSide(color: Sx.line)),
+            ),
+            child: Icon(icon, size: 18, color: on ? Sx.text : Sx.mute),
+          ),
+        ),
       ),
-      child: Icon(icon, size: 18),
-    ),
-  );
+    );
+  }
 }
 
 /// After queued changes, open ShowXpress again; open the show folder.

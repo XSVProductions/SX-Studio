@@ -103,6 +103,7 @@ class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
     for (final b in shown) {
       pages.putIfAbsent(b.page, () => []).add(b);
     }
+    final names = {for (final f in d?.faders ?? const <MasterFader>[]) f.k: _faderName(f)};
 
     return ScreenBody(
       bar: SaveBar(
@@ -133,65 +134,62 @@ class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
         ],
       ),
       children: [
-        SxCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SxHeader(
-                'Speed faders',
-                sub: "Which master speed fader each button follows. Faders only change step timing, so 1-step scenes don't react.",
-                actions: [OutlinedButton(onPressed: _load, child: const Text('Refresh'))],
+        SxListCard(
+          children: [
+            SxHeader(
+              'Speed faders',
+              sub: "Which master speed fader each button follows. Faders only change step timing, so 1-step scenes don't react.",
+              actions: [OutlinedButton(onPressed: _load, child: const Text('Refresh'))],
+            ),
+            ErrorBox(_error),
+            if (d == null && _error.isEmpty)
+              Padding(
+                padding: EdgeInsets.only(top: 14),
+                child: Text('Reading the show.', style: Sx.sub),
               ),
-              ErrorBox(_error),
-              if (d == null && _error.isEmpty)
-                Padding(
-                  padding: EdgeInsets.only(top: 14),
-                  child: Text('Reading the show.', style: Sx.sub),
-                ),
-              if (d != null) ...[
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          for (final f in d.faders)
-                            _Chip(
-                              '${d.buttons.where((b) => _picked[b.sec] == f.k).length}  ${_faderName(f)}',
-                              on: _only == f.k,
-                              onTap: () => setState(() => _only = _only == f.k ? -1 : f.k),
-                            ),
-                        ],
-                      ),
+            if (d != null) ...[
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final f in d.faders)
+                          _Chip(
+                            '${d.buttons.where((b) => _picked[b.sec] == f.k).length}  ${_faderName(f)}',
+                            on: _only == f.k,
+                            onTap: () => setState(() => _only = _only == f.k ? -1 : f.k),
+                          ),
+                      ],
                     ),
-                    SizedBox(
-                      width: 220,
-                      child: TextField(
-                        decoration: const InputDecoration(hintText: 'Find a button'),
-                        onChanged: (v) => setState(() => _query = v),
-                      ),
-                    ),
-                  ],
-                ),
-                for (final buttons in pages.values) ...[
-                  GroupLabel(
-                    buttons.first.pageName,
-                    count: buttons.length,
-                    trailing: _FaderMenu(faders: d.faders, name: _faderName, hint: 'Set all on this page', onPick: (k) => _pick(buttons, k)),
                   ),
-                  for (final b in buttons) _row(d, b),
+                  SizedBox(
+                    width: 220,
+                    child: TextField(
+                      decoration: const InputDecoration(hintText: 'Find a button'),
+                      onChanged: (v) => setState(() => _query = v),
+                    ),
+                  ),
                 ],
+              ),
+              for (final buttons in pages.values) ...[
+                GroupLabel(
+                  buttons.first.pageName,
+                  count: buttons.length,
+                  trailing: _FaderMenu(names: names, hint: 'Set all on this page', onPick: (k) => _pick(buttons, k)),
+                ),
+                for (final b in buttons) _row(names, b),
               ],
             ],
-          ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _row(SpeedPreview d, SpeedButton b) {
+  Widget _row(Map<int, String> names, SpeedButton b) {
     final (info, warn) = _info(b);
     final isChanged = _picked[b.sec] != b.fader;
     return Container(
@@ -212,7 +210,7 @@ class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
             flex: 3,
             child: Text(info, style: TextStyle(fontSize: 13, color: warn ? Sx.amber : Sx.dim)),
           ),
-          _FaderMenu(faders: d.faders, name: _faderName, value: _picked[b.sec], onPick: (k) => _pick([b], k)),
+          _FaderMenu(names: names, value: _picked[b.sec], onPick: (k) => _pick([b], k)),
         ],
       ),
     );
@@ -222,10 +220,10 @@ class _SpeedScreenState extends State<SpeedScreen> with ShowWatcher {
 /// A fader dropdown. With [hint] it is an action ("Set all on this page")
 /// and shows no value.
 class _FaderMenu extends StatelessWidget {
-  const _FaderMenu({required this.faders, required this.name, required this.onPick, this.value, this.hint});
+  const _FaderMenu({required this.names, required this.onPick, this.value, this.hint});
 
-  final List<MasterFader> faders;
-  final String Function(MasterFader) name;
+  /// Each fader's number and name.
+  final Map<int, String> names;
   final ValueChanged<int> onPick;
   final int? value;
   final String? hint;
@@ -234,33 +232,13 @@ class _FaderMenu extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox(
     width: 200,
     height: 34,
-    child: DropdownButtonHideUnderline(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        decoration: BoxDecoration(
-          color: Sx.well,
-          border: Border.all(color: Sx.line),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: DropdownButton<int>(
-          isExpanded: true,
-          isDense: true,
-          dropdownColor: Sx.panel,
-          style: TextStyle(fontFamily: Sx.body, fontSize: 13.5, color: Sx.text),
-          value: hint == null && faders.any((f) => f.k == value) ? value : null,
-          hint: Text(hint ?? '', style: TextStyle(color: Sx.dim, fontSize: 13)),
-          items: [
-            for (final f in faders)
-              DropdownMenuItem(
-                value: f.k,
-                child: Text(name(f), overflow: TextOverflow.ellipsis),
-              ),
-          ],
-          onChanged: (k) {
-            if (k != null) onPick(k);
-          },
-        ),
-      ),
+    child: SxMenu<int>(
+      items: names,
+      value: hint == null ? value : null,
+      hint: hint ?? '',
+      onPick: onPick,
+      fontSize: 13.5,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
     ),
   );
 }

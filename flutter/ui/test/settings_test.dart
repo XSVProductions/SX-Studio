@@ -110,6 +110,7 @@ void main() {
     final engine = _Engine();
     await _pump(tester, engine);
     await tester.ensureVisible(find.text('Check now'));
+    await tester.pump();
     await tester.tap(find.text('Check now'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Update to 2.1.0'));

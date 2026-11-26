@@ -64,7 +64,7 @@ Future<(Map<String, Map<String, Object?>>, AppState)> _mount(
   final sh = show ?? (_Show()..sxOpen = sxOpen);
   SharedPreferences.setMockInitialValues({});
   tester.view
-    ..physicalSize = const Size(1300, 1000)
+    ..physicalSize = const Size(1300, 2000)
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final posts = <String, Map<String, Object?>>{};

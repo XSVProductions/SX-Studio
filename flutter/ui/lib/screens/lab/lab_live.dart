@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
@@ -82,6 +83,9 @@ class LabLive {
 
 /// One button on the board, the old page's `.lbb`. Rebuilds only when its
 /// own state changes.
+///
+/// A board has a hundred or more of these, so a tile is plain boxes and text:
+/// no clip, no intrinsic layout and no `Opacity` layer.
 class TileView extends StatefulWidget {
   const TileView({
     super.key,
@@ -90,6 +94,7 @@ class TileView extends StatefulWidget {
     required this.width,
     required this.idle,
     this.arranging = false,
+    this.dim = false,
     this.onTap,
     this.onMenu,
     this.onDelete,
@@ -102,6 +107,9 @@ class TileView extends StatefulWidget {
   /// The player isn't running.
   final bool idle;
   final bool arranging;
+
+  /// On a hidden page while arranging: faded like the page's heading.
+  final bool dim;
   final VoidCallback? onTap;
 
   /// Opens the button's menu at a screen position: right-click, or a long
@@ -120,121 +128,164 @@ class _TileViewState extends State<TileView> {
   var _down = false;
 
   @override
+  void initState() {
+    super.initState();
+    widget.state.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(TileView old) {
+    super.didUpdateWidget(old);
+    if (old.state == widget.state) return;
+    old.state.removeListener(_changed);
+    widget.state.addListener(_changed);
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() => setState(() {});
+
+  @override
   Widget build(BuildContext context) {
     final t = widget.tile;
-    // The button's own color from live.ini: show data, the same in both themes.
-    final own = t.color < 0 ? null : Color(0xFF000000 | (t.color & 0xFFFFFF));
-    return ValueListenableBuilder(
-      valueListenable: widget.state,
-      builder: (context, s, _) {
-        final on = s.on && !widget.arranging;
-        final hover = _hover && !t.missing && !widget.arranging;
-        final edge = on
-            ? Sx.green
-            : widget.arranging
-            ? Sx.line2
-            : hover
-            ? Sx.accent
-            : Sx.line;
-        final box = Container(
-          width: widget.width,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            color: on ? Sx.green.withValues(alpha: .09) : Sx.panel,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: edge),
-            // `box-shadow: 0 0 0 1px`: a second line around a playing button.
-            boxShadow: on ? [BoxShadow(color: Sx.green.withValues(alpha: .45), spreadRadius: 1)] : null,
-          ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Container(width: 4, color: own ?? (on ? Sx.green : (hover ? Sx.accent : Sx.line2))),
-                Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.fromLTRB(7, 9, widget.onDelete == null ? 11 : 26, 9),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          t.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Sx.text, height: 1.3),
-                        ),
-                        const SizedBox(height: 2),
-                        Text.rich(
-                          TextSpan(
-                            children: [
-                              if (on)
-                                WidgetSpan(
-                                  alignment: PlaceholderAlignment.middle,
-                                  child: Icon(Icons.play_arrow, size: 13, color: Sx.green),
-                                ),
-                              TextSpan(text: widget.arranging ? t.label : s.text),
-                            ],
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontSize: 11.5, color: on ? Sx.green : Sx.mute, fontWeight: on ? FontWeight.w600 : FontWeight.w400, height: 1.3),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-        final opacity = widget.arranging
+    final s = widget.state.value;
+    final on = s.on && !widget.arranging;
+    final hover = _hover && !t.missing && !widget.arranging;
+    // The old page's opacity on idle and missing buttons. Each color is
+    // blended over the card instead, which looks the same and needs no layer.
+    final fade =
+        (widget.arranging
             ? 1.0
             : t.missing
             ? (widget.idle ? .4 : .45)
-            : (widget.idle ? .85 : 1.0);
-        return Stack(
-          children: [
-            Opacity(
-              opacity: opacity,
-              child: widget.onTap == null && widget.onMenu == null
-                  ? box
-                  : MouseRegion(
-                      cursor: widget.onTap == null
-                          ? MouseCursor.defer
-                          : t.missing
-                          ? SystemMouseCursors.basic
-                          : SystemMouseCursors.click,
-                      onEnter: (_) => setState(() => _hover = true),
-                      onExit: (_) => setState(() => _hover = false),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: widget.onTap == null ? null : (_) => setState(() => _down = true),
-                        onTapUp: widget.onTap == null ? null : (_) => setState(() => _down = false),
-                        onTapCancel: widget.onTap == null ? null : () => setState(() => _down = false),
-                        onTap: widget.onTap,
-                        onSecondaryTapUp: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
-                        onLongPressStart: widget.onMenu == null || widget.onTap == null ? null : (d) => widget.onMenu!(d.globalPosition),
-                        // `.lbb:active{transform:scale(.97)}`
-                        child: Transform.scale(scale: _down ? .97 : 1, child: box),
-                      ),
-                    ),
-            ),
-            if (widget.onDelete != null)
-              Positioned(
-                top: 0,
-                right: 0,
-                child: IconButton(
-                  onPressed: widget.onDelete,
-                  tooltip: 'Take it off this page',
-                  visualDensity: VisualDensity.compact,
-                  icon: Icon(Icons.close, size: 15, color: Sx.mute),
-                ),
+            : (widget.idle ? .85 : 1.0)) *
+        (widget.dim ? .45 : 1.0);
+    final card = Sx.card;
+    Color f(Color c) => fade == 1 ? c : Color.alphaBlend(c.withValues(alpha: c.a * fade), card);
+    final edge = on
+        ? Sx.green
+        : widget.arranging
+        ? Sx.line2
+        : hover
+        ? Sx.accent
+        : Sx.line;
+    // The button's own color from live.ini: show data, the same in both themes.
+    final own = t.color < 0 ? null : Color(0xFF000000 | (t.color & 0xFFFFFF));
+    Widget box = Container(
+      width: widget.width,
+      decoration: BoxDecoration(
+        color: on ? Sx.green.withValues(alpha: .09) : f(Sx.panel),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: f(edge)),
+        // `box-shadow: 0 0 0 1px`: a second line around a playing button.
+        boxShadow: on ? [BoxShadow(color: Sx.green.withValues(alpha: .45), spreadRadius: 1)] : null,
+      ),
+      child: CustomPaint(
+        painter: _Stripe(f(own ?? (on ? Sx.green : (hover ? Sx.accent : Sx.line2)))),
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(4 + 7, 9, widget.onDelete == null ? 11 : 26, 9),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                t.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: f(Sx.text), height: 1.3),
               ),
-          ],
-        );
-      },
+              const SizedBox(height: 2),
+              Text.rich(
+                TextSpan(
+                  children: [
+                    if (on)
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.middle,
+                        child: Icon(Icons.play_arrow, size: 13, color: Sx.green),
+                      ),
+                    TextSpan(text: widget.arranging ? t.label : s.text),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11.5, color: on ? Sx.green : f(Sx.mute), fontWeight: on ? FontWeight.w600 : FontWeight.w400, height: 1.3),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (widget.onTap != null || widget.onMenu != null) {
+      box = MouseRegion(
+        cursor: widget.onTap == null
+            ? MouseCursor.defer
+            : t.missing
+            ? SystemMouseCursors.basic
+            : SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: widget.onTap == null ? null : (_) => setState(() => _down = true),
+          onTapUp: widget.onTap == null ? null : (_) => setState(() => _down = false),
+          onTapCancel: widget.onTap == null ? null : () => setState(() => _down = false),
+          onTap: widget.onTap,
+          onSecondaryTapUp: widget.onMenu == null ? null : (d) => widget.onMenu!(d.globalPosition),
+          onLongPressStart: widget.onMenu == null || widget.onTap == null ? null : (d) => widget.onMenu!(d.globalPosition),
+          // `.lbb:active{transform:scale(.97)}`, only while pressed.
+          child: _down ? Transform.scale(scale: .97, child: box) : box,
+        ),
+      );
+    }
+    if (widget.onDelete == null) return box;
+    return Stack(
+      children: [
+        box,
+        Positioned(
+          top: 0,
+          right: 0,
+          child: IconButton(
+            onPressed: widget.onDelete,
+            tooltip: 'Take it off this page',
+            visualDensity: VisualDensity.compact,
+            icon: Icon(Icons.close, size: 15, color: Sx.mute),
+          ),
+        ),
+      ],
     );
   }
+}
+
+/// A tile's colored strip down its left side, 4 px wide inside the 1 px
+/// border. Its ends follow the tile's outer corner (radius 10), as they did
+/// when the tile clipped it, without a clip.
+class _Stripe extends CustomPainter {
+  _Stripe(this.color);
+
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // The outer corner is a circle of radius 10 around (9, 9) here. These
+    // are where it crosses x = 0 and x = 4.
+    final a = 9 - math.sqrt(100 - 81);
+    final b = 9 - math.sqrt(100 - 25);
+    final h = size.height;
+    const r = Radius.circular(10);
+    final path = Path()
+      ..moveTo(4, b)
+      ..arcToPoint(Offset(0, a), radius: r, clockwise: false)
+      ..lineTo(0, h - a)
+      ..arcToPoint(Offset(4, h - b), radius: r, clockwise: false)
+      ..close();
+    canvas.drawPath(path, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_Stripe old) => old.color != color;
 }
 
 /// Four dots, one more lit on each beat (`.aubeats`). Wakes once a beat on
@@ -394,7 +445,8 @@ class BpmCard extends StatelessWidget {
                 ],
               ),
             ),
-            BeatDots(clock: live.clock),
+            // A beat repaints the dots only, not the card around them.
+            RepaintBoundary(child: BeatDots(clock: live.clock)),
             Listener(
               onPointerDown: (_) => onTap(),
               child: Tooltip(

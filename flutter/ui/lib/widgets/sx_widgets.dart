@@ -243,44 +243,106 @@ class GroupLabel extends StatelessWidget {
 
 /// A small pill button, the old app's `.mini`. [primary] makes it lime, [on]
 /// marks something that is running (green).
-class MiniButton extends StatelessWidget {
+///
+/// It is drawn with plain boxes, a dozen widgets where Material's
+/// `OutlinedButton` is about 45. Lists hold several per row, so that was a
+/// large share of what those screens cost to build.
+class MiniButton extends StatefulWidget {
   const MiniButton(this.text, {super.key, required this.onPressed, this.icon, this.primary = false, this.on = false});
 
   final String text;
   final IconData? icon;
+
+  /// Null turns the button off.
   final VoidCallback? onPressed;
   final bool primary;
   final bool on;
 
   @override
-  Widget build(BuildContext context) => OutlinedButton(
-    onPressed: onPressed,
-    style: OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 3),
-      minimumSize: const Size(0, 28),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      shape: const StadiumBorder(),
-      textStyle: const TextStyle(fontFamily: Sx.body, fontSize: 12, fontWeight: FontWeight.w600),
-      backgroundColor: primary
-          ? Sx.primaryBottom
-          : on
-          ? Sx.green.withValues(alpha: .1)
-          : Sx.hover,
-      foregroundColor: primary
-          ? Sx.onPrimary
-          : on
-          ? Sx.green
-          : Sx.text,
-      side: primary ? BorderSide.none : BorderSide(color: on ? Sx.green : Sx.line),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(icon, size: 14)),
-        Text(text),
-      ],
-    ),
-  );
+  State<MiniButton> createState() => _MiniButtonState();
+}
+
+class _MiniButtonState extends State<MiniButton> {
+  var _hover = false;
+  var _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget;
+    final enabled = w.onPressed != null;
+    final fg = !enabled
+        ? Sx.mute
+        : w.primary
+        ? Sx.onPrimary
+        : w.on
+        ? Sx.green
+        : Sx.text;
+    final fill = !enabled
+        ? Colors.transparent
+        : w.primary
+        ? Sx.primaryBottom
+        : w.on
+        ? Sx.green.withValues(alpha: .1)
+        : Sx.hover;
+    // Material's tint under the pointer and under a press
+    final tint = enabled && (_down || _hover) ? fg.withValues(alpha: _down ? .1 : .08) : null;
+    // a laptop packs buttons tighter than a phone, as Material's did
+    final dense = Theme.of(context).visualDensity.baseSizeAdjustment;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: w.onPressed,
+          onTapDown: enabled ? (_) => setState(() => _down = true) : null,
+          onTapUp: enabled ? (_) => setState(() => _down = false) : null,
+          onTapCancel: enabled ? () => setState(() => _down = false) : null,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: math.max(0, 28 + dense.dy)),
+            child: DecoratedBox(
+              decoration: ShapeDecoration(
+                color: tint == null ? fill : Color.alphaBlend(tint, fill),
+                shape: StadiumBorder(side: w.primary ? BorderSide.none : BorderSide(color: w.on ? Sx.green : Sx.line)),
+              ),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 11 + math.max(0, dense.dx), vertical: math.max(0, 3 + dense.dy)),
+                child: Align(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (w.icon != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(w.icon, size: 14, color: fg),
+                        ),
+                      Text(
+                        w.text,
+                        // the whole style, as Material's button gave its label: nothing comes from the text around it
+                        style: TextStyle(
+                          inherit: false,
+                          fontFamily: Sx.body,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: fg,
+                          textBaseline: TextBaseline.alphabetic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// One button of the tab bar or of a [Seg]. The one that is [on] gets the

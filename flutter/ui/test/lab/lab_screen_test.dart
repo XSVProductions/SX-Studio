@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sx_studio/screens/lab/lab_live.dart';
 import 'package:sx_studio/screens/lab/lab_screen.dart';
+import 'package:sx_studio/widgets/sx_widgets.dart';
 
 import 'lab_fixture.dart';
 
@@ -505,7 +506,7 @@ void main() {
     await t.pump();
 
     // Hide SETUP. It stays on screen, marked, while arranging.
-    await t.tap(find.widgetWithText(OutlinedButton, 'Hide').at(2));
+    await t.tap(find.widgetWithText(MiniButton, 'Hide').at(2));
     await t.pump();
     await t.pump();
     expect(s.layout['hidden'], ['3']);

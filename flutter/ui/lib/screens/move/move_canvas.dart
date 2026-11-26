@@ -39,13 +39,30 @@ class MoveCanvasModel {
 
 /// The drawing of one section: the pan/tilt shape (with every head's copy of
 /// it) or a value graph. Drag a point to move it, drag empty space to move the
-/// whole shape, double-tap to add a point. Repaints only when something changes.
+/// whole shape, double-tap to add a point. Repaints when something changes
+/// and at each tick of [clock].
 ///
 /// Port of the old page's `mvDraw`, `mvDown`, `mvMove`, `mvUp` and `mvDbl`.
 class MoveCanvas extends StatefulWidget {
-  const MoveCanvas({super.key, required this.model, required this.onSelect, required this.onDrag, required this.onDragEnd, required this.onAdd});
+  const MoveCanvas({
+    super.key,
+    required this.model,
+    required this.onSelect,
+    required this.onDrag,
+    required this.onDragEnd,
+    required this.onAdd,
+    this.clock,
+    this.now,
+  });
 
   final MoveCanvasModel model;
+
+  /// Ticks while the heads move (the old `mvAnim`). Each tick repaints the
+  /// canvas, and nothing else, with the heads where [now] puts them.
+  final Listenable? clock;
+
+  /// Ms into the movement right now. Null draws the heads at the model's `at`.
+  final double Function()? now;
 
   /// A point was picked (-1: none).
   final ValueChanged<int> onSelect;
@@ -159,7 +176,7 @@ class _MoveCanvasState extends State<MoveCanvas> {
         onPointerUp: _up,
         onPointerCancel: _up,
         child: RepaintBoundary(
-          child: CustomPaint(size: _size, painter: _Painter(m)),
+          child: CustomPaint(size: _size, painter: _Painter(m, widget.now, widget.clock)),
         ),
       );
     },
@@ -193,9 +210,13 @@ MovePt fromPx(MoveCanvasModel m, Offset at, Size s) {
 }
 
 class _Painter extends CustomPainter {
-  _Painter(this.m) : light = Sx.isLight;
+  _Painter(this.m, this.now, Listenable? clock) : light = Sx.isLight, super(repaint: clock);
 
   final MoveCanvasModel m;
+  final double Function()? now;
+
+  /// Where the heads are in the movement as this frame is painted.
+  double get _at => now?.call() ?? m.at;
 
   /// The theme it was painted in, so a theme switch repaints.
   final bool light;
@@ -295,7 +316,7 @@ class _Painter extends CustomPainter {
       // Where each head is at [m.at].
       if (w.pts.isNotEmpty) {
         for (final (hi, h) in m.doc.heads.indexed) {
-          final q = shapePx(v, moveHeadXY(h, m.state.heads[hi], cen, movePathAt(w.pts, w.tr, movePhase(w, h.k, m.at))), size);
+          final q = shapePx(v, moveHeadXY(h, m.state.heads[hi], cen, movePathAt(w.pts, w.tr, movePhase(w, h.k, _at))), size);
           c.drawCircle(q, 5, Paint()..color = moveHue(hi, n, 1));
           if (n <= 8) _text(c, h.label.isEmpty ? '#${hi + 1}' : h.label, q + const Offset(7, -6), size: 10);
         }
@@ -330,7 +351,7 @@ class _Painter extends CustomPainter {
         );
       }
       for (final (hi, h) in m.doc.heads.indexed) {
-        final u = movePhase(w, h.k, m.at), x = _gx((u - u.floorToDouble()) * moveMax, size.width);
+        final u = movePhase(w, h.k, _at), x = _gx((u - u.floorToDouble()) * moveMax, size.width);
         c.drawLine(Offset(x, 12), Offset(x, size.height - 18), stroke..color = moveHue(hi, n, hi == 0 ? .9 : .35));
       }
     }

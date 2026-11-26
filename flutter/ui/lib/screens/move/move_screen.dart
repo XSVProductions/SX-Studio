@@ -98,11 +98,14 @@ class _MoveScreenState extends State<MoveScreen> {
     HardwareKeyboard.instance.removeHandler(_key);
     unawaited(_pv?.stop());
     _live.dispose();
+    _clockTimer?.cancel();
+    _clock.dispose();
     super.dispose();
   }
 
   /// Leaving the tab stops the movement on the lights.
   void _tabChanged() {
+    _syncClock();
     if (_app.tab != 'move' && _pv != null) _pvStop(_reo);
     if (_app.madeScenes.length != _made) {
       _made = _app.madeScenes.length;
@@ -115,6 +118,23 @@ class _MoveScreenState extends State<MoveScreen> {
   var _made = 0;
 
   double _now() => _hold ? _holdT : DateTime.now().difference(_t0).inMilliseconds.toDouble();
+
+  /// Ticks 30 times a second while a movement is open on the tab on show and
+  /// not paused, so the heads on the canvas move (the old `mvAnim`). A tick
+  /// repaints the canvas only.
+  final _clock = ValueNotifier(0);
+  Timer? _clockTimer;
+
+  /// Starts or stops [_clock] to match what is on show.
+  void _syncClock() {
+    final run = mounted && _doc != null && !_hold && _app.tab == 'move';
+    if (!run) {
+      _clockTimer?.cancel();
+      _clockTimer = null;
+    } else {
+      _clockTimer ??= Timer.periodic(const Duration(milliseconds: 33), (_) => _clock.value++);
+    }
+  }
 
   bool get _ro => _doc?.readonly.isNotEmpty ?? true;
 
@@ -555,6 +575,8 @@ class _MoveScreenState extends State<MoveScreen> {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final d = _doc;
+    // every change that starts or stops the heads moving (open, close, pause) rebuilds the screen
+    _syncClock();
     final narrow = MediaQuery.sizeOf(context).width <= 640;
     final dirty = _dirty;
     return ScreenBody(
@@ -959,6 +981,8 @@ class _MoveScreenState extends State<MoveScreen> {
             ),
             child: MoveCanvas(
               model: m,
+              clock: _clock,
+              now: _now,
               onSelect: (i) {
                 _pt = i;
                 _live.value++;

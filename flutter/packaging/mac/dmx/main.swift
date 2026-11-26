@@ -2,6 +2,8 @@
 //   first line printed: "OK <interface name>" or "ERR <why>"; then one line per change from stdin:
 //   z (all 0) | b:ch:v (raw byte) | p:c:f:v (16-bit, glides) | s:c:f:v (16-bit, jumps) | k (keep-alive) | q (quit)
 //   No command for 30 s or stdin closed -> all channels 0, interface closed, exit.
+// A frame goes out as soon as a line arrives (at most 50 a second), so SX Studio's own 40 frames a second reach the
+// lights as they were made. With nothing new the frame is sent again every 40 ms, or every 25 ms while a glide runs.
 // It uses ShowXpress's own Mac driver (efk_hardware.dylib next to TheLightingController.app). That driver has to be
 // loaded and used on a program's main thread, which PowerShell can't do - hence this small tool. The driver is Intel
 // or Apple Silicon depending on the ShowXpress download, so this tool is built for both and SX Studio runs the kind
@@ -94,6 +96,32 @@ let lock = NSLock()
 var running = true
 var lastCmd = Date()
 
+// ---- waiting. macOS may add 10 ms to an ordinary wait (usleep, a semaphore, a condition): a 25 ms sleep here took
+// 33 ms, and 160 ms once the program ran at background priority, which is 6 frames a second. A kqueue timer marked
+// critical is on time in both cases (25.02 ms measured). The same queue wakes the main loop when a line arrives.
+let kq = kqueue()
+let lineEvent: UInt = 1
+let timerEvent: UInt = 2
+func change(_ ident: UInt, _ filter: Int32, _ flags: Int32, _ fflags: Int32 = 0, _ data: Int = 0) {
+    var e = kevent(ident: ident, filter: Int16(filter), flags: UInt16(flags), fflags: UInt32(fflags), data: data, udata: nil)
+    _ = kevent(kq, &e, 1, nil, 0, nil)
+}
+change(lineEvent, EVFILT_USER, EV_ADD | EV_CLEAR)
+
+// called by the reader for every line: the main loop sends the new frame at once
+func lineArrived() { change(lineEvent, EVFILT_USER, 0, NOTE_TRIGGER) }
+
+// Waits `us` microseconds. With `orLine` it returns early, and true, when a line arrives.
+func wait(us: Int, orLine: Bool) -> Bool {
+    change(timerEvent, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_USECONDS | NOTE_CRITICAL, max(us, 1))
+    var got = kevent()
+    while true {
+        if kevent(kq, nil, 0, &got, 1, nil) != 1 { continue }
+        if got.filter == Int16(EVFILT_TIMER) { return false }
+        if orLine { change(timerEvent, EVFILT_TIMER, EV_DELETE); return true }
+    }
+}
+
 func num(_ s: Substring, _ mx: Int) -> Int? {
     guard let v = Int(s), v >= 0, v <= mx else { return nil }
     return v
@@ -123,10 +151,12 @@ func apply(_ line: String) {
 let reader = Thread {
     while let line = readLine() {
         apply(line)
+        lineArrived()
         lock.lock(); let r = running; lock.unlock()
         if !r { break }
     }
     lock.lock(); running = false; lock.unlock()
+    lineArrived()
 }
 reader.start()
 
@@ -146,15 +176,22 @@ while true {
         frame[p.f] = UInt8(v & 255)
     }
     let out = frame
+    let gliding = pairs.values.contains { $0.cur != $0.tgt }
     if Date().timeIntervalSince(lastCmd) > 30 { running = false }
     lock.unlock()
     sendFrame(out)
-    // keep the main run loop turning (the driver may rely on it), ~40 frames a second
-    if CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0.025, false) == .finished { usleep(25000) }
+    let sent = DispatchTime.now().uptimeNanoseconds
+    // keep the main run loop turning (the driver may rely on it)
+    CFRunLoopRunInMode(CFRunLoopMode.defaultMode, 0, false)
+    // the next frame: when a line arrives, but not within 20 ms of this one. Lines that came together make one frame.
+    if wait(us: gliding ? 25000 : 40000, orLine: true) {
+        let since = Int((DispatchTime.now().uptimeNanoseconds - sent) / 1000)
+        if since < 20000 { _ = wait(us: 20000 - since, orLine: false) }
+    }
 }
 
 // lights out, then let ShowXpress have the interface again
 let zero = [UInt8](repeating: 0, count: N)
-for _ in 0..<3 { sendFrame(zero); usleep(30000) }
+for _ in 0..<3 { sendFrame(zero); _ = wait(us: 30000, orLine: false) }
 _ = efkClose()
 exit(0)

@@ -32,11 +32,18 @@ void main() {
     out.send(frame);
     frame[9] = 0;
     out.send(frame);
-    out.close();
+    await out.close();
     for (var i = 0; i < 50 && !(got.existsSync() && got.readAsStringSync().contains('q')); i++) {
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
     expect(got.readAsLinesSync(), ['b:1:255 b:10:7', 'b:10:0', 'q']);
+  });
+
+  test('close waits for the helper to end, so the next one finds the interface free', () async {
+    final out = await HelperDmx.open(helper: helper('echo "OK D512S"\nread line\nsleep 0.3'), driverDir: tmp.path);
+    expect(out.alive, isTrue);
+    await out.close();
+    expect(out.alive, isFalse);
   });
 
   test('no interface gives the old message', () async {

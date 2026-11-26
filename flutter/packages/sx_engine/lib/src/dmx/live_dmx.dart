@@ -83,8 +83,7 @@ Future<void> _sender((DmxSpec, SendPort) args) async {
   final (spec, toOwner) = args;
   final DmxOutput out;
   try {
-    // The Mac's driver runs in a helper program, which only opens asynchronously.
-    out = await openDmxAsync(spec);
+    out = await openDmx(spec);
   } on DmxError catch (e) {
     toOwner.send(e.message);
     return;
@@ -95,14 +94,14 @@ Future<void> _sender((DmxSpec, SendPort) args) async {
   final commands = ReceivePort();
   late final Timer timer;
 
-  void stop() {
+  Future<void> stop() async {
     timer.cancel();
     commands.close();
     final dark = Uint8List(dmxFrameSize);
     for (var i = 0; i < 3; i++) {
       out.send(dark);
     }
-    out.close();
+    await out.close();
     toOwner.send(null);
   }
 
@@ -120,7 +119,7 @@ Future<void> _sender((DmxSpec, SendPort) args) async {
           frame.fillRange(0, dmxFrameSize, 0);
           glides.clear();
         } else if (t == 'q') {
-          stop();
+          unawaited(stop());
           return;
         } else if (t != 'k') {
           final a = t.split(':');
@@ -152,7 +151,7 @@ Future<void> _sender((DmxSpec, SendPort) args) async {
       frame[g.fine] = v & 255;
     }
     out.send(frame);
-    if (DateTime.now().difference(lastCommand) > const Duration(seconds: 30)) stop();
+    if (DateTime.now().difference(lastCommand) > const Duration(seconds: 30)) unawaited(stop());
   });
 
   toOwner.send((out.name, commands.sendPort));

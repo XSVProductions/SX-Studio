@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 
+import '../sx/mac_procs.dart';
 import 'win32.dart';
 
 /// VirtualDJ's OS2L: it connects over TCP and sends JSON objects one after
@@ -126,13 +127,18 @@ String? splitJsonObjects(String txt, void Function(String json) onObject) {
   return depth > 0 && st >= 0 && txt.length - st < 65536 ? txt.substring(st) : null;
 }
 
-/// Bonjour's `dnssd.dll` on Windows. Not run on real hardware.
+/// Bonjour: `dnssd.dll` on Windows (it comes with Apple's programs there),
+/// the system's own library on a Mac. The calls are the same.
 abstract final class _Bonjour {
+  static DynamicLibrary _lib() => Platform.isMacOS ? DynamicLibrary.process() : DynamicLibrary.open('dnssd.dll');
+  static Pointer<T> _alloc<T extends NativeType>(int bytes) => Platform.isMacOS ? macAlloc<T>(bytes) : winAlloc<T>(bytes);
+  static void _free(Pointer<NativeType> p) => Platform.isMacOS ? macFree(p) : winFree(p);
+
   /// Announces [port]. Returns '' or what went wrong, as the old player put it.
   static String register(int port, void Function(int sd) keep) {
-    if (!Platform.isWindows) return 'Bonjour is not installed';
+    if (!Platform.isWindows && !Platform.isMacOS) return 'Bonjour is not installed';
     try {
-      final lib = DynamicLibrary.open('dnssd.dll');
+      final lib = _lib();
       final reg = lib
           .lookupFunction<
             Int32 Function(
@@ -164,7 +170,7 @@ abstract final class _Bonjour {
               Pointer<Void>,
             )
           >('DNSServiceRegister');
-      final sd = winAlloc<IntPtr>(8), name = _ascii('SX Studio'), type = _ascii('_os2l._tcp');
+      final sd = _alloc<IntPtr>(8), name = _ascii('SX Studio'), type = _ascii('_os2l._tcp');
       try {
         // the port in network byte order
         final netPort = ((port & 0xFF) << 8) | ((port >> 8) & 0xFF);
@@ -172,9 +178,9 @@ abstract final class _Bonjour {
         keep(sd.value);
         return '';
       } finally {
-        winFree(sd);
-        winFree(name);
-        winFree(type);
+        _free(sd);
+        _free(name);
+        _free(type);
       }
     } on ArgumentError {
       return 'Bonjour is not installed';
@@ -183,7 +189,7 @@ abstract final class _Bonjour {
 
   static void deallocate(int sd) {
     try {
-      DynamicLibrary.open('dnssd.dll').lookupFunction<Void Function(IntPtr), void Function(int)>('DNSServiceRefDeallocate')(sd);
+      _lib().lookupFunction<Void Function(IntPtr), void Function(int)>('DNSServiceRefDeallocate')(sd);
     } on Object {
       // nothing to tidy
     }
@@ -191,8 +197,10 @@ abstract final class _Bonjour {
 
   static Pointer<Uint8> _ascii(String s) {
     final b = ascii.encode(s);
-    final p = winAlloc<Uint8>(b.length + 1);
-    p.asTypedList(b.length + 1).setAll(0, b);
+    final p = _alloc<Uint8>(b.length + 1);
+    p.asTypedList(b.length + 1)
+      ..setAll(0, b)
+      ..[b.length] = 0;
     return p;
   }
 }

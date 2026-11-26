@@ -18,21 +18,17 @@ bool isSxProcessName(String name) => _winName.hasMatch(name) && !_notSx.hasMatch
 /// `ProcessName` gives it: without the extension.
 String processNameOf(String exeFile) => exeFile.toLowerCase().endsWith('.exe') ? exeFile.substring(0, exeFile.length - 4) : exeFile;
 
-final _psLine = RegExp(r'^\s*(\d+)\s+(\S+)\s+(.+)$');
 final _macExe = RegExp(r'\.app/Contents/MacOS/(TheLightingController|ShowXpress)[^/]*$', caseSensitive: false);
 final _macNot = RegExp('Helper|sxh', caseSensitive: false);
 
-/// ShowXpress's main program in the output of `ps -axo pid=,stat=,comm=`.
+/// True for ShowXpress's main program on a Mac, given the full path of a
+/// running program.
 ///
 /// Only the main program inside the .app counts. A leftover part of
-/// ShowXpress once made SX Studio say "open" after it had closed, finished
-/// (zombie, stat Z) processes are skipped, and SX Studio's own Mac app
-/// ("SXHelper") must never match. Port of the Mac half of `Get-SxProcess`.
-List<SxProc> parseMacPs(String psOutput) => [
-  for (final line in psOutput.split('\n'))
-    if (_psLine.firstMatch(line.replaceAll('\r', '')) case final m?)
-      if (!m[2]!.toUpperCase().startsWith('Z') && _macExe.hasMatch(m[3]!.trim()) && !_macNot.hasMatch(m[3]!.trim())) (pid: int.parse(m[1]!), exe: m[3]!.trim()),
-];
+/// ShowXpress once made SX Studio say "open" after it had closed, and SX
+/// Studio's own old Mac app ("SXHelper") must never match. Port of the Mac
+/// half of `Get-SxProcess`, which read these paths from `ps`.
+bool isMacSxExe(String exe) => _macExe.hasMatch(exe.trim()) && !_macNot.hasMatch(exe.trim());
 
 /// The `.app` folder a Mac program runs from, or null.
 String? macAppOf(String exe) => RegExp(r'^(.+?\.app)/').firstMatch(exe)?[1];

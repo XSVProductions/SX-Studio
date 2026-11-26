@@ -3,11 +3,18 @@
 #include <shobjidl.h>
 #include <windows.h>
 
+#include "dmx_helper.h"
 #include "flutter_window.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // Started as `sx_studio.exe --dmx-helper ...`, this program is the DMX
+  // output and never shows a window (dmx_helper.cpp says why).
+  if (const int code = RunDmxHelperIfAsked(); code >= 0) {
+    return code;
+  }
+
   // One copy only, as the old app. Dart decides at start (boot_io.dart): a
   // copy of the same version shows its window and this one quits, an older
   // version is stopped and replaced.

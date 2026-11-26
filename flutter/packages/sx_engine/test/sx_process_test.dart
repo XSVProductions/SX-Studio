@@ -34,22 +34,22 @@ void main() {
     });
   });
 
-  group('Mac ps output', () {
-    const ps = '''
-  101 Ss   /sbin/launchd
-  4321 S    /Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingController
-  4322 Z    /Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingController
-  4323 S    /Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingControllerHelper
-  4400 S    /Applications/SX Studio.app/Contents/MacOS/SXHelper
-  4401 S    /Applications/SX Studio.app/Contents/Resources/TheLightingController
-  4500 R+   /Users/dj/Applications/ShowXpress.app/Contents/MacOS/ShowXpress
-''';
-
-    test('only the main program counts, not zombies, helpers or SX Studio', () {
-      expect(parseMacPs(ps), [
-        (pid: 4321, exe: '/Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingController'),
-        (pid: 4500, exe: '/Users/dj/Applications/ShowXpress.app/Contents/MacOS/ShowXpress'),
-      ]);
+  group('Mac programs', () {
+    test('only the main program counts, not helpers or SX Studio', () {
+      for (final exe in [
+        '/Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingController',
+        '/Users/dj/Applications/ShowXpress.app/Contents/MacOS/ShowXpress',
+      ]) {
+        expect(isMacSxExe(exe), isTrue, reason: exe);
+      }
+      for (final exe in [
+        '/sbin/launchd',
+        '/Applications/ShowXpress/TheLightingController.app/Contents/MacOS/TheLightingControllerHelper',
+        '/Applications/SX Studio.app/Contents/MacOS/SXHelper',
+        '/Applications/SX Studio.app/Contents/Resources/TheLightingController',
+      ]) {
+        expect(isMacSxExe(exe), isFalse, reason: exe);
+      }
     });
 
     test('the app a program runs from', () {

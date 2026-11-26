@@ -43,18 +43,6 @@ String? fromWide(Pointer<Uint16> p, {int max = 65536}) {
   return String.fromCharCodes(p.asTypedList(n));
 }
 
-final _setDllDirectory = kernel32.lookupFunction<Int32 Function(Pointer<Uint16>), int Function(Pointer<Uint16>)>('SetDllDirectoryW');
-
-/// Where Windows looks for the DLLs a driver loads by bare name.
-void setDllDirectory(String dir) {
-  final w = toWide(dir);
-  try {
-    _setDllDirectory(w);
-  } finally {
-    winFree(w);
-  }
-}
-
 final _setThreadExecutionState = kernel32.lookupFunction<Uint32 Function(Uint32), int Function(int)>('SetThreadExecutionState');
 
 /// Keeps the laptop from sleeping and the screen on for a while longer.

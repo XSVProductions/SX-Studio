@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
 
 import '../../theme.dart';
+import '../../widgets/sx_widgets.dart';
 
 /// Small pieces the Movement Editor uses. None of them are in `sx_widgets.dart`
 /// yet; the confirm dialog and the tag would fit there if another screen needs them.
@@ -173,7 +174,7 @@ class _MoveNumState extends State<MoveNum> {
   }
 }
 
-/// A dropdown in the old `select` style (well background, thin border, radius 8).
+/// A dropdown in the old `select` style (well background, thin border, radius 8), 32 high.
 class MoveDrop<T> extends StatelessWidget {
   const MoveDrop({super.key, required this.value, required this.items, required this.onChanged, this.width = 130});
 
@@ -185,42 +186,11 @@ class MoveDrop<T> extends StatelessWidget {
   final double width;
 
   @override
-  Widget build(BuildContext context) {
-    final change = onChanged;
-    return SizedBox(
-      width: width,
-      height: 32,
-      child: DropdownButtonHideUnderline(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: Sx.well,
-            border: Border.all(color: Sx.line),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButton<T>(
-            isExpanded: true,
-            isDense: true,
-            dropdownColor: Sx.panel,
-            style: TextStyle(fontFamily: Sx.body, fontSize: 13, color: Sx.text),
-            value: items.containsKey(value) ? value : null,
-            items: [
-              for (final e in items.entries)
-                DropdownMenuItem(
-                  value: e.key,
-                  child: Text(e.value, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: change == null
-                ? null
-                : (v) {
-                    if (v != null) change(v);
-                  },
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
+    height: 32,
+    child: SxMenu<T>(items: items, value: value, onPick: onChanged),
+  );
 }
 
 /// The DMX values a scene's first step puts on the heads, to light a movement

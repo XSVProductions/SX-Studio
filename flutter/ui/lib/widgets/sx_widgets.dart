@@ -12,6 +12,10 @@ export 'sx_menu.dart';
 /// Space left and right of a screen's content: 22 on a laptop, 10 on a phone.
 double sxGutter(BuildContext context) => MediaQuery.sizeOf(context).width <= 640 ? 10 : 22;
 
+/// The gap [ScreenBody] leaves on each side of its cards: the gutter, or more
+/// in a window wider than [Sx.contentWidth], where the cards sit in the middle.
+double sxSide(BuildContext context) => math.max(sxGutter(context), (MediaQuery.sizeOf(context).width - Sx.contentWidth) / 2);
+
 /// The fill, border and corners of a card.
 BoxDecoration _cardBox() => BoxDecoration(
   color: Sx.card,
@@ -115,8 +119,7 @@ class ScreenBody extends StatelessWidget {
     final shown = app?.result;
     final tab = TabScope.of(context);
     final children = [...this.children, if (shown != null && (tab == null || tab == app!.resultTab)) ResultCard(shown, key: ValueKey(app!.resultSeq))];
-    // the screen is as wide as the window: content sits in the middle, at most [Sx.contentWidth] wide
-    final side = math.max(gutter, (MediaQuery.sizeOf(context).width - Sx.contentWidth) / 2);
+    final side = sxSide(context);
     final gap = gutter < 22 ? 12.0 : 18.0;
     return Column(
       children: [

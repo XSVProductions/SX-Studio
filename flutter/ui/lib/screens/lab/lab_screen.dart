@@ -913,8 +913,7 @@ class _LabScreenState extends State<LabScreen> {
   /// The width inside the board card on a screen [screen] wide, worked out
   /// the way [ScreenBody] places its cards.
   static double _boardWidth(BuildContext context, double screen) {
-    final side = math.max(sxGutter(context), (MediaQuery.sizeOf(context).width - Sx.contentWidth) / 2);
-    return screen - 2 * side - 40;
+    return screen - 2 * sxSide(context) - 40;
   }
 
   Widget _top() => SxCard(

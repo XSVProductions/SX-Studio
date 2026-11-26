@@ -103,7 +103,7 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
   DESTINATION "${INSTALL_BUNDLE_DATA_DIR}" COMPONENT Runtime)
 
 # The page phones and tablets load from the laptop: the web build (flutter build web
-# --release --no-web-resources-cdn, run first) goes into "web" next to the program,
+# --release --wasm --no-web-resources-cdn, run first) goes into "web" next to the program,
 # where the engine serves it from. Re-copied each build so no stale file stays.
 set(SX_WEB_BUILD_DIR "${PROJECT_BUILD_DIR}web")
 install(CODE "

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:sx_api/sx_api.dart';
@@ -174,11 +175,23 @@ class AppState extends ChangeNotifier {
   /// Fetches the status now, for right after an action that changes it.
   Future<void> refresh() => _poll();
 
+  /// Ticks after every status poll, changed or not. For the few widgets that
+  /// time things by it ([RemoteRow]). Everything else listens to the state,
+  /// which stays quiet while the status stays the same.
+  final polled = ValueNotifier(0);
+
+  /// The last status as JSON text, to tell whether a poll brought news.
+  String _statusText = '';
+
   Future<void> _poll() async {
     if (_polling) return;
     _polling = true;
+    var changed = false;
     try {
       final was = status, now = await client.status();
+      final text = jsonEncode(now.toJson());
+      changed = !connected || text != _statusText;
+      _statusText = text;
       status = now;
       connected = true;
       if (!now.open) sxCloseAsked = null;
@@ -192,16 +205,25 @@ class AppState extends ChangeNotifier {
         }
       }
     } on ApiException {
+      changed = connected;
       connected = false;
     } finally {
       _polling = false;
     }
-    notifyListeners();
+    if (_gone) return;
+    // A poll every 2 s that always notified made the window rebuild and
+    // redraw the tab on show 30 times a minute for nothing.
+    if (changed) notifyListeners();
+    polled.value++;
   }
+
+  var _gone = false;
 
   @override
   void dispose() {
+    _gone = true;
     _timer.cancel();
+    polled.dispose();
     super.dispose();
   }
 }

@@ -33,6 +33,11 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
+  // Draw with Skia, not Impeller (Flutter's default since 3.47). With the
+  // real show on an RTX 2070, Impeller took 3 to 6 times as long per frame
+  // (APC40 tab 11.9 ms against 3.8 ms), and it has no cache for parts of the
+  // window that did not change.
+  project.set_impeller_switch(flutter::ImpellerSwitch::Disabled);
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();

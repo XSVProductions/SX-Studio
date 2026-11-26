@@ -101,19 +101,21 @@ class _RemoteRowState extends State<RemoteRow> {
   void initState() {
     super.initState();
     _app.addListener(_follow);
+    _app.polled.addListener(_follow);
     _follow();
   }
 
   @override
   void dispose() {
     _app.removeListener(_follow);
+    _app.polled.removeListener(_follow);
     super.dispose();
   }
 
-  /// Runs on every change of the app's state and every status poll. It
-  /// listens to the state itself because the row follows ShowXpress while its
-  /// tab is hidden too, and a hidden tab's widgets get no rebuilds
-  /// ([AppScope]).
+  /// Runs on every change of the app's state and on every status poll, which
+  /// is its clock for how long ShowXpress has been open. It listens to the
+  /// state itself because the row follows ShowXpress while its tab is hidden
+  /// too, and a hidden tab's widgets get no rebuilds ([AppScope]).
   void _follow() {
     final app = _app;
     final s = app.status;

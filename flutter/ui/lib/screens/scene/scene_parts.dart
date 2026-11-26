@@ -4,6 +4,7 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
+import '../rig/hover.dart';
 import 'scene_work.dart';
 
 // Pieces of the Scene Editor screen: the channel rows, the heads list and a
@@ -140,40 +141,39 @@ class SceneRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 6),
-    child: Material(
-      color: Sx.panel,
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: Sx.line),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          name,
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Sx.text),
-                        ),
-                        ?tag,
-                      ],
-                    ),
-                    Text(small, style: TextStyle(fontSize: 11.5, color: Sx.dim)),
-                  ],
-                ),
+    child: HoverTap(
+      onTap: onTap,
+      // the old `.sesc:hover` lightens the border
+      builder: (context, hover) => Container(
+        // 12 and 8 from the edge: the border takes the first pixel
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        decoration: BoxDecoration(
+          color: Sx.panel,
+          border: Border.all(color: hover ? Sx.line2 : Sx.line),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        name,
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Sx.text),
+                      ),
+                      ?tag,
+                    ],
+                  ),
+                  Text(small, style: TextStyle(fontSize: 11.5, color: Sx.dim)),
+                ],
               ),
-              if (right != null) Padding(padding: const EdgeInsets.only(left: 12), child: right),
-            ],
-          ),
+            ),
+            if (right != null) Padding(padding: const EdgeInsets.only(left: 12), child: right),
+          ],
         ),
       ),
     ),
@@ -207,7 +207,7 @@ Future<bool> sceneAsk(BuildContext context, String title, List<(String, bool)> b
     ) ??
     false;
 
-/// A dropdown in the old `select` look: well fill, line border, radius 8.
+/// A dropdown in the old `select` look: well fill, line border, radius 8, 32 high.
 class SceneSelect<T> extends StatelessWidget {
   const SceneSelect({super.key, required this.items, required this.value, required this.hint, required this.onChanged});
 
@@ -217,36 +217,9 @@ class SceneSelect<T> extends StatelessWidget {
   final ValueChanged<T>? onChanged;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => SizedBox(
     height: 32,
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-    decoration: BoxDecoration(
-      color: Sx.well,
-      border: Border.all(color: Sx.line),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<T>(
-        isExpanded: true,
-        isDense: true,
-        dropdownColor: Sx.panel,
-        style: TextStyle(fontFamily: Sx.body, fontSize: 13, color: Sx.text),
-        value: items.containsKey(value) ? value : null,
-        hint: Text(hint, style: TextStyle(color: Sx.dim, fontSize: 13)),
-        items: [
-          for (final e in items.entries)
-            DropdownMenuItem(
-              value: e.key,
-              child: Text(e.value, overflow: TextOverflow.ellipsis),
-            ),
-        ],
-        onChanged: onChanged == null
-            ? null
-            : (v) {
-                if (v != null) onChanged!(v);
-              },
-      ),
-    ),
+    child: SxMenu<T>(items: items, value: value, hint: hint, onPick: onChanged),
   );
 }
 
@@ -416,11 +389,11 @@ class SceneChannelRow extends StatelessWidget {
             hint: 'named...',
             onChanged: (i) => onValue(jsRound((rs[i].lo + rs[i].hi) / 2)),
           );
-    final fade = Tooltip(
+    final fade = HoverTip(
       message: "Glide from the step before over this step's time",
-      child: InkWell(
+      child: HoverTap(
         onTap: () => onFade(!(fs.first && !fm)),
-        child: Row(
+        builder: (context, _) => Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
@@ -443,15 +416,12 @@ class SceneChannelRow extends StatelessWidget {
     );
     final x = SizedBox(
       width: 20,
-      child: IconButton(
-        tooltip: 'Take this channel out of these heads, in every step',
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
-        iconSize: 18,
-        color: Sx.mute,
-        hoverColor: Colors.transparent,
-        icon: const Icon(Icons.close),
-        onPressed: onDelete,
+      child: HoverTip(
+        message: 'Take this channel out of these heads, in every step',
+        child: HoverTap(
+          onTap: onDelete,
+          builder: (context, _) => Icon(Icons.close, size: 18, color: Sx.mute),
+        ),
       ),
     );
     final nm = name(mix ? ' · mixed' : '', color: chg ? Sx.blue : null);
@@ -556,32 +526,43 @@ class SceneHeads extends StatelessWidget {
             ),
             for (final g in groups.entries) ...[
               SceneGroupHead(g.key, top: 10, bottom: 4),
-              for (final h in g.value)
-                Opacity(
-                  opacity: w != null && !work.inStep(w, h.id) ? .45 : 1,
-                  child: Material(
-                    color: sel.contains(h.id) ? Sx.accent.withValues(alpha: .15) : Colors.transparent,
-                    borderRadius: BorderRadius.circular(7),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(7),
-                      hoverColor: Sx.hover,
-                      onTap: () => onTap(h),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(h.name, style: TextStyle(fontSize: 13, color: Sx.text)),
-                            ),
-                            const SizedBox(width: 6),
-                            Text(h.addr != 0 ? 'DMX ${h.addr}' : 'not patched', style: TextStyle(fontSize: 13, color: Sx.dim)),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              for (final h in g.value) _headRow(h, w != null && !work.inStep(w, h.id)),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// One head, the old `.seh`: picked ones tinted, ones not in the step on
+  /// screen at 45 % (`.seh.dim`), a fill under the mouse.
+  Widget _headRow(SceneHead h, bool dim) {
+    final a = dim ? .45 : 1.0, on = sel.contains(h.id);
+    return HoverTap(
+      onTap: () => onTap(h),
+      builder: (context, hover) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: on
+              ? Sx.accent.withValues(alpha: .15 * a)
+              : hover
+              ? Sx.hover
+              : null,
+          borderRadius: BorderRadius.circular(7),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                h.name,
+                style: TextStyle(fontSize: 13, color: Sx.text.withValues(alpha: a)),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              h.addr != 0 ? 'DMX ${h.addr}' : 'not patched',
+              style: TextStyle(fontSize: 13, color: Sx.dim.withValues(alpha: a)),
+            ),
           ],
         ),
       ),

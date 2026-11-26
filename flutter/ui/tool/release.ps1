@@ -45,7 +45,7 @@ try {
   flutter pub get
   if ($LASTEXITCODE) { throw 'flutter pub get failed.' }
   # no CDN: a phone on a venue network must get every file from the laptop
-  flutter build web --release --no-web-resources-cdn
+  flutter build web --release --wasm --no-web-resources-cdn
   if ($LASTEXITCODE) { throw 'The web build failed.' }
   # windows\CMakeLists.txt copies the web build into Release\web
   flutter build windows --release "--build-name=$Version" "--dart-define=SX_VERSION=$Version"

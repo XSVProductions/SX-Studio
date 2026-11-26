@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:async';
 import 'dart:math';
 
@@ -47,6 +48,9 @@ class _PhoneCardState extends State<PhoneCard> {
   Future<void> _do(Future<PhoneInfo> Function(SxClient c) call) async {
     try {
       final p = await call(AppScope.read(context).client);
+      // the 5 second poll mostly brings the same answer, which needs no redraw
+      final old = _p;
+      if (old != null && _error.isEmpty && jsonEncode(old.toJson()) == jsonEncode(p.toJson())) return;
       if (mounted) {
         setState(() {
           _p = p;

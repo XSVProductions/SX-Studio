@@ -51,6 +51,11 @@ class _MoveScreenState extends State<MoveScreen> {
   var _err = '';
   MoveBackups? _bk;
 
+  /// Goes up while a drag on the canvas moves points or a point is picked.
+  /// Only the canvas and the settings beside it follow it, as the old
+  /// `mvMove` redrew only those two. The rest catches up when the drag ends.
+  final _live = ValueNotifier(0);
+
   // The clock the movement plays on (shared by the drawing and the lights).
   var _t0 = DateTime.now();
   var _hold = false;
@@ -92,11 +97,15 @@ class _MoveScreenState extends State<MoveScreen> {
     _app.removeListener(_tabChanged);
     HardwareKeyboard.instance.removeHandler(_key);
     unawaited(_pv?.stop());
+    _live.dispose();
+    _clockTimer?.cancel();
+    _clock.dispose();
     super.dispose();
   }
 
   /// Leaving the tab stops the movement on the lights.
   void _tabChanged() {
+    _syncClock();
     if (_app.tab != 'move' && _pv != null) _pvStop(_reo);
     if (_app.madeScenes.length != _made) {
       _made = _app.madeScenes.length;
@@ -109,6 +118,23 @@ class _MoveScreenState extends State<MoveScreen> {
   var _made = 0;
 
   double _now() => _hold ? _holdT : DateTime.now().difference(_t0).inMilliseconds.toDouble();
+
+  /// Ticks 30 times a second while a movement is open on the tab on show and
+  /// not paused, so the heads on the canvas move (the old `mvAnim`). A tick
+  /// repaints the canvas only.
+  final _clock = ValueNotifier(0);
+  Timer? _clockTimer;
+
+  /// Starts or stops [_clock] to match what is on show.
+  void _syncClock() {
+    final run = mounted && _doc != null && !_hold && _app.tab == 'move';
+    if (!run) {
+      _clockTimer?.cancel();
+      _clockTimer = null;
+    } else {
+      _clockTimer ??= Timer.periodic(const Duration(milliseconds: 33), (_) => _clock.value++);
+    }
+  }
 
   bool get _ro => _doc?.readonly.isNotEmpty ?? true;
 
@@ -549,6 +575,8 @@ class _MoveScreenState extends State<MoveScreen> {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final d = _doc;
+    // every change that starts or stops the heads moving (open, close, pause) rebuilds the screen
+    _syncClock();
     final narrow = MediaQuery.sizeOf(context).width <= 640;
     final dirty = _dirty;
     return ScreenBody(
@@ -568,15 +596,13 @@ class _MoveScreenState extends State<MoveScreen> {
         ],
       ),
       children: [
-        SxCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _header(d, dirty, narrow),
-              ErrorBox(d == null && _err.isEmpty ? _listErr : _err),
-              if (d == null) ..._picker(narrow) else ..._editor(d, narrow),
-            ],
-          ),
+        // one child per movement in the list and per head in the editor, so only the rows on screen are built
+        SxListCard(
+          children: [
+            _header(d, dirty, narrow),
+            ErrorBox(d == null && _err.isEmpty ? _listErr : _err),
+            if (d == null) ..._picker(narrow) else ..._editor(d, narrow),
+          ],
         ),
         if (d != null && (_bk?.backups.isNotEmpty ?? false)) _backups(_bk!, app.sxOpen, narrow),
       ],
@@ -636,6 +662,11 @@ class _MoveScreenState extends State<MoveScreen> {
       ];
     }
     final q = _query.trim().toLowerCase();
+    final width = MediaQuery.sizeOf(context).width;
+    // 30 % of a row's inside, 150 to 250: the screen's column, less the card's
+    // padding (2 x 20) and the row's padding and border (2 x 13)
+    final inner = width - 2 * math.max(sxGutter(context), (width - Sx.contentWidth) / 2) - 40 - 26;
+    final nameW = width <= 860 ? null : math.min(250.0, math.max(150.0, inner * .3));
     final shown = [...l.moves.where((m) => q.isEmpty || m.name.toLowerCase().contains(q) || m.used.any((u) => u.toLowerCase().contains(q)))];
     final count = Text('${l.moves.length} movements${q.isEmpty ? '' : ' · ${shown.length} found'} · tap one to open it', style: Sx.sub.copyWith(height: 1.2));
     final search = TextField(
@@ -658,11 +689,13 @@ class _MoveScreenState extends State<MoveScreen> {
         ),
       const SizedBox(height: 10),
       if (shown.isEmpty) Text('No movement matches.', style: Sx.sub),
-      for (final m in shown) Padding(padding: const EdgeInsets.only(bottom: 6), child: _listRow(m)),
+      for (final m in shown) Padding(padding: const EdgeInsets.only(bottom: 6), child: _listRow(m, nameW)),
     ];
   }
 
-  Widget _listRow(MoveListItem m) {
+  /// One movement in the list. On a laptop the name column is [nameW] wide,
+  /// on a narrow screen everything is stacked.
+  Widget _listRow(MoveListItem m, double? nameW) {
     final name = Wrap(
       crossAxisAlignment: WrapCrossAlignment.center,
       runSpacing: 2,
@@ -693,31 +726,29 @@ class _MoveScreenState extends State<MoveScreen> {
     );
     return _Row(
       onTap: () => _open(m.file),
-      child: LayoutBuilder(
-        builder: (context, c) => MediaQuery.sizeOf(context).width <= 860
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  name,
-                  used,
-                  if (m.on.isNotEmpty) ...[const SizedBox(height: 4), on],
-                  const SizedBox(height: 4),
-                  st,
-                ],
-              )
-            : Row(
-                children: [
-                  SizedBox(
-                    width: math.min(250, math.max(150, c.maxWidth * .3)),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [name, used]),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: on),
-                  const SizedBox(width: 12),
-                  st,
-                ],
-              ),
-      ),
+      child: nameW == null
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                name,
+                used,
+                if (m.on.isNotEmpty) ...[const SizedBox(height: 4), on],
+                const SizedBox(height: 4),
+                st,
+              ],
+            )
+          : Row(
+              children: [
+                SizedBox(
+                  width: nameW,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [name, used]),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: on),
+                const SizedBox(width: 12),
+                st,
+              ],
+            ),
     );
   }
 
@@ -763,8 +794,9 @@ class _MoveScreenState extends State<MoveScreen> {
         _gh('Channels', 'only the ones that play are sent to the lights'),
         Wrap(spacing: 6, runSpacing: 6, children: [for (var i = 0; i < d.secs.length; i++) _secChip(d, i)]),
         const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, c) {
+        ValueListenableBuilder(
+          valueListenable: _live,
+          builder: (context, _, _) {
             final canvas = _canvasCol(d);
             final side = _side(d);
             if (MediaQuery.sizeOf(context).width <= 900) {
@@ -781,7 +813,7 @@ class _MoveScreenState extends State<MoveScreen> {
           },
         ),
         _gh('Heads', d.aim.isNotEmpty ? 'aim and size are set by Aim Movers' : 'aim = where it points, as 16-bit pan / tilt steps · zoom = size of its shape'),
-        _heads(d, narrow),
+        ..._heads(d, narrow),
       ],
     ];
   }
@@ -949,8 +981,16 @@ class _MoveScreenState extends State<MoveScreen> {
             ),
             child: MoveCanvas(
               model: m,
-              onSelect: (i) => setState(() => _pt = i),
-              onDrag: (pts) => setState(() => _w = _w.withSec(_sec, _w.secs[_sec].copyWith(pts: pts))),
+              clock: _clock,
+              now: _now,
+              onSelect: (i) {
+                _pt = i;
+                _live.value++;
+              },
+              onDrag: (pts) {
+                _w = _w.withSec(_sec, _w.secs[_sec].copyWith(pts: pts));
+                _live.value++;
+              },
               onDragEnd: (before) {
                 _hist.add(before);
                 if (_hist.length > 200) _hist.removeAt(0);
@@ -1165,8 +1205,8 @@ class _MoveScreenState extends State<MoveScreen> {
   }
 
   /// The heads' aim and size. Port of `mvHeadsDraw`: a table on a laptop,
-  /// one block per head on a phone.
-  Widget _heads(MoveDoc d, bool narrow) {
+  /// one block per head on a phone. One child per head, for the card's lazy list.
+  List<Widget> _heads(MoveDoc d, bool narrow) {
     final own = d.aim.isNotEmpty;
     const cols = [('op', 'Aim pan', 'OffsetPan'), ('ot', 'Aim tilt', 'OffsetTilt'), ('zp', 'Zoom pan', 'ZoomPan'), ('zt', 'Zoom tilt', 'ZoomTilt')];
     Widget cell(int i, MoveHead h, (String, String, String) c) {
@@ -1204,111 +1244,106 @@ class _MoveScreenState extends State<MoveScreen> {
     final line = Border(top: BorderSide(color: Sx.line));
 
     if (narrow) {
-      return Column(
-        children: [
-          for (final (i, h) in d.heads.indexed)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
-              decoration: BoxDecoration(border: line),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: name(h)),
-                      Text('DMX ', style: th),
-                      dmx(h),
-                    ],
+      return [
+        for (final (i, h) in d.heads.indexed)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+            decoration: BoxDecoration(border: line),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: name(h)),
+                    Text('DMX ', style: th),
+                    dmx(h),
+                  ],
+                ),
+                if (tags(h).isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Wrap(runSpacing: 4, children: tags(h)),
                   ),
-                  if (tags(h).isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Wrap(runSpacing: 4, children: tags(h)),
-                    ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 6,
-                    children: [
-                      for (final c in cols)
-                        if (h.has.contains(c.$3))
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(c.$2, style: th.copyWith(fontSize: 11.5)),
-                              cell(i, h, c),
-                            ],
-                          ),
-                    ],
-                  ),
-                ],
-              ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 6,
+                  children: [
+                    for (final c in cols)
+                      if (h.has.contains(c.$3))
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(c.$2, style: th.copyWith(fontSize: 11.5)),
+                            cell(i, h, c),
+                          ],
+                        ),
+                  ],
+                ),
+              ],
             ),
-        ],
-      );
+          ),
+      ];
     }
     Widget pad(Widget c) => Padding(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4), child: c);
-    return Table(
-      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-      columnWidths: const {0: FlexColumnWidth(2), 6: FlexColumnWidth(1.4)},
-      defaultColumnWidth: const IntrinsicColumnWidth(),
-      children: [
-        TableRow(
-          children: [
-            for (final t in ['Head', 'DMX', for (final c in cols) c.$2, '']) pad(Text(t, style: th)),
-          ],
-        ),
-        for (final (i, h) in d.heads.indexed)
-          TableRow(
-            decoration: BoxDecoration(border: line),
-            children: [
-              pad(name(h)),
-              pad(dmx(h)),
-              for (final c in cols) pad(cell(i, h, c)),
-              pad(Wrap(runSpacing: 4, children: tags(h))),
-            ],
-          ),
-      ],
+    // The old table as rows of fixed columns, so each head is its own child.
+    // The number columns fit a number box (86 + 12), or a number in Aim Movers'
+    // movements. The DMX column fits "not patched" when a head is.
+    final numW = own ? 72.0 : 98.0, dmxW = d.heads.any((h) => h.addr == 0) ? 104.0 : 56.0;
+    Widget row(List<Widget> cells, {Decoration? deco}) => Container(
+      decoration: deco,
+      child: Row(
+        children: [
+          Expanded(flex: 20, child: pad(cells[0])),
+          SizedBox(width: dmxW, child: pad(cells[1])),
+          for (final c in cells.sublist(2, 6)) SizedBox(width: numW, child: pad(c)),
+          Expanded(flex: 14, child: pad(cells[6])),
+        ],
+      ),
     );
+    return [
+      row([
+        for (final t in ['Head', 'DMX', for (final c in cols) c.$2, '']) Text(t, style: th),
+      ]),
+      for (final (i, h) in d.heads.indexed)
+        row([name(h), dmx(h), for (final c in cols) cell(i, h, c), Wrap(runSpacing: 4, children: tags(h))], deco: BoxDecoration(border: line)),
+    ];
   }
 
   /// Earlier versions, with Revert. Port of `mvBackups`.
-  Widget _backups(MoveBackups b, bool sxOpen, bool narrow) => SxCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Earlier versions', style: Sx.title.copyWith(fontSize: 15)),
-        const SizedBox(height: 4),
-        Text('Every save keeps the movement as it was just before. Revert puts one back (with ShowXpress closed).', style: Sx.sub),
-        const SizedBox(height: 10),
-        for (final x in b.backups)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: _Row(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          x.at.replaceFirst('T', ' '),
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Sx.text),
-                        ),
-                        Text(x.what, style: TextStyle(color: Sx.dim, fontSize: 11.5)),
-                      ],
-                    ),
+  Widget _backups(MoveBackups b, bool sxOpen, bool narrow) => SxListCard(
+    children: [
+      Text('Earlier versions', style: Sx.title.copyWith(fontSize: 15)),
+      const SizedBox(height: 4),
+      Text('Every save keeps the movement as it was just before. Revert puts one back (with ShowXpress closed).', style: Sx.sub),
+      const SizedBox(height: 10),
+      for (final x in b.backups)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: _Row(
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        x.at.replaceFirst('T', ' '),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Sx.text),
+                      ),
+                      Text(x.what, style: TextStyle(color: Sx.dim, fontSize: 11.5)),
+                    ],
                   ),
-                  const SizedBox(width: 12),
-                  MiniButton('Revert to this', onPressed: sxOpen ? null : () => _revert(x.id)),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                MiniButton('Revert to this', onPressed: sxOpen ? null : () => _revert(x.id)),
+              ],
             ),
           ),
-      ],
-    ),
+        ),
+    ],
   );
 }
 

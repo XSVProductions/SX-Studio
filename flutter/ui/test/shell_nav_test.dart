@@ -177,6 +177,20 @@ void main() {
     await end(tester, app);
   });
 
+  testWidgets('a status poll that brings nothing new rebuilds nothing, and still ticks', (tester) async {
+    final engine = _Engine();
+    final app = await pump(tester, engine);
+    var changes = 0, ticks = 0;
+    app.addListener(() => changes++);
+    app.polled.addListener(() => ticks++);
+    await tester.runAsync(app.refresh);
+    expect((changes, ticks), (0, 1));
+    engine.sxOpen = true;
+    await tester.runAsync(app.refresh);
+    expect((changes, ticks), (1, 2));
+    await end(tester, app);
+  });
+
   testWidgets('a hidden tab is left alone when the state changes, and catches up when it is shown again', (tester) async {
     const open = 'ShowXpress is open. A fix waits until it closes.';
     final engine = _Engine();

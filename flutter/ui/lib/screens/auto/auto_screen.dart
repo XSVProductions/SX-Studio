@@ -19,6 +19,13 @@ bool _isSetup(String page) => RegExp(r'^\s*setup\s*$', caseSensitive: false).has
 /// A line under the looks: what the last action did. The color is read when drawn.
 typedef _Msg = ({String text, Color Function() color, IconData? icon});
 
+/// The last status, when it arrived, and whether the tab is on show.
+typedef _Live = ({AutoStatus? status, DateTime at, bool onTab});
+
+/// What the screen shows of a status outside the "now playing" lines. A
+/// status that only moves the bar and the time left keeps this the same.
+Object _shape(AutoStatus? s) => (s?.running, s?.lookId, s?.held, s?.target, s?.error);
+
 /// Auto Show: SX Studio presses the user's looks in ShowXpress one after
 /// another, each for a number of bars, while the DJ mixes.
 ///
@@ -38,8 +45,10 @@ class _AutoScreenState extends State<AutoScreen> {
   AutoConfig? _c;
   var _error = '';
 
-  AutoStatus? _st;
-  var _stAt = DateTime.now();
+  /// The status polls write here. Only the "now playing" lines listen, so a
+  /// poll rebuilds the whole screen only when [_shape] changes.
+  late final _live = ValueNotifier<_Live>((status: null, at: DateTime.now(), onTab: _app.tab == _tab));
+  AutoStatus? get _st => _live.value.status;
   String? _polledAt;
 
   /// Asks the engine for the status once a second while the show plays on
@@ -58,7 +67,8 @@ class _AutoScreenState extends State<AutoScreen> {
   final _bpm = TextEditingController();
   final _bpmFocus = FocusNode();
 
-  AppState get _app => AppScope.read(context);
+  /// Kept, so [dispose] can stop listening.
+  late final AppState _app = AppScope.read(context);
   bool get _running => _st?.running ?? false;
 
   /// [AppState.imports] as last seen.
@@ -70,43 +80,59 @@ class _AutoScreenState extends State<AutoScreen> {
     _bpmFocus.addListener(() {
       if (!_bpmFocus.hasFocus) _bpmTyped();
     });
+    // The app's state changes on every click and status poll. The screen
+    // listens itself instead of through AppScope.of, so that only what changed
+    // rebuilds, not the whole screen.
+    _app.addListener(_appChanged);
+    _follow();
     _load();
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final app = AppScope.of(context);
-    // a settings import replaced the Auto Show
-    if (_imports != app.imports) {
-      _imports = app.imports;
-      _load();
-    }
-    // the status poll carries the Auto Show's status too
-    final a = app.status?.auto;
-    if (a != null && a.at != _polledAt) {
-      _polledAt = a.at;
-      _setStatus(a);
-    }
-    _syncPoll(app.tab == _tab);
-  }
-
-  @override
   void dispose() {
+    _app.removeListener(_appChanged);
     _poll?.cancel();
     _bpmSend?.cancel();
     _bpm.dispose();
     _bpmFocus.dispose();
+    _live.dispose();
     super.dispose();
   }
 
-  void _syncPoll(bool onTab) {
-    final want = onTab && _running;
+  void _appChanged() {
+    if (_follow()) setState(() {});
+  }
+
+  /// Follows the app's state while the tab is on show. A hidden tab catches
+  /// up when it is shown again. True when the screen must rebuild.
+  bool _follow() {
+    final app = _app, onTab = app.tab == _tab;
+    if (onTab != _live.value.onTab) _live.value = (status: _st, at: _live.value.at, onTab: onTab);
+    var rebuild = false;
+    if (onTab) {
+      // a settings import replaced the Auto Show
+      if (_imports != app.imports) {
+        _imports = app.imports;
+        _load();
+      }
+      // the status poll carries the Auto Show's status too
+      final a = app.status?.auto;
+      if (a != null && a.at != _polledAt) {
+        _polledAt = a.at;
+        rebuild = _setStatus(a);
+      }
+    }
+    _syncPoll();
+    return rebuild;
+  }
+
+  void _syncPoll() {
+    final want = _app.tab == _tab && _running;
     if (want && _poll == null) {
       _poll = Timer.periodic(const Duration(seconds: 1), (_) async {
         try {
           final s = await _app.client.autoStatus();
-          if (mounted) setState(() => _setStatus(s));
+          if (mounted && _setStatus(s)) setState(() {});
         } on ApiException {
           // the next tick tries again
         }
@@ -117,11 +143,14 @@ class _AutoScreenState extends State<AutoScreen> {
     }
   }
 
-  void _setStatus(AutoStatus? s) {
-    _st = s;
-    _stAt = DateTime.now();
+  /// Takes a new status. True when the screen must rebuild to show it,
+  /// false when only the "now playing" lines change (they follow [_live]).
+  bool _setStatus(AutoStatus? s) {
+    final was = _st;
+    _live.value = (status: s, at: DateTime.now(), onTab: _live.value.onTab);
     if (s != null && s.running && s.target == 'player' && !_bpmFocus.hasFocus) _bpm.text = '${s.bpm.round()}';
-    if (mounted) _syncPoll(_app.tab == _tab);
+    if (mounted) _syncPoll();
+    return _shape(was) != _shape(s);
   }
 
   Future<void> _load() async {
@@ -209,9 +238,8 @@ class _AutoScreenState extends State<AutoScreen> {
   Future<void> _cmd(AutoCmd cmd, [String v = '']) async {
     final r = await _app.client.autoCmd(cmd, v);
     if (!mounted) return;
-    setState(() {
-      if (r.status != null) _setStatus(r.status);
-    });
+    // a BPM change moves only the "now playing" lines
+    if (r.status != null && _setStatus(r.status)) setState(() {});
     if (!r.ok) _say(r.error, color: () => Sx.red);
   }
 
@@ -219,7 +247,8 @@ class _AutoScreenState extends State<AutoScreen> {
     final r = await _app.client.autoStop();
     if (!mounted) return;
     final s = r.status;
-    setState(() => _setStatus(s == null ? null : AutoStatus.fromJson({...s.toJson(), 'error': ''})));
+    _setStatus(s == null ? null : AutoStatus.fromJson({...s.toJson(), 'error': ''}));
+    setState(() {});
     await _app.refresh();
   }
 
@@ -386,7 +415,6 @@ class _AutoScreenState extends State<AutoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final app = AppScope.of(context);
     final i = _info, c = _c;
     final dirty = _dirty;
     return ScreenBody(
@@ -420,11 +448,11 @@ class _AutoScreenState extends State<AutoScreen> {
                   child: Text('Reading the show.', style: Sx.sub),
                 ),
               if (i != null && !i.ready && !i.player && !(_running && _st!.target == 'player')) _remoteOff(),
-              if (i != null && c != null) _play(app, i, c),
+              if (i != null && c != null) _play(i, c),
             ],
           ),
         ),
-        if (i != null && c != null) SxCard(child: _looks(i, c)),
+        if (i != null && c != null) SxListCard(stretch: true, children: _looks(i, c)),
       ],
     );
   }
@@ -475,7 +503,7 @@ class _AutoScreenState extends State<AutoScreen> {
   );
 
   /// The old `.auplay` box.
-  Widget _play(AppState app, AutoInfo i, AutoConfig c) {
+  Widget _play(AutoInfo i, AutoConfig c) {
     final s = _st, run = s != null && s.running;
     final phone = MediaQuery.sizeOf(context).width <= 640;
     return Container(
@@ -486,7 +514,7 @@ class _AutoScreenState extends State<AutoScreen> {
         border: Border.all(color: run ? Sx.green.withValues(alpha: .5) : Sx.line),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: run ? _playing(app, s, phone) : _notPlaying(i, c, s, phone),
+      child: run ? _playing(s, phone) : _notPlaying(i, c, s, phone),
     );
   }
 
@@ -537,12 +565,19 @@ class _AutoScreenState extends State<AutoScreen> {
   TextStyle _big(bool phone) =>
       TextStyle(fontFamily: Sx.display, letterSpacing: .5, fontSize: phone ? 22 : 28, fontWeight: FontWeight.w700, height: 1.15, color: Sx.text);
 
-  Widget _playing(AppState app, AutoStatus s, bool phone) {
+  Widget _playing(AutoStatus s, bool phone) {
     const pad = EdgeInsets.symmetric(horizontal: 14, vertical: 10);
+    final big = _big(phone);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        NowPlaying(status: s, received: _stAt, visible: app.tab == _tab, big: _big(phone)),
+        ValueListenableBuilder(
+          valueListenable: _live,
+          builder: (_, v, _) => switch (v.status) {
+            final s? => NowPlaying(status: s, received: v.at, visible: v.onTab, big: big),
+            null => const SizedBox.shrink(),
+          },
+        ),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -592,53 +627,53 @@ class _AutoScreenState extends State<AutoScreen> {
     );
   }
 
-  Widget _looks(AutoInfo i, AutoConfig c) {
+  /// The rows of the looks card, one per look, so only those on screen are built.
+  List<Widget> _looks(AutoInfo i, AutoConfig c) {
     final looks = c.looks, act = _active;
     final round = act.fold(0.0, (a, l) => a + lookSeconds(l, c.bpm));
     final msg = _msg;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          spacing: 8,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 280),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text('Looks', style: Sx.title),
-                  if (looks.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        '${act.length} of ${looks.length} look${looks.length > 1 ? 's' : ''} in the show · one round ≈ ${fmtSeconds(round)} at ${bpmText(c.bpm)} BPM',
-                        style: Sx.sub,
-                      ),
+    return [
+      Wrap(
+        spacing: 8,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 280),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('Looks', style: Sx.title),
+                if (looks.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      '${act.length} of ${looks.length} look${looks.length > 1 ? 's' : ''} in the show · one round ≈ ${fmtSeconds(round)} at ${bpmText(c.bpm)} BPM',
+                      style: Sx.sub,
                     ),
-                ],
-              ),
-            ),
-            OutlinedButton(onPressed: _newLook, child: const Text('+ New look')),
-            OutlinedButton.icon(onPressed: _newFromPlaying, icon: const Icon(Icons.download, size: 18), label: const Text("New look from what's playing")),
-          ],
-        ),
-        if (looks.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: Text(
-              'No looks yet. A look is what plays at the same time, for example one movement, a colour and the uplights. '
-              "To cycle through movements, make one look per movement. Build one in ShowXpress, then press New look from what's playing, "
-              'or press + New look and pick the buttons.',
-              style: Sx.sub,
+                  ),
+              ],
             ),
           ),
-        for (final (k, l) in looks.indexed) _LookRow(key: ValueKey('${l.id}-$_gen'), index: k, count: looks.length, look: l, state: this),
-        const SizedBox(height: 16),
-        Wrap(
+          OutlinedButton(onPressed: _newLook, child: const Text('+ New look')),
+          OutlinedButton.icon(onPressed: _newFromPlaying, icon: const Icon(Icons.download, size: 18), label: const Text("New look from what's playing")),
+        ],
+      ),
+      if (looks.isEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+            'No looks yet. A look is what plays at the same time, for example one movement, a colour and the uplights. '
+            "To cycle through movements, make one look per movement. Build one in ShowXpress, then press New look from what's playing, "
+            'or press + New look and pick the buttons.',
+            style: Sx.sub,
+          ),
+        ),
+      for (final (k, l) in looks.indexed) _LookRow(key: ValueKey('${l.id}-$_gen'), index: k, count: looks.length, look: l, state: this),
+      Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Wrap(
           spacing: 14,
           runSpacing: 10,
           crossAxisAlignment: WrapCrossAlignment.center,
@@ -654,6 +689,7 @@ class _AutoScreenState extends State<AutoScreen> {
             ),
             Text('When I stop', style: Sx.sub),
             _Select<String>(
+              width: 220,
               value: c.stop,
               items: const {'keep': 'Leave the last look playing', 'off': 'Turn the look off'},
               onPick: (v) {
@@ -671,32 +707,32 @@ class _AutoScreenState extends State<AutoScreen> {
             ),
           ],
         ),
-        if (msg != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 10),
-            child: Text.rich(
-              TextSpan(
-                children: [
-                  if (msg.icon != null)
-                    WidgetSpan(
-                      alignment: PlaceholderAlignment.middle,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: Icon(msg.icon, size: 15, color: msg.color()),
-                      ),
-                    ),
-                  TextSpan(text: msg.text),
-                ],
-              ),
-              style: TextStyle(color: msg.color(), fontSize: 13, height: 1.4),
-            ),
-          ),
+      ),
+      if (msg != null)
         Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: Text('Show: ${i.show} · Auto Show settings are kept in the show folder (auto_show.json)', style: TextStyle(color: Sx.mute, fontSize: 12)),
+          padding: const EdgeInsets.only(top: 10),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                if (msg.icon != null)
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(msg.icon, size: 15, color: msg.color()),
+                    ),
+                  ),
+                TextSpan(text: msg.text),
+              ],
+            ),
+            style: TextStyle(color: msg.color(), fontSize: 13, height: 1.4),
+          ),
         ),
-      ],
-    );
+      Padding(
+        padding: const EdgeInsets.only(top: 16),
+        child: Text('Show: ${i.show} · Auto Show settings are kept in the show folder (auto_show.json)', style: TextStyle(color: Sx.mute, fontSize: 12)),
+      ),
+    ];
   }
 }
 
@@ -760,6 +796,7 @@ class _LookRow extends StatelessWidget {
                   ),
                 ),
                 _Select<int>(
+                  width: 88,
                   value: l.bars,
                   items: {for (final b in bars) b: '$b bar${b > 1 ? 's' : ''}'},
                   onPick: (v) {
@@ -847,7 +884,9 @@ class _LookRow extends StatelessWidget {
   }
 }
 
-/// A `.mini` button with only an icon (the old arrows).
+/// A `.mini` button with only an icon (the old arrows). Drawn plain, not as
+/// an `OutlinedButton`: every look has two, and a Material button is about
+/// forty widgets.
 class _IconMini extends StatelessWidget {
   const _IconMini(this.icon, this.onPressed);
 
@@ -855,19 +894,31 @@ class _IconMini extends StatelessWidget {
   final VoidCallback? onPressed;
 
   @override
-  Widget build(BuildContext context) => OutlinedButton(
-    onPressed: onPressed,
-    style: OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-      minimumSize: const Size(0, 28),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      shape: const StadiumBorder(),
-      backgroundColor: Sx.hover,
-      foregroundColor: Sx.text,
-      side: BorderSide(color: Sx.line),
-    ),
-    child: Icon(icon, size: 14),
-  );
+  Widget build(BuildContext context) {
+    final on = onPressed != null;
+    return Semantics(
+      button: true,
+      enabled: on,
+      child: MouseRegion(
+        cursor: on ? SystemMouseCursors.click : MouseCursor.defer,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onPressed,
+          child: Container(
+            height: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 9),
+            decoration: BoxDecoration(
+              // the theme's disabled outlined button: no fill, muted icon
+              color: on ? Sx.hover : null,
+              border: Border.all(color: Sx.line),
+              borderRadius: BorderRadius.circular(99),
+            ),
+            child: Icon(icon, size: 14, color: on ? Sx.text : Sx.mute),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// A button of a look, the old `.auchip`, with a cross to take it out.
@@ -895,12 +946,15 @@ class _TitleChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(title, style: TextStyle(fontSize: 12.5, color: bad ? Sx.redText : Sx.text)),
-            InkWell(
-              onTap: onRemove,
-              customBorder: const CircleBorder(),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                child: Icon(Icons.close, size: 13, color: Sx.dim, semanticLabel: 'Take it out of this look'),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: onRemove,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  child: Icon(Icons.close, size: 13, color: Sx.dim, semanticLabel: 'Take it out of this look'),
+                ),
               ),
             ),
           ],
@@ -910,35 +964,21 @@ class _TitleChip extends StatelessWidget {
   }
 }
 
-/// A drop-down, the old `select`.
+/// A drop-down, the old `select`. It is [width] wide, or as wide as the
+/// label picked when [width] is null, for labels that hold a name.
 class _Select<T> extends StatelessWidget {
-  const _Select({required this.value, required this.items, required this.onPick});
+  const _Select({required this.value, required this.items, required this.onPick, this.width});
 
   final T value;
   final Map<T, String> items;
   final ValueChanged<T> onPick;
+  final double? width;
 
   @override
-  Widget build(BuildContext context) => Container(
+  Widget build(BuildContext context) => SizedBox(
+    width: width,
     height: 34,
-    padding: const EdgeInsets.symmetric(horizontal: 8),
-    decoration: BoxDecoration(
-      color: Sx.well,
-      border: Border.all(color: Sx.line),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: DropdownButtonHideUnderline(
-      child: DropdownButton<T>(
-        isDense: true,
-        dropdownColor: Sx.panel,
-        style: TextStyle(fontFamily: Sx.body, fontSize: 13, color: Sx.text),
-        value: items.containsKey(value) ? value : null,
-        items: [for (final e in items.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
-        onChanged: (v) {
-          if (v != null) onPick(v);
-        },
-      ),
-    ),
+    child: SxMenu<T>(items: items, value: value, onPick: onPick, expand: width != null),
   );
 }
 
@@ -951,27 +991,31 @@ class _Check extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    onTap: () => onChanged(!value),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 20,
-          height: 20,
-          child: Checkbox(
-            value: value,
-            activeColor: Sx.accent,
-            checkColor: Sx.isLight ? Sx.card : Sx.onPrimary,
-            side: BorderSide(color: Sx.line2),
-            onChanged: (v) => onChanged(v ?? false),
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onChanged(!value),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: value,
+              activeColor: Sx.accent,
+              checkColor: Sx.isLight ? Sx.card : Sx.onPrimary,
+              side: BorderSide(color: Sx.line2),
+              onChanged: (v) => onChanged(v ?? false),
+            ),
           ),
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(label, style: TextStyle(fontSize: 13, color: Sx.dim)),
-        ),
-      ],
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(label, style: TextStyle(fontSize: 13, color: Sx.dim)),
+          ),
+        ],
+      ),
     ),
   );
 }

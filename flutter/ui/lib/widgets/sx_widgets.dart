@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../app_state.dart';
@@ -5,28 +7,64 @@ import '../theme.dart';
 import 'result_card.dart';
 
 export 'result_card.dart';
+export 'sx_menu.dart';
 
 /// Space left and right of a screen's content: 22 on a laptop, 10 on a phone.
 double sxGutter(BuildContext context) => MediaQuery.sizeOf(context).width <= 640 ? 10 : 22;
 
+/// The gap [ScreenBody] leaves on each side of its cards: the gutter, or more
+/// in a window wider than [Sx.contentWidth], where the cards sit in the middle.
+double sxSide(BuildContext context) => math.max(sxGutter(context), (MediaQuery.sizeOf(context).width - Sx.contentWidth) / 2);
+
+/// The fill, border and corners of a card.
+BoxDecoration _cardBox() => BoxDecoration(
+  color: Sx.card,
+  border: Border.all(color: Sx.line),
+  borderRadius: BorderRadius.circular(14),
+  boxShadow: Sx.isLight ? const [BoxShadow(color: Color(0x0F141821), blurRadius: 3, offset: Offset(0, 1))] : null,
+);
+
+const _cardPadding = EdgeInsets.fromLTRB(20, 18, 20, 18);
+
 /// A bordered section of a screen, the old app's `.card`. Most screens are
-/// one or two of these.
+/// one or two of these. A card with a long list in it is an [SxListCard].
 class SxCard extends StatelessWidget {
-  const SxCard({super.key, required this.child, this.padding = const EdgeInsets.fromLTRB(20, 18, 20, 18)});
+  const SxCard({super.key, required this.child, this.padding = _cardPadding});
 
   final Widget child;
   final EdgeInsets padding;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: padding,
-    decoration: BoxDecoration(
-      color: Sx.card,
-      border: Border.all(color: Sx.line),
-      borderRadius: BorderRadius.circular(14),
-      boxShadow: Sx.isLight ? const [BoxShadow(color: Color(0x0F141821), blurRadius: 3, offset: Offset(0, 1))] : null,
+  Widget build(BuildContext context) => Container(padding: padding, decoration: _cardBox(), child: child);
+}
+
+/// An [SxCard] for a long list. Only the [children] on screen (and a little
+/// beyond) are built, laid out and painted, so a show with 300 buttons costs
+/// what a screenful of them costs.
+///
+/// It works only as a direct child of [ScreenBody]. The children are laid
+/// out as in a `Column`: at their own width on the left, or filling the card
+/// when [stretch] is set. A child that scrolls away loses the State of its
+/// widgets, so keep what the user edits in the screen's State.
+class SxListCard extends StatelessWidget {
+  const SxListCard({super.key, required this.children, this.padding = _cardPadding, this.stretch = false});
+
+  final List<Widget> children;
+  final EdgeInsets padding;
+
+  /// The children fill the card's width (`CrossAxisAlignment.stretch`).
+  /// Otherwise each keeps its own width (`CrossAxisAlignment.start`).
+  final bool stretch;
+
+  @override
+  Widget build(BuildContext context) => DecoratedSliver(
+    decoration: _cardBox(),
+    sliver: SliverPadding(
+      padding: padding,
+      sliver: SliverList(
+        delegate: SliverChildListDelegate(stretch ? children : [for (final c in children) Align(alignment: Alignment.centerLeft, child: c)]),
+      ),
     ),
-    child: child,
   );
 }
 
@@ -63,6 +101,9 @@ class SxHeader extends StatelessWidget {
 /// The scrolling body every screen uses: centered, capped at [Sx.contentWidth],
 /// with room at the bottom for the [SaveBar]. The last save's [ResultCard]
 /// comes after the screen's own cards, as the old `#result` did.
+///
+/// A child that is an [SxListCard] builds only its rows on screen. Every
+/// other child is built whole.
 class ScreenBody extends StatelessWidget {
   const ScreenBody({super.key, required this.children, this.bar});
 
@@ -78,26 +119,20 @@ class ScreenBody extends StatelessWidget {
     final shown = app?.result;
     final tab = TabScope.of(context);
     final children = [...this.children, if (shown != null && (tab == null || tab == app!.resultTab)) ResultCard(shown, key: ValueKey(app!.resultSeq))];
+    final side = sxSide(context);
+    final gap = gutter < 22 ? 12.0 : 18.0;
     return Column(
       children: [
         Expanded(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.fromLTRB(gutter, gutter < 22 ? 12 : 20, gutter, 28),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: Sx.contentWidth),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final (i, c) in children.indexed)
-                      Padding(
-                        padding: EdgeInsets.only(top: i == 0 ? 0 : (gutter < 22 ? 12 : 18)),
-                        child: c,
-                      ),
-                  ],
+          child: CustomScrollView(
+            slivers: [
+              for (final (i, c) in children.indexed)
+                SliverPadding(
+                  padding: EdgeInsets.fromLTRB(side, i == 0 ? (gutter < 22 ? 12 : 20) : gap, side, i == children.length - 1 ? 28 : 0),
+                  // its own layer, so a change in one card redraws that card only
+                  sliver: c is SxListCard ? c : SliverToBoxAdapter(child: RepaintBoundary(child: c)),
                 ),
-              ),
-            ),
+            ],
           ),
         ),
         ?bar,
@@ -211,44 +246,106 @@ class GroupLabel extends StatelessWidget {
 
 /// A small pill button, the old app's `.mini`. [primary] makes it lime, [on]
 /// marks something that is running (green).
-class MiniButton extends StatelessWidget {
+///
+/// It is drawn with plain boxes, a dozen widgets where Material's
+/// `OutlinedButton` is about 45. Lists hold several per row, so that was a
+/// large share of what those screens cost to build.
+class MiniButton extends StatefulWidget {
   const MiniButton(this.text, {super.key, required this.onPressed, this.icon, this.primary = false, this.on = false});
 
   final String text;
   final IconData? icon;
+
+  /// Null turns the button off.
   final VoidCallback? onPressed;
   final bool primary;
   final bool on;
 
   @override
-  Widget build(BuildContext context) => OutlinedButton(
-    onPressed: onPressed,
-    style: OutlinedButton.styleFrom(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 3),
-      minimumSize: const Size(0, 28),
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      shape: const StadiumBorder(),
-      textStyle: const TextStyle(fontFamily: Sx.body, fontSize: 12, fontWeight: FontWeight.w600),
-      backgroundColor: primary
-          ? Sx.primaryBottom
-          : on
-          ? Sx.green.withValues(alpha: .1)
-          : Sx.hover,
-      foregroundColor: primary
-          ? Sx.onPrimary
-          : on
-          ? Sx.green
-          : Sx.text,
-      side: primary ? BorderSide.none : BorderSide(color: on ? Sx.green : Sx.line),
-    ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (icon != null) Padding(padding: const EdgeInsets.only(right: 4), child: Icon(icon, size: 14)),
-        Text(text),
-      ],
-    ),
-  );
+  State<MiniButton> createState() => _MiniButtonState();
+}
+
+class _MiniButtonState extends State<MiniButton> {
+  var _hover = false;
+  var _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget;
+    final enabled = w.onPressed != null;
+    final fg = !enabled
+        ? Sx.mute
+        : w.primary
+        ? Sx.onPrimary
+        : w.on
+        ? Sx.green
+        : Sx.text;
+    final fill = !enabled
+        ? Colors.transparent
+        : w.primary
+        ? Sx.primaryBottom
+        : w.on
+        ? Sx.green.withValues(alpha: .1)
+        : Sx.hover;
+    // Material's tint under the pointer and under a press
+    final tint = enabled && (_down || _hover) ? fg.withValues(alpha: _down ? .1 : .08) : null;
+    // a laptop packs buttons tighter than a phone, as Material's did
+    final dense = Theme.of(context).visualDensity.baseSizeAdjustment;
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : MouseCursor.defer,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: w.onPressed,
+          onTapDown: enabled ? (_) => setState(() => _down = true) : null,
+          onTapUp: enabled ? (_) => setState(() => _down = false) : null,
+          onTapCancel: enabled ? () => setState(() => _down = false) : null,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: math.max(0, 28 + dense.dy)),
+            child: DecoratedBox(
+              decoration: ShapeDecoration(
+                color: tint == null ? fill : Color.alphaBlend(tint, fill),
+                shape: StadiumBorder(side: w.primary ? BorderSide.none : BorderSide(color: w.on ? Sx.green : Sx.line)),
+              ),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 11 + math.max(0, dense.dx), vertical: math.max(0, 3 + dense.dy)),
+                child: Align(
+                  widthFactor: 1,
+                  heightFactor: 1,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (w.icon != null)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: Icon(w.icon, size: 14, color: fg),
+                        ),
+                      Text(
+                        w.text,
+                        // the whole style, as Material's button gave its label: nothing comes from the text around it
+                        style: TextStyle(
+                          inherit: false,
+                          fontFamily: Sx.body,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: fg,
+                          textBaseline: TextBaseline.alphabetic,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// One button of the tab bar or of a [Seg]. The one that is [on] gets the

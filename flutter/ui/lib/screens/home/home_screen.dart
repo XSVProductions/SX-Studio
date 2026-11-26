@@ -154,18 +154,23 @@ class _Hero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final small = sxGutter(context) < 22;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
+    const round = BorderRadius.all(Radius.circular(16));
+    // Drawn once and kept: hovering a tile or any other change under the
+    // banner doesn't draw its gradients and blend again. The gradients carry
+    // the rounded corners themselves, so the banner needs no clip.
+    return RepaintBoundary(
       child: Container(
         foregroundDecoration: BoxDecoration(
           border: Border.all(color: Sx.line),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: round,
         ),
         decoration: const BoxDecoration(
+          borderRadius: round,
           gradient: LinearGradient(begin: Alignment(-.4, -1), end: Alignment(.4, 1), colors: [Color(0xFF10131A), Color(0xFF07080B)]),
         ),
         child: DecoratedBox(
           decoration: const BoxDecoration(
+            borderRadius: round,
             gradient: RadialGradient(
               center: Alignment(-.84, -1.2),
               radius: .9,
@@ -176,6 +181,7 @@ class _Hero extends StatelessWidget {
           ),
           child: DecoratedBox(
             decoration: const BoxDecoration(
+              borderRadius: round,
               gradient: RadialGradient(
                 center: Alignment(1, 1.4),
                 radius: .8,
@@ -248,6 +254,8 @@ class _Grid extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
+    // the banner's rounded corners, the only clip on the page
+    canvas.clipRRect(RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(16)));
     final paint = Paint()
       ..strokeWidth = 1
       ..shader = const LinearGradient(colors: [Color(0x05FFFFFF), Color(0x00FFFFFF)], stops: [0, .75]).createShader(Offset.zero & size);
@@ -330,23 +338,16 @@ class _TileState extends State<_Tile> {
   Widget build(BuildContext context) {
     final def = widget.def;
     final name = def.id == 'settings' ? 'Settings' : SettingsModel.of(AppScope.read(context)).nameOf(tabs.firstWhere((t) => t.id == def.id));
-    return ClipRRect(
+    return InkWell(
+      onTap: () => AppScope.read(context).go(def.id),
+      onHover: (h) => setState(() => _hover = h),
+      hoverColor: Colors.transparent,
       borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: () => AppScope.read(context).go(def.id),
-        onHover: (h) => setState(() => _hover = h),
-        hoverColor: Colors.transparent,
+      child: CustomPaint(
+        foregroundPainter: _TileEdge(hover: _hover),
         child: Container(
-          foregroundDecoration: BoxDecoration(
-            border: Border.all(color: Sx.line),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          decoration: BoxDecoration(
-            color: _hover ? Sx.hover : Sx.card,
-            // The lime bar on the left edge while the pointer is over the tile.
-            border: Border(left: BorderSide(color: _hover ? Sx.accent : Colors.transparent, width: 3)),
-          ),
-          padding: const EdgeInsets.fromLTRB(13, 14, 16, 15),
+          decoration: BoxDecoration(color: _hover ? Sx.hover : Sx.card, borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 15),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -374,4 +375,31 @@ class _TileState extends State<_Tile> {
       ),
     );
   }
+}
+
+/// A tile's thin outline, and while [hover] the lime bar along its left
+/// edge, cut to the rounded corners. Painted here so the tile needs no clip.
+class _TileEdge extends CustomPainter {
+  _TileEdge({required this.hover});
+
+  final bool hover;
+
+  /// So a theme switch repaints.
+  final light = Sx.isLight;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final r = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(12));
+    if (hover) {
+      canvas
+        ..save()
+        ..clipRRect(r)
+        ..drawRect(Rect.fromLTWH(0, 0, 3, size.height), Paint()..color = Sx.accent)
+        ..restore();
+    }
+    canvas.drawDRRect(r, r.deflate(1), Paint()..color = Sx.line);
+  }
+
+  @override
+  bool shouldRepaint(_TileEdge old) => old.hover != hover || old.light != light;
 }

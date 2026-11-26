@@ -138,6 +138,40 @@ void main() {
     await _done(tester, app);
   });
 
+  testWidgets('a status poll that holds the show turns Hold into Resume', (tester) async {
+    final e = _Engine();
+    final app = await _pump(tester, AutoScreen.new, e);
+    await tester.tap(find.text('Start Auto Show'));
+    await tester.pumpAndSettle();
+    expect(find.text('Hold'), findsOneWidget);
+
+    e.status = AutoStatus.fromJson({..._playing.toJson(), 'held': true});
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+    expect(find.text('Resume'), findsOneWidget);
+    expect(find.textContaining('held, stays on this look until you resume'), findsOneWidget);
+    await _done(tester, app);
+  });
+
+  testWidgets('a name typed into a look survives its row scrolling away and back', (tester) async {
+    final e = _Engine();
+    e.config.looks.addAll([
+      for (var i = 0; i < 30; i++) AutoLook(id: 'c${'$i'.padLeft(7, '0')}', name: 'Extra $i', bars: 8, on: true, titles: ['RED']),
+    ]);
+    final app = await _pump(tester, AutoScreen.new, e);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Circles'), 'Big circles');
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pump();
+
+    final list = find.byType(Scrollable).first;
+    await tester.scrollUntilVisible(find.widgetWithText(TextFormField, 'Extra 29'), 600, scrollable: list);
+    // the row is gone, not just out of view
+    expect(find.widgetWithText(TextFormField, 'Big circles', skipOffstage: false), findsNothing);
+    await tester.scrollUntilVisible(find.widgetWithText(TextFormField, 'Big circles'), -600, scrollable: list);
+    expect(app.dirtyTabs, contains('auto'));
+    await _done(tester, app);
+  });
+
   testWidgets('a look with two one-at-a-time buttons warns and offers a split', (tester) async {
     final e = _Engine();
     e.config.looks[1].titles = ['CIRCLE', 'FIGURE 8'];

@@ -1,11 +1,7 @@
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:path/path.dart' as p;
 
 import '../player/win32.dart';
-import 'dmx_output.dart';
 
 /// What the user sees when the driver answers but finds no interface.
 /// The hub retries on this one, since the interface can take a moment to be
@@ -13,85 +9,6 @@ import 'dmx_output.dart';
 const dmxNotFound =
     'The DMX interface (D512S) was not found. Check its USB cable - unplug it, plug it back in, wait a few seconds - and try again. '
     'ShowXpress must stay closed.';
-
-typedef _Call = Int64 Function();
-typedef _DartCall = int Function();
-
-/// Chauvet's own driver, `efk_hardware.dll` from the ShowXpress folder, on
-/// Windows. It drives the D512S USB interface.
-///
-/// The calls and their order are the `DllImport`s and `Open` in
-/// `dmx_out.ps1` and `player.ps1`. The C# declared every call as returning
-/// `long` (64-bit), and the interface names as a pointer to a UTF-16 string.
-///
-/// Not run on real hardware: written from the old source on Linux.
-class EfkDmx implements DmxOutput {
-  EfkDmx._(this.name, this._close, this._send, this._buf);
-
-  /// Loads the driver from [dir] and opens the first interface. Throws
-  /// [DmxError] with the old app's messages.
-  factory EfkDmx.open(String dir) {
-    final dll = p.join(dir, 'efk_hardware.dll');
-    if (!File(dll).existsSync()) throw DmxError("ShowXpress's interface driver (efk_hardware.dll) was not found in $dir");
-    final DynamicLibrary lib;
-    try {
-      // the driver loads its helpers by bare name from its own folder
-      setDllDirectory(dir);
-      lib = DynamicLibrary.open(dll);
-    } on ArgumentError catch (e) {
-      throw DmxError("The DMX output didn't start: ${e.message}");
-    }
-    final check = lib.lookupFunction<_Call, _DartCall>('EFK_check_hardware');
-    final open = lib.lookupFunction<_Call, _DartCall>('EFK_open');
-    final close = lib.lookupFunction<_Call, _DartCall>('EFK_close');
-    final stream = lib.lookupFunction<_Call, _DartCall>('EFK_stream_mode');
-    final names = lib.lookupFunction<Pointer<Uint16> Function(), Pointer<Uint16> Function()>('EFK_get_name_of_interfaces');
-    final send = lib.lookupFunction<Int64 Function(Pointer<Uint8>), int Function(Pointer<Uint8>)>('EFK_send_dmx');
-    check();
-    final n = fromWide(names());
-    final iface = n == null ? '' : _trimBarsAndSpaces(n);
-    if (iface.isEmpty || n!.startsWith('err')) throw DmxError(dmxNotFound);
-    open();
-    stream();
-    return EfkDmx._(iface.toUpperCase(), close, send, winAlloc<Uint8>(dmxFrameSize));
-  }
-
-  @override
-  final String name;
-  final _DartCall _close;
-  final int Function(Pointer<Uint8>) _send;
-  final Pointer<Uint8> _buf;
-  bool _closed = false;
-
-  @override
-  void send(Uint8List frame) {
-    if (_closed) return;
-    _buf.asTypedList(dmxFrameSize).setAll(0, frame);
-    _send(_buf);
-  }
-
-  /// Releases the interface, so ShowXpress can have it. Doesn't send
-  /// anything first: callers put the lights out themselves.
-  @override
-  void close() {
-    if (_closed) return;
-    _closed = true;
-    _close();
-    winFree(_buf);
-  }
-}
-
-/// .NET's `Trim('|', ' ')`.
-String _trimBarsAndSpaces(String s) {
-  var a = 0, b = s.length;
-  while (a < b && (s[a] == '|' || s[a] == ' ')) {
-    a++;
-  }
-  while (b > a && (s[b - 1] == '|' || s[b - 1] == ' ')) {
-    b--;
-  }
-  return s.substring(a, b);
-}
 
 // ---------------------------------------------------------------- is the interface still plugged in?
 

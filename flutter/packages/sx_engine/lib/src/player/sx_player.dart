@@ -46,8 +46,8 @@ class PlayerConfig {
 /// that keep-alive and black out the rig. This one has no keep-alive: it
 /// plays until it is told to stop or the app quits.
 ///
-/// The old player ran on Windows only. This one also runs on a Mac, through
-/// the `sxh_dmx` helper live aim uses there.
+/// The old player ran on Windows only. This one also runs on a Mac. On both
+/// the frames go out through the helper program live aim uses ([HelperDmx]).
 ///
 /// Port of `player.ps1` (the running part) and `SxPlayer.Run`.
 class SxPlayer {
@@ -165,8 +165,7 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
   }
   DmxOutput out;
   try {
-    // The Mac's driver runs in a helper program, which only opens asynchronously.
-    out = await openDmxAsync(cfg.dmx);
+    out = await openDmx(cfg.dmx);
   } on DmxError catch (e) {
     return owner.send(e.message);
   }
@@ -176,15 +175,17 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
   core.checkShow();
 
   // watch the interface: unplugged -> stop sending, plugged back -> open it again.
-  // On a Mac the helper ending is the sign, and opening it again starts a new one.
+  // Windows says whether the device is there. A Mac can't be asked, so there
+  // the helper ending is the only sign. Opening again starts a new helper.
   final device = cfg.dmx is EfkDmxSpec ? EfkDevice.find(out.name) : null;
-  bool present() => switch (cfg.dmx) {
+  bool plugged() => switch (cfg.dmx) {
     FakeDmxSpec(:final logPath?) => !File(p.join(p.dirname(logPath), '_iface_unplugged')).existsSync(),
-    EfkDmxSpec() => switch (out) {
-      HelperDmx(:final alive) => alive,
-      _ => device?.present() ?? true,
-    },
+    EfkDmxSpec() => device?.present() ?? true,
     _ => true,
+  };
+  bool helperEnded() => switch (out) {
+    HelperDmx(:final alive) => !alive,
+    _ => false,
   };
 
   final isWindows = Platform.isWindows && cfg.dmx is EfkDmxSpec;
@@ -254,14 +255,10 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
       return;
     }
     reopening = true;
-    try {
-      out.close();
-    } on Object {
-      // already gone
-    }
+    await out.close();
     await Future<void>.delayed(const Duration(milliseconds: 300));
     try {
-      out = await openDmxAsync(cfg.dmx);
+      out = await openDmx(cfg.dmx);
       lost = false;
       core.reconnects++;
     } on DmxError {
@@ -289,7 +286,7 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
       if (!lost && !reopening) out.send(dark);
       await Future<void>.delayed(const Duration(milliseconds: 30));
     }
-    out.close();
+    await out.close();
     if (isWindows) win.fineTimers(false);
     awake?.kill();
     Isolate.exit();
@@ -313,11 +310,12 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
     final o = core.frame(t);
     if (t - lastDev > 500) {
       lastDev = t;
-      if (!present()) {
+      final there = plugged();
+      if (!there || helperEnded()) {
         lost = true;
         backAt = -1;
-        // a Mac helper that ended never comes back by itself: start a new one
-        if (out is HelperDmx && !reopening && t >= retryAt) unawaited(reopen());
+        // a helper that ended never comes back by itself: start a new one
+        if (there && !reopening && t >= retryAt) unawaited(reopen());
       } else if (lost && !reopening) {
         if (backAt < 0) backAt = t;
         if (t - backAt > 1500 && t >= retryAt) unawaited(reopen());

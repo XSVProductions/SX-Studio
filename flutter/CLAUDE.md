@@ -118,7 +118,7 @@ cd packages/sx_engine
 dart run bin/sx_engine.dart --show /tmp/<you>/show --port <your port> --token dev --web ../../ui/build/web --dmx-log /tmp/<you>/frame.txt
 
 # web build. One at a time when several agents share a machine.
-cd ui && flutter build web --release --no-web-resources-cdn
+cd ui && flutter build web --release --wasm --no-web-resources-cdn
 
 # screenshot a tab
 chromium-browser --headless --no-sandbox --hide-scrollbars --window-size=1300,900 --virtual-time-budget=15000 \

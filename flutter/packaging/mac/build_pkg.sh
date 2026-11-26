@@ -12,7 +12,7 @@ cd "$ROOT/ui"
 # a checkout that gained a package since its last build needs this first
 flutter pub get
 # no CDN: a phone on a venue network must get every file from the laptop
-flutter build web --release --no-web-resources-cdn
+flutter build web --release --wasm --no-web-resources-cdn
 flutter build macos --release --build-name="$VER" --dart-define=SX_VERSION="$VER"
 
 rm -rf "$B"

@@ -551,8 +551,7 @@ class _AutoScreenState extends State<AutoScreen> {
           ),
         ),
         _bpmControls(),
-        if (first != null)
-          _Select<String>(width: 240, value: first, items: {for (final l in act) l.id: 'Start with ${l.name}'}, onPick: (v) => setState(() => _first = v)),
+        if (first != null) _Select<String>(value: first, items: {for (final l in act) l.id: 'Start with ${l.name}'}, onPick: (v) => setState(() => _first = v)),
         FilledButton.icon(
           onPressed: act.isNotEmpty && (i.ready || i.player) ? _start : null,
           icon: const Icon(Icons.play_arrow, size: 18),
@@ -797,7 +796,7 @@ class _LookRow extends StatelessWidget {
                   ),
                 ),
                 _Select<int>(
-                  width: 100,
+                  width: 88,
                   value: l.bars,
                   items: {for (final b in bars) b: '$b bar${b > 1 ? 's' : ''}'},
                   onPick: (v) {
@@ -965,21 +964,21 @@ class _TitleChip extends StatelessWidget {
   }
 }
 
-/// A drop-down, the old `select`, [width] wide so it doesn't change size
-/// with the label picked.
+/// A drop-down, the old `select`. It is [width] wide, or as wide as the
+/// label picked when [width] is null, for labels that hold a name.
 class _Select<T> extends StatelessWidget {
-  const _Select({required this.value, required this.items, required this.onPick, required this.width});
+  const _Select({required this.value, required this.items, required this.onPick, this.width});
 
   final T value;
   final Map<T, String> items;
   final ValueChanged<T> onPick;
-  final double width;
+  final double? width;
 
   @override
   Widget build(BuildContext context) => SizedBox(
     width: width,
     height: 34,
-    child: SxMenu<T>(items: items, value: value, onPick: onPick),
+    child: SxMenu<T>(items: items, value: value, onPick: onPick, expand: width != null),
   );
 }
 

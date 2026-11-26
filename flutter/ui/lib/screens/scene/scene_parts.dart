@@ -145,7 +145,8 @@ class SceneRow extends StatelessWidget {
       onTap: onTap,
       // the old `.sesc:hover` lightens the border
       builder: (context, hover) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        // 12 and 8 from the edge: the border takes the first pixel
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           color: Sx.panel,
           border: Border.all(color: hover ? Sx.line2 : Sx.line),

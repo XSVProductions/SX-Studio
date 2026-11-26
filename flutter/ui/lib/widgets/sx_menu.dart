@@ -109,7 +109,7 @@ class SxMenu<T> extends StatelessWidget {
               mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
               children: [
                 if (lead != null && picked != null && label != null) lead!(picked),
-                expand ? Expanded(child: text) : text,
+                expand ? Expanded(child: text) : Flexible(child: text),
                 Icon(Icons.arrow_drop_down, size: 24, color: on ? Sx.text2 : Sx.mute),
               ],
             ),

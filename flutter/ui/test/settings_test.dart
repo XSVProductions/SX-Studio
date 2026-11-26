@@ -138,7 +138,9 @@ void main() {
     final engine = _Engine();
     await _pump(tester, engine);
     // the first tab can't go up, and the last of a menu can't go down
-    expect(tester.widget<OutlinedButton>(find.ancestor(of: find.byIcon(Icons.arrow_drop_up).first, matching: find.byType(OutlinedButton))).onPressed, isNull);
+    await tester.tap(find.byIcon(Icons.arrow_drop_up).first);
+    await tester.pumpAndSettle();
+    expect(engine.posts['/api/settings/set'], isNull);
     await tester.tap(find.byIcon(Icons.arrow_drop_down).first);
     await tester.pumpAndSettle();
     final order = (engine.posts['/api/settings/set']!.last['tabOrder'] as List).cast<String>();
@@ -158,6 +160,26 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(engine.posts['/api/settings/set']!.last['tabNames'], <String, String>{});
+  });
+
+  _test('a name being typed survives its row scrolling away and back', (tester) async {
+    final engine = _Engine();
+    await _pump(tester, engine);
+    tester.view.physicalSize = const Size(1200, 700);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(TextField, 'Rig Test').first);
+    await tester.pump();
+    await tester.enterText(find.widgetWithText(TextField, 'Rig Test'), 'Hang check');
+    await tester.pump();
+    await tester.scrollUntilVisible(find.text('Updates'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Hang check'), findsNothing, reason: 'the row is off screen, so it is gone');
+    await tester.scrollUntilVisible(find.widgetWithText(TextField, 'Hang check'), -300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Hang check'), findsOneWidget);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(engine.posts['/api/settings/set']!.last['tabNames'], {'rt': 'Hang check'});
   });
 
   _test('Pair a phone shows the code', (tester) async {

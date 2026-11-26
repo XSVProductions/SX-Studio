@@ -136,31 +136,29 @@ class _HealthScreenState extends State<HealthScreen> with ShowWatcher {
         actions: [FilledButton(onPressed: _loading ? null : _load, child: const Text('Check again'))],
       ),
       children: [
-        SxCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SxHeader(
-                'Show health check',
-                sub:
-                    'Looks through the whole show for things that have caused trouble before: missing scenes, broken beat settings, '
-                    'APC pads that fire two buttons, colour chases that spin the wheel. Checking changes nothing. Each problem shows a '
-                    "recommended fix; where the helper can do it for you there's a button, and every fix can be reverted.",
-              ),
-              if (d != null && d.applied.isNotEmpty) _applied(app, d.applied),
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: _loading
-                    ? Text('Checking the show.', style: Sx.sub)
-                    : _error.isNotEmpty
-                    ? Text(_error, style: TextStyle(color: Sx.red, fontSize: 13))
-                    : d == null
-                    ? const SizedBox.shrink()
-                    : _summary(d),
-              ),
-              if (!_loading && d != null) ..._issues(d),
-            ],
-          ),
+        // one row per problem, so a show with hundreds builds only those on screen
+        SxListCard(
+          children: [
+            const SxHeader(
+              'Show health check',
+              sub:
+                  'Looks through the whole show for things that have caused trouble before: missing scenes, broken beat settings, '
+                  'APC pads that fire two buttons, colour chases that spin the wheel. Checking changes nothing. Each problem shows a '
+                  "recommended fix; where the helper can do it for you there's a button, and every fix can be reverted.",
+            ),
+            if (d != null && d.applied.isNotEmpty) _applied(app, d.applied),
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: _loading
+                  ? Text('Checking the show.', style: Sx.sub)
+                  : _error.isNotEmpty
+                  ? Text(_error, style: TextStyle(color: Sx.red, fontSize: 13))
+                  : d == null
+                  ? const SizedBox.shrink()
+                  : _summary(d),
+            ),
+            if (!_loading && d != null) ..._issues(d),
+          ],
         ),
       ],
     );

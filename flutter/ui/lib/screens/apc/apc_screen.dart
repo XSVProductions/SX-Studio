@@ -224,32 +224,20 @@ class _ApcScreenState extends State<ApcScreen> with ShowWatcher {
         border: Border.all(color: Sx.line),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: GridView.count(
-        crossAxisCount: 8,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        children: [
-          for (var r = 1; r <= 8; r++)
-            for (var c = 1; c <= 8; c++) _cell(e, (8 - r) * 8 + (c - 1)),
-        ],
-      ),
+      child: PadGrid(rows: 8, cell: (r, c, size) => _cell(e, (7 - r) * 8 + c, size)),
     ),
   );
 
   /// Pad [n]: tap it, drag it onto another pad, or right-click it.
-  Widget _cell(ApcEdits e, int n) => DragTarget<String>(
+  Widget _cell(ApcEdits e, int n, double size) => DragTarget<String>(
     onAcceptWithDetails: (d) => _edit((e) => e.drop(d.data, n)),
-    builder: (context, over, _) => LayoutBuilder(
-      builder: (context, box) => PadDraggable<String>(
-        data: e.dragFrom(n),
-        size: box.biggest,
-        child: GestureDetector(
-          onTap: () => _edit((e) => e.tap(n)),
-          onSecondaryTapUp: (d) => _menu(n, d.globalPosition),
-          child: _Pad(edits: e, n: n, drop: over.isNotEmpty),
-        ),
+    builder: (context, over, _) => PadDraggable<String>(
+      data: e.dragFrom(n),
+      size: Size.square(size),
+      child: GestureDetector(
+        onTap: () => _edit((e) => e.tap(n)),
+        onSecondaryTapUp: (d) => _menu(n, d.globalPosition),
+        child: _Pad(edits: e, n: n, drop: over.isNotEmpty),
       ),
     ),
   );
@@ -506,10 +494,9 @@ class _Pad extends StatelessWidget {
             border: Border.all(color: dup ? Sx.red : Sx.line, width: dup ? 2 : 1),
             borderRadius: BorderRadius.circular(7),
           ),
-          clipBehavior: Clip.antiAlias,
           child: Stack(
             children: [
-              Positioned(left: 0, right: 0, top: 0, height: 5, child: ColoredBox(color: padColor(e.on(p)) ?? padNoOn)),
+              PadStrip(padColor(e.on(p)) ?? padNoOn, border: dup ? 2 : 1),
               if (dup)
                 Positioned(
                   top: 8,

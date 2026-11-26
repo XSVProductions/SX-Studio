@@ -98,7 +98,13 @@ class _Apc40ScreenState extends State<Apc40Screen> {
     _polling = true;
     try {
       final s = await AppScope.read(context).client.apc40Status();
-      if (mounted) setState(() => _status = s);
+      // Most polls bring the same status. Redraw only when the line it shows changes.
+      final e = _e;
+      if (e != null && apc40StatusLine(e.info.windows, s) == apc40StatusLine(e.info.windows, _status)) {
+        _status = s;
+      } else if (mounted) {
+        setState(() => _status = s);
+      }
     } on Exception {
       // The next poll tries again, as the old one did.
     }
@@ -470,31 +476,20 @@ class _Apc40ScreenState extends State<Apc40Screen> {
         border: Border.all(color: Sx.line),
         borderRadius: BorderRadius.circular(14),
       ),
-      child: GridView.count(
-        crossAxisCount: 8,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        children: [
-          for (var r = 0; r < 5; r++)
-            for (var c = 0; c < 8; c++) _cell(e, (4 - r) * 8 + c),
-        ],
-      ),
+      child: PadGrid(rows: 5, cell: (r, c, size) => _cell(e, (4 - r) * 8 + c, size)),
     ),
   );
 
-  Widget _cell(Apc40Edits e, int n) => DragTarget<int>(
+  Widget _cell(Apc40Edits e, int n, double size) => DragTarget<int>(
     onAcceptWithDetails: (d) => _edit((e) => e.drop(d.data, n)),
-    builder: (context, over, _) => LayoutBuilder(
-      builder: (context, box) {
-        final pad = _A4Pad(edits: e, n: n, drop: over.isNotEmpty);
-        return PadDraggable<int>(
-          data: e.pg.pads.containsKey(n) ? n : null,
-          size: box.biggest,
-          child: GestureDetector(onTapUp: (d) => _tap(n, d.kind), onSecondaryTapUp: (d) => _menu(n, d.globalPosition), child: pad),
-        );
-      },
+    builder: (context, over, _) => PadDraggable<int>(
+      data: e.pg.pads.containsKey(n) ? n : null,
+      size: Size.square(size),
+      child: GestureDetector(
+        onTapUp: (d) => _tap(n, d.kind),
+        onSecondaryTapUp: (d) => _menu(n, d.globalPosition),
+        child: _A4Pad(edits: e, n: n, drop: over.isNotEmpty),
+      ),
     ),
   );
 
@@ -807,10 +802,9 @@ class _A4Pad extends StatelessWidget {
           border: Border.all(color: Sx.line),
           borderRadius: BorderRadius.circular(7),
         ),
-        clipBehavior: Clip.antiAlias,
         child: Stack(
           children: [
-            Positioned(left: 0, right: 0, top: 0, height: 5, child: ColoredBox(color: on)),
+            PadStrip(on, border: 1),
             Positioned(
               left: 5,
               right: 5,
@@ -944,36 +938,6 @@ class _Select<T> extends StatelessWidget {
   final String hint;
 
   @override
-  Widget build(BuildContext context) => DropdownButtonHideUnderline(
-    child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: Sx.well,
-        border: Border.all(color: Sx.line),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: DropdownButton<T>(
-        isExpanded: true,
-        isDense: true,
-        dropdownColor: Sx.panel,
-        style: TextStyle(fontFamily: Sx.body, fontSize: 13, color: Sx.text),
-        value: value,
-        hint: Text(
-          hint,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 13, color: Sx.text),
-        ),
-        items: [
-          for (final i in items.entries)
-            DropdownMenuItem(
-              value: i.key,
-              child: Text(i.value, overflow: TextOverflow.ellipsis),
-            ),
-        ],
-        onChanged: (v) {
-          if (v != null) onPick(v);
-        },
-      ),
-    ),
-  );
+  Widget build(BuildContext context) =>
+      SxMenu<T>(items: items, value: value, onPick: onPick, hint: hint, hintColor: Sx.text, padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6));
 }

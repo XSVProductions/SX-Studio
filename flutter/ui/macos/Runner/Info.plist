@@ -28,5 +28,10 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Draw with Skia. Impeller, Flutter's default since 3.47, stutters and
+	     flickers on Intel Macs (flutter/flutter#191538), and Flutter no longer
+	     tests on them. The two measure the same on Apple silicon. -->
+	<key>FLTEnableImpeller</key>
+	<false/>
 </dict>
 </plist>

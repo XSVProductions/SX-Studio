@@ -1,7 +1,12 @@
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/gestures.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/material.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/services.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:sx_studio/screens/apc40/apc40_screen.dart';
 
 import '../health/fixture.dart';
@@ -51,7 +56,7 @@ Canned _canned({Object? save}) => Canned({
 });
 
 /// The pad showing [title] in the grid.
-Finder _pad(String title) => find.descendant(of: find.byType(GridView), matching: find.text(title));
+Finder _pad(String title) => find.descendant(of: find.byType(PadGrid), matching: find.text(title));
 
 Map<String, Object?> _savedPads(Canned c, int page) {
   final layout = c.posts.lastWhere((p) => p.$1 == '/api/apc40/save').$2['layout']! as Map;
@@ -193,6 +198,27 @@ void main() {
     });
     final (_, end) = await pumpScreen(t, c, Apc40Screen.new, tab: 'apc40');
     expect(find.textContaining('The APC40 works with SX Studio on Windows.', findRichText: true), findsOneWidget);
+    await end();
+  });
+
+  testWidgets('the status poll shows a status that changed, though most polls bring the same one', (t) async {
+    Map<String, Object?> status(String at) => {
+      'ok': true,
+      'status': {'running': true, 'pid': 1, 'apc': 'ok', 'sx': 'ok', 'page': 1, 'pageName': 'Dancefloor', 'pages': 2, 'last': '', 'error': '', 'at': at},
+    };
+    final c = Canned({
+      '/api/apc40': _info(),
+      '/api/apc40/status': [
+        {'ok': true, 'status': null},
+        status('21:00:01'),
+      ],
+    });
+    final (_, end) = await pumpScreen(t, c, Apc40Screen.new, tab: 'apc40');
+    final line = find.textContaining('APC40 connected', findRichText: true);
+    expect(line, findsNothing);
+    await t.pump(const Duration(milliseconds: 1500));
+    await t.pump();
+    expect(line, findsOneWidget);
     await end();
   });
 }

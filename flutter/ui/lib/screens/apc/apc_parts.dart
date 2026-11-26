@@ -147,6 +147,68 @@ class PadDashed extends CustomPainter {
   bool shouldRepaint(PadDashed old) => old.accent != accent;
 }
 
+/// The pads in [rows] rows of 8 square cells, 6 apart, as wide as it is
+/// given. [cell] builds the pad at a row and column (0 is the top left) at
+/// [size] by [size]. Every pad is on screen at once, so this lays them out
+/// plainly: a `GridView` adds a keep-alive, semantics index and repaint
+/// boundary to each pad, and each layer costs drawing time.
+class PadGrid extends StatelessWidget {
+  const PadGrid({super.key, required this.rows, required this.cell});
+
+  final int rows;
+  final Widget Function(int row, int col, double size) cell;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final size = (box.maxWidth - 6 * 7) / 8;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (var r = 0; r < rows; r++)
+            Padding(
+              padding: EdgeInsets.only(top: r == 0 ? 0 : 6),
+              child: Row(
+                children: [
+                  for (var c = 0; c < 8; c++)
+                    Padding(
+                      padding: EdgeInsets.only(left: c == 0 ? 0 : 6),
+                      child: SizedBox.square(dimension: size, child: cell(r, c, size)),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
+/// The lit strip along the top of a used pad, in its "playing" colour. Its
+/// top corners follow the pad's rounded inside edge, so the pad needs no
+/// clip: a clip on each of 64 pads was the slowest part of drawing the tab.
+/// [border] is the pad's border width, inside which the strip sits.
+class PadStrip extends StatelessWidget {
+  const PadStrip(this.color, {super.key, required this.border});
+
+  final Color color;
+  final double border;
+
+  @override
+  Widget build(BuildContext context) => Positioned(
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 5,
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(7 - border)),
+      ),
+    ),
+  );
+}
+
 /// One line of a [showPadMenu].
 typedef PadMenuItem = ({String text, bool enabled, VoidCallback go});
 

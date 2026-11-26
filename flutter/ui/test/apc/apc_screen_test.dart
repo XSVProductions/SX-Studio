@@ -1,7 +1,12 @@
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/gestures.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/material.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/services.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:sx_studio/screens/apc/apc_screen.dart';
 
 import '../health/fixture.dart';
@@ -82,7 +87,7 @@ void main() {
 
   testWidgets('drag a pad onto a free pad to move it there', (t) async {
     final (app, end) = await pumpScreen(t, Canned({'/api/apc': _apc}), ApcScreen.new, tab: 'apc');
-    final red = find.descendant(of: find.byType(GridView), matching: find.text('RED'));
+    final red = find.descendant(of: find.byType(PadGrid), matching: find.text('RED'));
     final from = t.getCenter(red);
     final g = await t.startGesture(from, kind: PointerDeviceKind.mouse);
     await g.moveBy(const Offset(20, 0));

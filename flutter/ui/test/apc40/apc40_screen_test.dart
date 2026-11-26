@@ -1,10 +1,6 @@
-import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/gestures.dart';
-import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/material.dart';
-import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter/services.dart';
-import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sx_studio/screens/apc/apc_parts.dart';
 import 'package:sx_studio/screens/apc40/apc40_screen.dart';

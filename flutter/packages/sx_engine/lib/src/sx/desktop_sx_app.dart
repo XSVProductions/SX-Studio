@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sx_api/sx_api.dart';
 
 import '../show/text_files.dart';
+import 'mac_procs.dart';
 import 'sx_app.dart';
 import 'sx_process.dart';
 import 'windows_desk.dart';
@@ -137,14 +138,10 @@ class WindowsSx implements SxOs {
 /// ShowXpress on a Mac: `TheLightingController.app`.
 class MacSx implements SxOs {
   @override
-  List<SxProc> processes() {
-    try {
-      final r = Process.runSync('ps', ['-axo', 'pid=,stat=,comm=']);
-      return parseMacPs('${r.stdout}');
-    } on ProcessException {
-      return const [];
-    }
-  }
+  List<SxProc> processes() => [
+    for (final x in macProcesses())
+      if (isMacSxExe(x.exe)) x,
+  ];
 
   /// ShowXpress's app: in Applications, or in a ShowXpress folder there (the
   /// download's layout, with the interface driver next to the app), else

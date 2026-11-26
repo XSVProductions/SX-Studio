@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../dmx/dmx_output.dart';
 import '../dmx/efk_dmx.dart';
+import '../dmx/helper_dmx.dart';
 import '../show/show_env.dart';
 import 'midi_winmm.dart';
 import 'os2l.dart';
@@ -25,7 +26,8 @@ class PlayerConfig {
   final String show;
   final DmxSpec dmx;
 
-  /// Open the APC mini (ShowXpress's MIDI devices). Windows only.
+  /// Open the APC mini (ShowXpress's MIDI devices). Windows only: on a Mac
+  /// the player is worked from the screen and from phones.
   final bool midi;
 
   /// Listen for VirtualDJ on this port. 0 = don't.
@@ -43,6 +45,9 @@ class PlayerConfig {
 /// by a line from the server every second, and one slow request could starve
 /// that keep-alive and black out the rig. This one has no keep-alive: it
 /// plays until it is told to stop or the app quits.
+///
+/// The old player ran on Windows only. This one also runs on a Mac, through
+/// the `sxh_dmx` helper live aim uses there.
 ///
 /// Port of `player.ps1` (the running part) and `SxPlayer.Run`.
 class SxPlayer {
@@ -160,7 +165,8 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
   }
   DmxOutput out;
   try {
-    out = openDmx(cfg.dmx);
+    // The Mac's driver runs in a helper program, which only opens asynchronously.
+    out = await openDmxAsync(cfg.dmx);
   } on DmxError catch (e) {
     return owner.send(e.message);
   }
@@ -169,14 +175,30 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
   core.setBpm(playerStartBpm(cfg.show), 0, 'manual');
   core.checkShow();
 
-  // watch the interface: unplugged -> stop sending, plugged back -> open it again
-  final bool Function() present = switch (cfg.dmx) {
-    FakeDmxSpec(:final logPath?) => () => !File(p.join(p.dirname(logPath), '_iface_unplugged')).existsSync(),
-    EfkDmxSpec() => EfkDevice.find(out.name)?.present ?? () => true,
-    _ => () => true,
+  // watch the interface: unplugged -> stop sending, plugged back -> open it again.
+  // On a Mac the helper ending is the sign, and opening it again starts a new one.
+  final device = cfg.dmx is EfkDmxSpec ? EfkDevice.find(out.name) : null;
+  bool present() => switch (cfg.dmx) {
+    FakeDmxSpec(:final logPath?) => !File(p.join(p.dirname(logPath), '_iface_unplugged')).existsSync(),
+    EfkDmxSpec() => switch (out) {
+      HelperDmx(:final alive) => alive,
+      _ => device?.present() ?? true,
+    },
+    _ => true,
   };
 
   final isWindows = Platform.isWindows && cfg.dmx is EfkDmxSpec;
+  // No sleep and the screen stays on while the player runs. Windows is asked
+  // again every 30 seconds below. A Mac is held awake by `caffeinate`, which
+  // ends with the app if the player never gets to stop it.
+  Process? awake;
+  if (Platform.isMacOS && cfg.dmx is EfkDmxSpec) {
+    try {
+      awake = await Process.start('/usr/bin/caffeinate', ['-d', '-i', '-w', '$pid']);
+    } on ProcessException {
+      // the Mac may sleep: the lights still play
+    }
+  }
   WinMidi? midi;
   if (cfg.midi && isWindows) {
     try {
@@ -239,7 +261,7 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
     }
     await Future<void>.delayed(const Duration(milliseconds: 300));
     try {
-      out = openDmx(cfg.dmx);
+      out = await openDmxAsync(cfg.dmx);
       lost = false;
       core.reconnects++;
     } on DmxError {
@@ -269,6 +291,7 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
     }
     out.close();
     if (isWindows) win.fineTimers(false);
+    awake?.kill();
     Isolate.exit();
   }
 
@@ -293,6 +316,8 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
       if (!present()) {
         lost = true;
         backAt = -1;
+        // a Mac helper that ended never comes back by itself: start a new one
+        if (out is HelperDmx && !reopening && t >= retryAt) unawaited(reopen());
       } else if (lost && !reopening) {
         if (backAt < 0) backAt = t;
         if (t - backAt > 1500 && t >= retryAt) unawaited(reopen());

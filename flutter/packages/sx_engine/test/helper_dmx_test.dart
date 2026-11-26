@@ -39,6 +39,16 @@ void main() {
     expect(got.readAsLinesSync(), ['b:1:255 b:10:7', 'b:10:0', 'q']);
   });
 
+  test('says when the helper has ended', () async {
+    final out = await HelperDmx.open(helper: helper('echo "OK D512S"\nread line'), driverDir: tmp.path);
+    expect(out.alive, isTrue);
+    out.close();
+    for (var i = 0; i < 50 && out.alive; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    expect(out.alive, isFalse);
+  });
+
   test('no interface gives the old message', () async {
     await expectLater(
       HelperDmx.open(helper: helper('echo "ERR none"'), driverDir: tmp.path),

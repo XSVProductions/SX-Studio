@@ -26,7 +26,9 @@ import 'efk_dmx.dart';
 /// interface plugged in: the driver loads and the old "not found" message
 /// comes back. Not checked with an interface.
 class HelperDmx implements DmxOutput {
-  HelperDmx._(this.name, this._proc);
+  HelperDmx._(this.name, this._proc) {
+    unawaited(_proc.exitCode.then((_) => _alive = false));
+  }
 
   /// Starts [helper] for the ShowXpress folder [driverDir]. Throws [DmxError]
   /// with the old app's messages (`Start-Live` and `Open-DmxChild`).
@@ -63,6 +65,11 @@ class HelperDmx implements DmxOutput {
   final _sent = Uint8List(dmxFrameSize);
   var _lastLine = DateTime.now();
   bool _closed = false;
+  bool _alive = true;
+
+  /// False once the helper has ended, asked to or not. It ends by itself
+  /// when the driver stops answering or SX Studio stops writing to it.
+  bool get alive => _alive;
 
   @override
   void send(Uint8List frame) {

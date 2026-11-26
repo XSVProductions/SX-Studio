@@ -75,15 +75,12 @@ class LabButton {
 /// and friends). The keep-alive (`Step-PlayerKeep`) is gone: the player
 /// lives on the engine's own process and needs none.
 class LabPlayer implements PlayerControl, LabPlayerHooks {
-  LabPlayer(this.e, {bool? onMac}) : onMac = onMac ?? Platform.isMacOS {
+  LabPlayer(this.e) {
     e.dmx.playerOn = () => running;
     e.dmx.stopPlayer = stop;
   }
 
   final Engine e;
-
-  /// The old app ran the player on Windows only, for now. Defaults to this computer.
-  final bool onMac;
 
   SxPlayer? _player;
 
@@ -140,10 +137,11 @@ class LabPlayer implements PlayerControl, LabPlayerHooks {
 
   void _setEvent(String kind, String text) => event = PlayEvent(++_evN, kind, text, roundTripDate(DateTime.now()));
 
-  /// Port of `Start-Player`. Answers `{ok, iface, out, error}`.
+  /// Port of `Start-Player`. Answers `{ok, iface, out, error}`. The old one
+  /// refused on a Mac ("the Mac part comes in a later stage"). This one plays
+  /// there too.
   Future<Json> start(String root) async {
     await stop();
-    if (onMac) return {'ok': false, 'error': 'The SX Player only runs on Windows for now - the Mac part comes in a later stage.', 'out': ''};
     final spec = e.dmx.spec;
     final fake = spec is FakeDmxSpec;
     final dev = fake ? const PlayerDevices() : PlayerDevices.read(root);
@@ -326,7 +324,7 @@ class LabPlayer implements PlayerControl, LabPlayerHooks {
         labMap[lb.sec] = lb;
       }
     }
-    final windows = !onMac && Platform.isWindows;
+    final windows = Platform.isWindows;
     if (stopNova && windows) {
       await pauseNova();
     }

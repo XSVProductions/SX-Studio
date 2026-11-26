@@ -41,6 +41,15 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
 
   ScenePreview? _pv;
 
+  /// The step a playing preview is on. Only the step strip shows it, so a
+  /// new step rebuilds the strip and not the screen.
+  final _playAt = ValueNotifier(-1);
+
+  /// Goes up with each change to a value or fade of the step on screen. The
+  /// step strip, the grid, the saved pill and the bar follow it, and the
+  /// channel row redraws itself, so a slider drag doesn't rebuild the screen.
+  final _edits = ValueNotifier(0);
+
   /// "Open ShowXpress again when I stop".
   var _reo = false;
 
@@ -85,6 +94,8 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   void dispose() {
     _app.removeListener(_onApp);
     unawaited(_pv?.stop());
+    _playAt.dispose();
+    _edits.dispose();
     super.dispose();
   }
 
@@ -205,6 +216,16 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   /// mark the tab, and send the new frame to the lights.
   void _changed(VoidCallback f) {
     setState(f);
+    _markDirty();
+    _pv?.push(_work!, _cur);
+  }
+
+  /// A value or fade changed in the step on screen: what [_edits] drives
+  /// redraws, the tab is marked, the lights get the new frame. Like the old
+  /// slider's `put` and `seLite`.
+  void _edited(VoidCallback f) {
+    f();
+    _edits.value++;
     _markDirty();
     _pv?.push(_work!, _cur);
   }
@@ -382,14 +403,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     final c = await _closeSx();
     if (!c.go || !mounted) return;
     setState(() => _busy = '');
-    final (pv, r) = await ScenePreview.start(
-      _app.client,
-      w,
-      onFailed: _pvFailed,
-      onStep: (_) {
-        if (mounted) setState(() {});
-      },
-    );
+    final (pv, r) = await ScenePreview.start(_app.client, w, onFailed: _pvFailed, onStep: (at) => _playAt.value = at);
     if (!mounted) {
       await pv?.stop();
       return;
@@ -454,53 +468,62 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final w = _work;
-    final dirty = w?.dirty ?? false;
-    final hint = _busy.isNotEmpty
-        ? _busy
-        : w == null
-        ? 'Open a scene to change it.'
-        : w.readonly
-        ? 'This scene can only be changed in ShowXpress.'
-        : app.sxOpen
-        ? 'ShowXpress is open. A save waits until it closes.'
-        : dirty
-        ? '${w.what()}. Only that is changed in the file.'
-        : 'Matches the show.';
     final phone = sxGutter(context) < 22;
     return ScreenBody(
-      bar: SaveBar(
-        hint: hint,
-        actions: [
-          OutlinedButton(onPressed: dirty && _busy.isEmpty ? _undo : null, child: const Text('Undo changes')),
-          FilledButton(onPressed: dirty && _busy.isEmpty ? _save : null, child: const Text('Save scene')),
-        ],
+      bar: ValueListenableBuilder(
+        valueListenable: _edits,
+        builder: (context, _, _) {
+          final dirty = w?.dirty ?? false;
+          final hint = _busy.isNotEmpty
+              ? _busy
+              : w == null
+              ? 'Open a scene to change it.'
+              : w.readonly
+              ? 'This scene can only be changed in ShowXpress.'
+              : app.sxOpen
+              ? 'ShowXpress is open. A save waits until it closes.'
+              : dirty
+              ? '${w.what()}. Only that is changed in the file.'
+              : 'Matches the show.';
+          return SaveBar(
+            hint: hint,
+            actions: [
+              OutlinedButton(onPressed: dirty && _busy.isEmpty ? _undo : null, child: const Text('Undo changes')),
+              FilledButton(onPressed: dirty && _busy.isEmpty ? _save : null, child: const Text('Save scene')),
+            ],
+          );
+        },
       ),
       children: [
-        SxCard(
+        // one child per scene in the list, so only the rows on screen are built
+        SxListCard(
           padding: phone ? const EdgeInsets.fromLTRB(14, 14, 14, 14) : const EdgeInsets.fromLTRB(20, 18, 20, 18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SxHeader(
-                w?.scene.name ?? 'Scene Editor',
-                sub:
-                    "Change a scene's steps and values and see it on the lights. Saving changes only what you changed in the scene file. "
-                    'Everything else in it stays exactly as ShowXpress wrote it.',
-                actions: [
-                  if (w != null && !phone) SceneStateTag(dirty: dirty),
-                  if (w != null) OutlinedButton.icon(onPressed: _back, icon: const Icon(Icons.arrow_back, size: 16), label: const Text('All scenes')),
-                  if (!phone || w == null) OutlinedButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh, size: 16), label: const Text('Reload')),
-                ],
-              ),
-              ErrorBox(_error),
-              if (w == null) ..._listView(phone) else ..._editor(w, phone),
-            ],
-          ),
+          stretch: true,
+          children: [
+            SxHeader(
+              w?.scene.name ?? 'Scene Editor',
+              sub:
+                  "Change a scene's steps and values and see it on the lights. Saving changes only what you changed in the scene file. "
+                  'Everything else in it stays exactly as ShowXpress wrote it.',
+              actions: [
+                if (w != null && !phone) _stateTag(w),
+                if (w != null) OutlinedButton.icon(onPressed: _back, icon: const Icon(Icons.arrow_back, size: 16), label: const Text('All scenes')),
+                if (!phone || w == null) OutlinedButton.icon(onPressed: _reload, icon: const Icon(Icons.refresh, size: 16), label: const Text('Reload')),
+              ],
+            ),
+            ErrorBox(_error),
+            if (w == null) ..._listView(phone) else ..._editor(w, phone),
+          ],
         ),
         if (w != null && _backups.isNotEmpty) _backupsCard(app.sxOpen),
       ],
     );
   }
+
+  Widget _stateTag(SceneWork w) => ValueListenableBuilder(
+    valueListenable: _edits,
+    builder: (context, _, _) => SceneStateTag(dirty: w.dirty),
+  );
 
   void _undo() => _changed(() {
     final w = _work!;
@@ -604,10 +627,7 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
       if (phone)
         Padding(
           padding: const EdgeInsets.only(top: 10),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: SceneStateTag(dirty: w.dirty),
-          ),
+          child: Align(alignment: Alignment.centerLeft, child: _stateTag(w)),
         ),
       Padding(
         padding: const EdgeInsets.only(top: 8),
@@ -686,7 +706,10 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     return [
       _preview(w),
       SceneGroupHead('STEPS', count: '$n step${n == 1 ? '' : 's'} · loop $loop s'),
-      StepStrip(work: w, cur: _cur, playing: _pv?.playingAt ?? -1, onPick: _pickStep),
+      ListenableBuilder(
+        listenable: Listenable.merge([_playAt, _edits]),
+        builder: (context, _) => StepStrip(work: w, cur: _cur, playing: _pv?.playingAt ?? -1, onPick: _pickStep),
+      ),
       const SizedBox(height: 10),
       Wrap(
         spacing: 6,
@@ -739,7 +762,10 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
           ),
         ],
       ),
-      SceneGrid(work: w, cur: _cur, sel: _sel, selVer: _selVer, onPick: _gridPick),
+      ListenableBuilder(
+        listenable: _edits,
+        builder: (context, _) => SceneGrid(work: w, cur: _cur, sel: _sel, selVer: _selVer, onPick: _gridPick),
+      ),
       const SizedBox(height: 14),
       if (wide)
         Row(
@@ -798,17 +824,20 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
         ),
       ),
       if (rows.isEmpty) Text('${names.length == 1 ? 'This head has' : 'These heads have'} no channels in this step.', style: Sx.sub),
+      // a value or fade change redraws its own row, not the screen
       for (final r in rows)
-        SceneChannelRow(
+        StatefulBuilder(
           key: ValueKey(r.ix),
-          work: w,
-          step: _cur,
-          row: r,
-          model: _mo,
-          narrow: narrow,
-          onValue: (v) => _changed(() => w.setValue(_cur, r.keys, v)),
-          onFade: (on) => _changed(() => w.setFade(_cur, r.keys, on)),
-          onDelete: () => _delCh(r.ix),
+          builder: (context, redraw) => SceneChannelRow(
+            work: w,
+            step: _cur,
+            row: r,
+            model: _mo,
+            narrow: narrow,
+            onValue: (v) => redraw(() => _edited(() => w.setValue(_cur, r.keys, v))),
+            onFade: (on) => redraw(() => _edited(() => w.setFade(_cur, r.keys, on))),
+            onDelete: () => _delCh(r.ix),
+          ),
         ),
       if (add.isNotEmpty)
         Padding(
@@ -844,19 +873,17 @@ class _SceneScreenState extends State<SceneScreen> with ShowWatcher {
     ]);
   }
 
-  Widget _backupsCard(bool sxOpen) => SxCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const SxHeader('Earlier versions', sub: 'Every save keeps the scene as it was just before. Revert puts one back (with ShowXpress closed).'),
-        const SizedBox(height: 4),
-        for (final b in _backups)
-          SceneRow(
-            name: b.at.replaceFirst('T', ' '),
-            small: b.what,
-            right: MiniButton('Revert to this', onPressed: sxOpen || _busy.isNotEmpty ? null : () => _revert(b.id)),
-          ),
-      ],
-    ),
+  Widget _backupsCard(bool sxOpen) => SxListCard(
+    stretch: true,
+    children: [
+      const SxHeader('Earlier versions', sub: 'Every save keeps the scene as it was just before. Revert puts one back (with ShowXpress closed).'),
+      const SizedBox(height: 4),
+      for (final b in _backups)
+        SceneRow(
+          name: b.at.replaceFirst('T', ' '),
+          small: b.what,
+          right: MiniButton('Revert to this', onPressed: sxOpen || _busy.isNotEmpty ? null : () => _revert(b.id)),
+        ),
+    ],
   );
 }

@@ -7,7 +7,9 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sx_api/sx_api.dart';
 import 'package:sx_studio/app_state.dart';
+import 'package:sx_studio/page_store.dart';
 import 'package:sx_studio/screens/aim/aim_screen.dart';
+import 'package:sx_studio/screens/aim/live_aim_screen.dart';
 import 'package:sx_studio/theme.dart';
 
 Map<String, Object?> _tile(String label, {String warn = '', bool is140 = true}) => {
@@ -212,4 +214,102 @@ void main() {
     expect(find.widgetWithText(TextField, '150'), findsOneWidget, reason: '`reloadAll` clears `LD`');
     app.dispose();
   });
+
+  testWidgets('a drag in live aim moves the numbers without rebuilding the rest of the screen', (tester) async {
+    // a phone, so the test font's wide letters fit the pan and tilt lines
+    tester.view
+      ..physicalSize = const Size(400, 2000)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    LiveHead head(String id) => LiveHead(
+      id: id,
+      label: 'H$id',
+      is140: true,
+      addr: int.parse(id) * 16,
+      look: const [(5, 255)],
+      dimI: 5,
+      shutI: 6,
+      c: (22600, 49700),
+      k: (19000, 53100),
+      home: (22600, 49700),
+      dk: (19000, 53100),
+      kSet: false,
+      free: true,
+      partner: '',
+      tower: '',
+      side: '',
+      order: int.parse(id),
+      hung: true,
+      deg: (540, 270),
+      rp: false,
+      rt: false,
+    );
+    final client = SxClient(
+      Uri.parse('http://laptop'),
+      token: 't',
+      client: MockClient(
+        (req) async => http.Response(
+          jsonEncode(
+            req.method == 'POST'
+                ? {'ok': true, 'out': '', 'error': ''}
+                : {
+                    'ok': true,
+                    'open': false,
+                    'q': {'items': <Object>[], 'reopen': true},
+                  },
+          ),
+          200,
+        ),
+      ),
+    );
+    final app = AppState(client, tab: 'aim');
+    await tester.pumpWidget(
+      AppScope(
+        state: app,
+        child: MaterialApp(
+          theme: sxTheme(),
+          home: LiveAimScreen(
+            mode: AimMode.floor,
+            start: LiveStart(
+              ok: true,
+              test: true,
+              info: LiveAimInfo(show: 's', mode: 'Floor', aimTitle: 'DF AIM (ADJUST)', heads: [head('1'), head('2')]),
+            ),
+            reopen: true,
+            prefs: _Prefs(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('22600  '), findsOneWidget);
+
+    final g = await tester.startGesture(tester.getCenter(find.text('Put your finger in this box and drag')));
+    await tester.pump();
+    await g.moveBy(const Offset(10, 0));
+    await tester.pump();
+    expect(find.text('22700  '), findsOneWidget, reason: '10 steps a pixel');
+    // the first step made the head aimed, which the list shows; later steps change only the numbers
+    final other = tester.widget(find.text('H2'));
+    await g.moveBy(const Offset(10, 0));
+    await tester.pump();
+    expect(find.text('22800  '), findsOneWidget);
+    expect(identical(tester.widget(find.text('H2')), other), isTrue, reason: 'the head list was not rebuilt');
+    await g.up();
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox());
+    app.dispose();
+  });
+}
+
+/// This device's store, kept in memory.
+class _Prefs implements PageStore {
+  final _kept = <String, String>{};
+
+  @override
+  String? get(String key) => _kept[key];
+
+  @override
+  void set(String key, String value) => _kept[key] = value;
 }

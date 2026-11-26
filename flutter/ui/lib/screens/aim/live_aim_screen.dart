@@ -59,6 +59,22 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
   var _dragging = false;
   String? _gone;
 
+  /// Ticks on a drag step that changed only the picked head's numbers. The
+  /// pan and tilt lines and the minimap listen to it, so a drag doesn't
+  /// rebuild the whole screen on every pointer move.
+  final _moved = ValueNotifier<int>(0);
+
+  /// [_shown] as of the last full build.
+  Object? _shape;
+
+  /// Everything outside the pan and tilt lines and the minimap that a drag
+  /// can change: which head and step, whether it counts as aimed, Undo and
+  /// the tab's dirty mark.
+  Object get _shown {
+    final h = _m.sel, w = _m.w(h);
+    return (h.id, _m.step, w.tc, w.tk, _m.canUndo, _m.edited);
+  }
+
   /// Holds the mouse in place while dragging in the pad (old `requestPointerLock`).
   late final _lock = PointerLock(
     onMove: (dx, dy, {required shift, required ctrl}) {
@@ -92,6 +108,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
     _lock.stop();
     _pump.close();
     _focus.dispose();
+    _moved.dispose();
     super.dispose();
   }
 
@@ -115,12 +132,17 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
     setState(() => _m.flip = f);
   }
 
-  /// After any change: queue the new values, send soon, redraw.
-  void _output({bool snap = false}) {
+  /// After any change: queue the new values, send soon, redraw. A drag step,
+  /// [moved], redraws only the numbers, unless it changed more than those.
+  void _output({bool snap = false, bool moved = false}) {
     _buffer.push(_m, snap: snap);
     _pump.kick();
     AppScope.read(context).setDirty('aim', _m.edited);
-    setState(() {});
+    if (moved && _shown == _shape) {
+      _moved.value++;
+    } else {
+      setState(() {});
+    }
   }
 
   void _endDrag() {
@@ -130,7 +152,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
 
   void _move(double dx, double dy, {bool fine = false, bool fast = false}) {
     if (_gone != null) return;
-    if (_m.move(dx, dy, fine: fine, fast: fast)) _output();
+    if (_m.move(dx, dy, fine: fine, fast: fast)) _output(moved: true);
   }
 
   Future<void> _reconnect() async {
@@ -224,6 +246,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
 
   @override
   Widget build(BuildContext context) {
+    _shape = _shown;
     final phone = MediaQuery.sizeOf(context).width <= 760;
     final body = phone
         ? ListView(
@@ -566,7 +589,7 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
   }
 
   Widget _side({required bool phone}) {
-    final h = _m.sel, w = _m.w(h), cp = _m.copies(h), pt = _m.partner(h), p = _m.pos(h, _m.step);
+    final h = _m.sel, w = _m.w(h), cp = _m.copies(h), pt = _m.partner(h);
     final where = h.tower.isEmpty ? '' : ' · ${h.tower}${h.side.isEmpty ? '' : (h.side == 'L' ? ' left' : ' right')}';
     final status = cp
         ? 'Not aimed. It gets the same aim as *${pt!.label}* next to it. Drag to aim it yourself.'
@@ -676,25 +699,36 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
         const SizedBox(height: 2),
         boldText(status, style: Sx.sub),
         const SizedBox(height: 6),
-        for (final (axis, name) in [(0, 'Pan'), (1, 'Tilt')])
-          Padding(
-            padding: const EdgeInsets.only(bottom: 3),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
+        ValueListenableBuilder(
+          valueListenable: _moved,
+          builder: (context, _, _) {
+            final p = _m.pos(h, _m.step);
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: 40,
-                  child: Text(name, style: TextStyle(color: Sx.dim, fontSize: 12.5)),
-                ),
-                Text(
-                  '${jsRound(axis == 0 ? p.$1 : p.$2)}  ',
-                  style: TextStyle(color: Sx.text, fontSize: 12.5, fontWeight: FontWeight.w500),
-                ),
-                Text(deg(axis == 0 ? p.$1 : p.$2, axis), style: TextStyle(color: Sx.dim, fontSize: 12)),
+                for (final (axis, name) in [(0, 'Pan'), (1, 'Tilt')])
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 3),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        SizedBox(
+                          width: 40,
+                          child: Text(name, style: TextStyle(color: Sx.dim, fontSize: 12.5)),
+                        ),
+                        Text(
+                          '${jsRound(axis == 0 ? p.$1 : p.$2)}  ',
+                          style: TextStyle(color: Sx.text, fontSize: 12.5, fontWeight: FontWeight.w500),
+                        ),
+                        Text(deg(axis == 0 ? p.$1 : p.$2, axis), style: TextStyle(color: Sx.dim, fontSize: 12)),
+                      ],
+                    ),
+                  ),
               ],
-            ),
-          ),
+            );
+          },
+        ),
         const SizedBox(height: 8),
         Center(
           child: ConstrainedBox(
@@ -707,7 +741,10 @@ class _LiveAimScreenState extends State<LiveAimScreen> {
                   border: Border.all(color: Sx.line),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: CustomPaint(painter: _MapPainter(_mapOf(h))),
+                child: ValueListenableBuilder(
+                  valueListenable: _moved,
+                  builder: (context, _, _) => CustomPaint(painter: _MapPainter(_mapOf(h))),
+                ),
               ),
             ),
           ),

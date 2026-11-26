@@ -16,9 +16,6 @@ import 'look_play.dart';
 /// Where the Looks settings are kept between runs (the old page's localStorage key).
 const lookPrefsKey = 'sxh_looks';
 
-/// A light's color from the look: data, not a theme color.
-Color _hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
-
 /// One-click Looks: a new scene from a template for the heads picked.
 ///
 /// The steps are worked out here with `buildLook`, the engine only checks
@@ -61,9 +58,6 @@ class _LookScreenState extends State<LookScreen> {
   /// The look on show, for the lights.
   BuiltLook? _cur;
 
-  /// Wakes the "How it looks" box at the next step.
-  Timer? _anim;
-
   late final OnTheLights _lights = OnTheLights(AppScope.read(context), raw: true, tick: const Duration(milliseconds: 40), frame: _frame);
 
   @override
@@ -77,7 +71,6 @@ class _LookScreenState extends State<LookScreen> {
 
   @override
   void dispose() {
-    _anim?.cancel();
     _lights.dispose();
     _name.dispose();
     super.dispose();
@@ -136,18 +129,6 @@ class _LookScreenState extends State<LookScreen> {
   void _lightsOn() => _lights.go(context, title: 'Close ShowXpress to see the look on the lights?', again: 'Show on the lights', onLost: _lightsLost);
 
   void _lightsLost(String error) => AppScope.read(context).showResult(failedResult('clprev', '$error${_lights.reopen ? OnTheLights.reopenNote : ''}'));
-
-  /// Shows the step on screen until the next one is due. Only while the tab is
-  /// on show; at most every 50 ms, so a fast strobe skips steps on screen.
-  void _animate(BuiltLook? l, bool onShow) {
-    _anim?.cancel();
-    _anim = null;
-    if (!onShow || l == null || l.err.isNotEmpty || (l.steps.length < 2 && !l.beat)) return;
-    final q = lookAt(l, DateTime.now().difference(_t0).inMilliseconds);
-    _anim = Timer(Duration(milliseconds: math.max(50, q.left)), () {
-      if (mounted) setState(() {});
-    });
-  }
 
   /// "Put it on this SX Player page": a button for the look made, with BPM
   /// and flash for a beat look, on the page picked or on a new LOOKS page.
@@ -224,11 +205,12 @@ class _LookScreenState extends State<LookScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final app = AppScope.of(context);
+    // AppScope.read, not .of: a click or a status poll elsewhere in the app
+    // must not rebuild this screen. The steps box follows the tab itself.
+    final app = AppScope.read(context);
     final rig = _rig;
     final look = rig == null ? null : buildLook(rig, _t, _o);
     _cur = look;
-    _animate(look, app.tab == 'look');
     final n = _clean, taken = rig != null && lookNameTaken(n, rig.scenes);
     final canMake = rig != null && look != null && look.err.isEmpty && n.isNotEmpty && !taken;
 
@@ -546,14 +528,12 @@ class _LookScreenState extends State<LookScreen> {
           return _field(
             name,
             _menu<PrismMode>(PrismMode.values, q.m, (m) => m.label, (v) => _changed(() => q.m = v), width: 118),
-            below: q.m == PrismMode.l || q.m == PrismMode.r
-                ? _slider('Speed', q.s, 0, 100, (v) => _changed(() => q.s = v.round()), key: Key('look-prism-speed-$j'))
-                : null,
+            below: q.m == PrismMode.l || q.m == PrismMode.r ? _slider('Speed', q.s, 0, 100, (v) => q.s = v, key: Key('look-prism-speed-$j')) : null,
           );
         }(),
       ],
-      _slider('Zoom', _o.zoom, 0, 255, (v) => _changed(() => o.zoom = v.round())),
-      _slider('Focus', _o.focus, 0, 255, (v) => _changed(() => o.focus = v.round())),
+      _slider('Zoom', _o.zoom, 0, 255, (v) => o.zoom = v),
+      _slider('Focus', _o.focus, 0, 255, (v) => o.focus = v),
       Text(
         'Spin speed: try it on the lights, each fixture counts it its own way. The gobos are set open and frost off.',
         style: Sx.sub.copyWith(fontSize: 12.5),
@@ -587,10 +567,8 @@ class _LookScreenState extends State<LookScreen> {
             for (final g in groups)
               () {
                 final can = lookCan(g.caps, _t), picked = lookGroupOn(_o, g, _t);
-                return Tooltip(
-                  message: can ? '' : "This look doesn't use these lights",
-                  child: _chip(g.label, g.heads.length, on: picked, onTap: can ? () => _changed(() => _o.on[_t]![g.model] = !picked) : null),
-                );
+                final chip = _chip(g.label, g.heads.length, on: picked, onTap: can ? () => _changed(() => _o.on[_t]![g.model] = !picked) : null);
+                return can ? chip : Tooltip(message: "This look doesn't use these lights", child: chip);
               }(),
           ],
         ),
@@ -622,61 +600,15 @@ class _LookScreenState extends State<LookScreen> {
             border: Border.all(color: Sx.line),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: on.isEmpty ? Text('No lights picked.', style: Sx.sub) : _steps(on, look),
+          child: on.isEmpty
+              ? Text('No lights picked.', style: Sx.sub)
+              : RepaintBoundary(
+                  child: _Steps(groups: on, look: look, t0: _t0),
+                ),
         ),
       ],
     );
   }
-
-  /// The old `.lkvis`: a row of dots per group of heads, each in its color
-  /// at the step on show. The dots change once per step, see [_animate].
-  Widget _steps(List<LookGroup> groups, BuiltLook look) {
-    final s = look.steps.isEmpty ? null : look.steps[lookAt(look, DateTime.now().difference(_t0).inMilliseconds).at];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      spacing: 10,
-      children: [
-        for (final g in groups)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(g.label, style: TextStyle(fontSize: 11, color: Sx.dim)),
-              const SizedBox(height: 5),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: [
-                  for (final h in g.heads)
-                    Tooltip(
-                      message: h.name,
-                      child: _dot(s?.show[h.id], prism: look.prism),
-                    ),
-                ],
-              ),
-            ],
-          ),
-      ],
-    );
-  }
-
-  /// One head: dark, lit in its color with a glow, or a prism.
-  Widget _dot(String? hex, {required bool prism}) {
-    final lit = hex == null ? null : _hexColor(hex);
-    return Container(
-      width: 22,
-      height: 22,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: lit ?? Sx.panel,
-        border: Border.all(color: Sx.line2),
-        // the old page's prism: white and pale blue and violet facets, still
-        gradient: prism ? SweepGradient(colors: [for (final c in _facets) _hexColor(c)]) : null,
-        boxShadow: lit == null || prism ? null : [BoxShadow(color: lit, blurRadius: 12)],
-      ),
-    );
-  }
-
-  static const _facets = ['ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff'];
 
   /// The old `.sepv` "On the lights" row.
   Widget _lightsRow() {
@@ -798,16 +730,17 @@ class _LookScreenState extends State<LookScreen> {
 
   /// The old `.chip.lkgc`: a group of heads, ticked when it is in the look,
   /// faded when this template can't use it.
-  Widget _chip(String label, int count, {required bool on, VoidCallback? onTap}) => Opacity(
-    opacity: onTap == null ? .4 : 1,
-    child: InkWell(
+  Widget _chip(String label, int count, {required bool on, VoidCallback? onTap}) {
+    // faded with alpha on each color, not an Opacity layer
+    final fade = onTap == null ? .4 : 1.0;
+    Color f(Color c) => c.withValues(alpha: c.a * fade);
+    return _Tap(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(99),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
         decoration: BoxDecoration(
-          color: on ? Sx.accent.withValues(alpha: .13) : Sx.panel,
-          border: Border.all(color: on ? Sx.accent : Sx.line),
+          color: f(on ? Sx.accent.withValues(alpha: .13) : Sx.panel),
+          border: Border.all(color: f(on ? Sx.accent : Sx.line)),
           borderRadius: BorderRadius.circular(99),
         ),
         child: Row(
@@ -816,20 +749,19 @@ class _LookScreenState extends State<LookScreen> {
             if (on)
               Padding(
                 padding: const EdgeInsets.only(right: 4),
-                child: Icon(Icons.check, size: 14, color: Sx.text),
+                child: Icon(Icons.check, size: 14, color: f(Sx.text)),
               ),
-            Text(label, style: TextStyle(fontSize: 12.5, color: Sx.text)),
-            Text('  x$count', style: TextStyle(fontSize: 11, color: Sx.dim)),
+            Text(label, style: TextStyle(fontSize: 12.5, color: f(Sx.text))),
+            Text('  x$count', style: TextStyle(fontSize: 11, color: f(Sx.dim))),
           ],
         ),
       ),
-    ),
-  );
+    );
+  }
 
   /// The old `.lkcc`: a look color to tick, with its place in the chase.
-  Widget _colorChip(String name, String hex, {required bool on, String? badge, required VoidCallback onTap}) => InkWell(
+  Widget _colorChip(String name, String hex, {required bool on, String? badge, required VoidCallback onTap}) => _Tap(
     onTap: onTap,
-    borderRadius: BorderRadius.circular(99),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
       decoration: BoxDecoration(
@@ -855,41 +787,10 @@ class _LookScreenState extends State<LookScreen> {
 
   Widget _colorMenu(String value, ValueChanged<String> onPick) => _menu<String>([for (final c in lookColors) c.$1], value, (n) => n, onPick, width: 118);
 
-  Widget _menu<T>(List<T> items, T value, String Function(T) label, ValueChanged<T> onPick, {required double width, Widget Function(T)? lead}) => SizedBox(
+  Widget _menu<T>(List<T> items, T value, String Function(T) label, ValueChanged<T> onPick, {required double width}) => SizedBox(
     width: width,
     height: 34,
-    child: DropdownButtonHideUnderline(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          color: Sx.well,
-          border: Border.all(color: Sx.line),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: DropdownButton<T>(
-          isExpanded: true,
-          isDense: true,
-          dropdownColor: Sx.panel,
-          style: TextStyle(fontFamily: Sx.body, fontSize: 13, color: Sx.text),
-          value: value,
-          items: [
-            for (final it in items)
-              DropdownMenuItem(
-                value: it,
-                child: Row(
-                  children: [
-                    ?lead?.call(it),
-                    Expanded(child: Text(label(it), overflow: TextOverflow.ellipsis)),
-                  ],
-                ),
-              ),
-          ],
-          onChanged: (v) {
-            if (v != null) onPick(v);
-          },
-        ),
-      ),
-    ),
+    child: SxMenu<T>(items: {for (final it in items) it: label(it)}, value: value, onPick: onPick),
   );
 
   /// The old `.mvf` row: the label on the left, the control on the right.
@@ -938,24 +839,250 @@ class _LookScreenState extends State<LookScreen> {
     ),
   );
 
-  /// A label, a slider and its value.
-  Widget _slider(String label, num value, double min, double max, ValueChanged<double> onChanged, {Key? key}) => Row(
-    children: [
-      SizedBox(
-        width: 60,
-        child: Text(label, style: TextStyle(fontSize: 13, color: Sx.text)),
-      ),
-      Expanded(
-        child: Slider(key: key, min: min, max: max, value: value.toDouble().clamp(min, max), onChanged: onChanged),
-      ),
-      SizedBox(
-        width: 32,
-        child: Text(
-          '$value',
-          textAlign: TextAlign.right,
-          style: TextStyle(fontSize: 12.5, color: Sx.dim),
+  /// A label, a slider and its value. [set] stores the value. While the
+  /// slider is dragged only it and the lights follow, and the screen
+  /// rebuilds and keeps the settings when the drag ends.
+  Widget _slider(String label, num value, double min, double max, void Function(int v) set, {Key? key}) => _Slide(
+    label: label,
+    value: value,
+    min: min,
+    max: max,
+    sliderKey: key,
+    onDrag: (v) {
+      set(v);
+      if (_rig case final rig?) _cur = buildLook(rig, _t, _o);
+    },
+    onDone: (v) => _changed(() => set(v)),
+  );
+}
+
+/// A light's color from the look: data, not a theme color.
+Color _hexColor(String hex) => Color(0xFF000000 | int.parse(hex, radix: 16));
+
+/// A tap target drawn plain: the pointer cursor and a tap, without the
+/// dozen widgets of an `InkWell`. Null [onTap] turns it off.
+class _Tap extends StatelessWidget {
+  const _Tap({required this.onTap, required this.child});
+
+  final VoidCallback? onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: onTap == null ? MouseCursor.defer : SystemMouseCursors.click,
+    child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: onTap, child: child),
+  );
+}
+
+/// The old `.lkvis`: a row of dots per group of heads, each in its color at
+/// the step on show. It wakes at the next step while the tab is on show, at
+/// most every 50 ms, so a fast strobe skips steps on screen. Then only the
+/// dots rebuild, not the screen.
+class _Steps extends StatefulWidget {
+  const _Steps({required this.groups, required this.look, required this.t0});
+
+  final List<LookGroup> groups;
+  final BuiltLook look;
+
+  /// When the look started.
+  final DateTime t0;
+
+  @override
+  State<_Steps> createState() => _StepsState();
+}
+
+class _StepsState extends State<_Steps> {
+  /// The step on show. Each dot follows it.
+  final _at = ValueNotifier(0);
+  Timer? _next;
+  var _onShow = false;
+
+  /// The dots, made again only when the look changes.
+  Widget? _dots;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _onShow = AppScope.of(context).tab == 'look';
+    _step();
+  }
+
+  @override
+  void didUpdateWidget(_Steps old) {
+    super.didUpdateWidget(old);
+    _dots = null;
+    _step();
+  }
+
+  @override
+  void dispose() {
+    _next?.cancel();
+    _at.dispose();
+    super.dispose();
+  }
+
+  /// Shows the step due now, and wakes at the next one.
+  void _step() {
+    _next?.cancel();
+    _next = null;
+    final l = widget.look;
+    final q = lookAt(l, DateTime.now().difference(widget.t0).inMilliseconds);
+    _at.value = l.steps.isEmpty ? 0 : q.at;
+    if (!_onShow || l.err.isNotEmpty || (l.steps.length < 2 && !l.beat)) return;
+    _next = Timer(Duration(milliseconds: math.max(50, q.left)), () {
+      if (mounted) _step();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => _dots ??= () {
+    final look = widget.look;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 10,
+      children: [
+        for (final g in widget.groups)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(g.label, style: TextStyle(fontSize: 11, color: Sx.dim)),
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final h in g.heads)
+                    Tooltip(
+                      message: h.name,
+                      child: ValueListenableBuilder(
+                        valueListenable: _at,
+                        builder: (_, at, _) => _Dot(look.steps.isEmpty ? null : look.steps[at].show[h.id], prism: look.prism),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+      ],
+    );
+  }();
+}
+
+/// One head: dark, lit in its color with a glow, or a prism.
+class _Dot extends StatelessWidget {
+  const _Dot(this.hex, {required this.prism});
+
+  final String? hex;
+  final bool prism;
+
+  static const _facets = ['ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff', '99ccff', 'ffffff', 'cc99ff', 'ffffff'];
+
+  @override
+  Widget build(BuildContext context) {
+    final lit = hex == null ? null : _hexColor(hex!);
+    return CustomPaint(
+      painter: lit == null || prism ? null : _Glow(lit),
+      child: Container(
+        width: 22,
+        height: 22,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: lit ?? Sx.panel,
+          border: Border.all(color: Sx.line2),
+          // the old page's prism: white and pale blue and violet facets, still
+          gradient: prism ? SweepGradient(colors: [for (final c in _facets) _hexColor(c)]) : null,
         ),
       ),
-    ],
-  );
+    );
+  }
+}
+
+/// The glow around a lit dot. It matches the old blurred shadow (blur 12)
+/// with a radial gradient, which costs the GPU far less than a blur on
+/// every dot at every step.
+class _Glow extends CustomPainter {
+  const _Glow(this.color);
+
+  final Color color;
+
+  /// How far from the dot's middle the glow reaches.
+  static const _reach = 30.0;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero);
+    Color a(double v) => color.withValues(alpha: v);
+    final shader = RadialGradient(
+      colors: [a(.35), a(.35), a(.2), a(.11), a(.055), a(.024), a(0)],
+      stops: const [0, .37, .5, .6, .7, .8, 1],
+    ).createShader(Rect.fromCircle(center: c, radius: _reach));
+    canvas.drawCircle(c, _reach, Paint()..shader = shader);
+  }
+
+  @override
+  bool shouldRepaint(_Glow old) => old.color != color;
+}
+
+/// A slider of the options, its label and its value. It keeps the value
+/// while dragged, so the screen doesn't rebuild on every move.
+class _Slide extends StatefulWidget {
+  const _Slide({required this.label, required this.value, required this.min, required this.max, required this.onDrag, required this.onDone, this.sliderKey});
+
+  final String label;
+  final num value;
+  final double min;
+  final double max;
+
+  /// Every move of a drag (or a tap) with the rounded value.
+  final ValueChanged<int> onDrag;
+
+  /// The drag ended at this value.
+  final ValueChanged<int> onDone;
+  final Key? sliderKey;
+
+  @override
+  State<_Slide> createState() => _SlideState();
+}
+
+class _SlideState extends State<_Slide> {
+  /// The value while dragged, null otherwise.
+  int? _drag;
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, v = _drag ?? w.value;
+    return Row(
+      children: [
+        SizedBox(
+          width: 60,
+          child: Text(w.label, style: TextStyle(fontSize: 13, color: Sx.text)),
+        ),
+        Expanded(
+          child: Slider(
+            key: w.sliderKey,
+            min: w.min,
+            max: w.max,
+            value: v.toDouble().clamp(w.min, w.max),
+            onChanged: (x) {
+              final r = x.round();
+              setState(() => _drag = r);
+              w.onDrag(r);
+            },
+            onChangeEnd: (x) {
+              _drag = null;
+              w.onDone(x.round());
+            },
+          ),
+        ),
+        SizedBox(
+          width: 32,
+          child: Text(
+            '$v',
+            textAlign: TextAlign.right,
+            style: TextStyle(fontSize: 12.5, color: Sx.dim),
+          ),
+        ),
+      ],
+    );
+  }
 }

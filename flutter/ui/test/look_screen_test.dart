@@ -194,6 +194,25 @@ void main() {
     app.dispose();
   });
 
+  testWidgets('a slider shows its value while dragged and keeps it when let go', (tester) async {
+    await open(tester);
+    await tester.tap(find.byKey(const Key('look-template-prism')));
+    await tester.pumpAndSettle();
+    expect(find.text('80'), findsOneWidget);
+
+    final zoom = find.byType(Slider).first;
+    final gesture = await tester.startGesture(tester.getCenter(zoom));
+    await gesture.moveBy(const Offset(-2000, 0));
+    await tester.pump();
+    expect(find.text('0'), findsOneWidget);
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(find.text('0'), findsOneWidget);
+    final kept = jsonDecode((await SharedPreferences.getInstance()).getString(lookPrefsKey)!) as Map;
+    expect((kept['prism'] as Map)['zoom'], 0);
+    app.dispose();
+  });
+
   testWidgets('plays the look on the lights through the raw output, and stops', (tester) async {
     await open(tester);
     await tester.tap(find.text('Show on the lights'));

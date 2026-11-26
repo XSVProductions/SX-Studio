@@ -176,4 +176,22 @@ void main() {
     expect(engine.postsTo('/api/sx/close'), hasLength(1));
     await end(tester, app);
   });
+
+  testWidgets('a hidden tab is left alone when the state changes, and catches up when it is shown again', (tester) async {
+    const open = 'ShowXpress is open. A fix waits until it closes.';
+    final engine = _Engine();
+    final app = await pump(tester, engine, tab: 'health');
+    expect(find.text(open), findsNothing);
+    app.go('home');
+    await tester.pump();
+    engine.sxOpen = true;
+    await tester.runAsync(app.refresh);
+    await tester.pump();
+    expect(app.sxOpen, isTrue);
+    expect(find.text(open, skipOffstage: false), findsNothing);
+    app.go('health');
+    await tester.pump();
+    expect(find.text(open), findsOneWidget);
+    await end(tester, app);
+  });
 }

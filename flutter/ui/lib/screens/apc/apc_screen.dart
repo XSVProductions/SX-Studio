@@ -481,7 +481,9 @@ class _Pad extends StatelessWidget {
     final sel = here.any((x) => x.sec == e.selected);
     final dup = here.length > 1;
     final moved = here.any(e.changed);
-    const shadow = [Shadow(color: apcBody, blurRadius: 2, offset: Offset(0, 1))];
+    // The old page's text-shadow without its 2 px blur. Blurring the shadow under every
+    // pad's two labels made each frame of this tab take six times as long to draw.
+    const shadow = [Shadow(color: apcBody, offset: Offset(0, 1))];
     return Semantics(
       button: true,
       label: '${padPlace(n)}: ${here.map((x) => x.title).join(' + ')}',

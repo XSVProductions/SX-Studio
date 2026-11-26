@@ -208,15 +208,24 @@ class AppState extends ChangeNotifier {
 
 /// Hands [AppState] to the widgets below. `AppScope.of(context)` rebuilds the
 /// caller when the state changes. Use `AppScope.read` in callbacks.
+///
+/// The shell puts a second one around each tab, with [live] false while the
+/// tab is hidden. The widgets of a hidden tab are left alone when the state
+/// changes and rebuild once when the tab is shown again (and once when it is
+/// hidden). So a click or a status poll costs the tab on show, not every tab
+/// opened so far. A widget that must follow the state while its tab is
+/// hidden listens to the [AppState] itself.
 class AppScope extends InheritedNotifier<AppState> {
-  const AppScope({super.key, required AppState state, required super.child}) : super(notifier: state);
+  const AppScope({super.key, required this.state, bool live = true, required super.child}) : super(notifier: live ? state : null);
 
-  static AppState of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()!.notifier!;
+  final AppState state;
 
-  static AppState read(BuildContext context) => context.getInheritedWidgetOfExactType<AppScope>()!.notifier!;
+  static AppState of(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()!.state;
+
+  static AppState read(BuildContext context) => context.getInheritedWidgetOfExactType<AppScope>()!.state;
 
   /// [of] where there may be no app (a widget shown on its own in a test).
-  static AppState? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()?.notifier;
+  static AppState? maybeOf(BuildContext context) => context.dependOnInheritedWidgetOfExactType<AppScope>()?.state;
 }
 
 /// Tells a screen which tab it is. The shell puts one around each tab, so

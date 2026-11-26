@@ -792,7 +792,9 @@ class _A4Pad extends StatelessWidget {
       final b = e.buttonOn(n);
       final idle = (b == null ? null : padColor(e.colour(n, false) ?? -1)) ?? padNoIdle;
       final on = (b == null ? null : padColor(e.colour(n, true) ?? -1)) ?? padNoOn;
-      const shadow = [Shadow(color: apcBody, blurRadius: 2, offset: Offset(0, 1))];
+      // The old page's text-shadow without its 2 px blur. Blurring the shadow under every
+      // pad's two labels made each frame of this tab take six times as long to draw.
+      const shadow = [Shadow(color: apcBody, offset: Offset(0, 1))];
       body = Container(
         foregroundDecoration: outline,
         decoration: BoxDecoration(

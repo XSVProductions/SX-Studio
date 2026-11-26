@@ -86,7 +86,7 @@ class _RemoteRowState extends State<RemoteRow> {
   bool _wasOnTab = false;
   DateTime? _wait;
 
-  AppState get _app => AppScope.read(context);
+  late final AppState _app = AppScope.read(context);
 
   /// A press happened lately or one waits, so don't press again by ourselves.
   bool get _recent {
@@ -98,9 +98,24 @@ class _RemoteRowState extends State<RemoteRow> {
   }
 
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final app = AppScope.of(context);
+  void initState() {
+    super.initState();
+    _app.addListener(_follow);
+    _follow();
+  }
+
+  @override
+  void dispose() {
+    _app.removeListener(_follow);
+    super.dispose();
+  }
+
+  /// Runs on every change of the app's state and every status poll. It
+  /// listens to the state itself because the row follows ShowXpress while its
+  /// tab is hidden too, and a hidden tab's widgets get no rebuilds
+  /// ([AppScope]).
+  void _follow() {
+    final app = _app;
     final s = app.status;
     final onTab = app.tab == widget.tab;
     if (onTab && !_wasOnTab) WidgetsBinding.instance.addPostFrameCallback((_) => _refresh(auto: app.sxOpen && !_recent));

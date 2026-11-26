@@ -21,14 +21,23 @@ class Shell extends StatefulWidget {
 }
 
 class _ShellState extends State<Shell> {
-  /// Tabs opened so far, in order. Their screens stay alive so unsaved edits
-  /// survive a trip to another tab.
-  final _opened = <String>['home'];
+  /// The screens of the tabs opened so far, in the order they were opened.
+  /// They stay alive so unsaved edits survive a trip to another tab. Each is
+  /// made once: handing Flutter the same widget on every build of the shell
+  /// is what lets it skip the hidden tabs (see [AppScope]).
+  final _screens = <String, Widget>{};
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    if (!_opened.contains(app.tab)) _opened.add(app.tab);
+    final tab = app.tab;
+    _screens.putIfAbsent(
+      tab,
+      () => TabScope(
+        id: tab,
+        child: Builder(builder: (c) => buildTab(c, tab)),
+      ),
+    );
     final gutter = sxGutter(context);
     // The laptop app lost its engine: the old page's "SX Studio has closed".
     // A phone keeps trying instead (the strip under the header).
@@ -51,16 +60,9 @@ class _ShellState extends State<Shell> {
                 const QueueBar(),
                 Expanded(
                   child: IndexedStack(
-                    index: _opened.indexOf(app.tab),
+                    index: _screens.keys.toList().indexOf(tab),
                     children: [
-                      for (final id in _opened)
-                        KeyedSubtree(
-                          key: ValueKey(id),
-                          child: TabScope(
-                            id: id,
-                            child: Builder(builder: (c) => buildTab(c, id)),
-                          ),
-                        ),
+                      for (final MapEntry(key: id, value: screen) in _screens.entries) AppScope(key: ValueKey(id), state: app, live: id == tab, child: screen),
                     ],
                   ),
                 ),

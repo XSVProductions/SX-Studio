@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sx_studio/screens/lab/lab_live.dart';
+import 'package:sx_studio/screens/lab/lab_screen.dart';
 
 import 'lab_fixture.dart';
 
@@ -114,6 +115,31 @@ void main() {
     expect(tileOf(t, 'FIGURE 8').on, isTrue);
     expect(tileOf(t, 'CIRCLE').on, isFalse);
     s.cmdGate!.complete({'ok': true});
+    await h.end();
+  });
+
+  testWidgets('a status poll rebuilds only the tiles whose state changed', (t) async {
+    final s = Script()
+      ..running = true
+      ..status = playerStatus();
+    final h = await pumpLab(t, s);
+    await h.poll();
+    final built = <String>[];
+    debugOnRebuildDirtyWidget = (e, _) => switch (e.widget) {
+      TileView(:final tile) => built.add(tile.title),
+      LabScreen() => built.add('the screen'),
+      _ => null,
+    };
+    addTearDown(() => debugOnRebuildDirtyWidget = null);
+    await h.poll();
+    expect(built, isEmpty, reason: 'the same status again');
+    s.status = playerStatus(
+      on: [
+        {'slot': 'page1_button2', 'step': 3, 'of': 8, 'bpm': true},
+      ],
+    );
+    await h.poll();
+    expect(built, ['RAINBOW CHASE']);
     await h.end();
   });
 
@@ -526,6 +552,30 @@ void main() {
     await t.pump();
     expect(find.text('SETUP'), findsNothing);
     expect(find.text('FIRST DANCE'), findsOneWidget);
+    await h.end();
+  });
+
+  testWidgets('Arrange: a button dragged into the next row of tiles lands there and is saved', (t) async {
+    final s = Script();
+    // Two tiles to a row, so COLORS is RED, RAINBOW CHASE, then GONE under RED.
+    final h = await pumpLab(t, s, width: 500);
+    await t.tap(find.text('Arrange'));
+    await t.pump();
+    final red = t.getCenter(find.text('RED'));
+    final gone = t.getRect(find.ancestor(of: find.text('GONE'), matching: find.byType(TileView)));
+    expect(gone.top, greaterThan(red.dy), reason: 'GONE is a row down');
+    final g = await t.startGesture(red);
+    await t.pump();
+    // Onto GONE's right half: RED goes after it, into the second row.
+    await g.moveTo(Offset(red.dx, gone.center.dy));
+    await t.pump();
+    await g.moveTo(Offset(gone.center.dx + gone.width / 4, gone.center.dy));
+    await t.pump();
+    await g.up();
+    await t.pump();
+    await t.pump();
+    expect((s.layout['order']! as Map)['1'], ['page1_button2', 'page1_button3', 'page1_button1']);
+    expect(t.getTopLeft(find.text('RED')).dy, greaterThan(t.getTopLeft(find.text('GONE')).dy));
     await h.end();
   });
 }

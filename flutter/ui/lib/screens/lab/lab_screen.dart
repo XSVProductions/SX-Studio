@@ -876,20 +876,24 @@ class _LabScreenState extends State<LabScreen> {
   @override
   Widget build(BuildContext context) => Stack(
     children: [
-      ScreenBody(
-        children: [
-          _top(),
-          if (_running && _board != null) ...[
-            SxCard(
-              child: BpmCard(live: _live, input: _bpmInput, focus: _bpmFocus, onTap: _tap, onSet: _setBpm, onSync: () => _cmd(LabCmd.sync, quiet: true)),
-            ),
-            SxCard(
-              child: FadersCard(live: _live, faders: _board!.faders, onMove: _moveFader),
-            ),
+      // The board is cut into rows of tiles, so it needs its width before
+      // [ScreenBody] lays it out.
+      LayoutBuilder(
+        builder: (context, box) => ScreenBody(
+          children: [
+            _top(),
+            if (_running && _board != null) ...[
+              SxCard(
+                child: BpmCard(live: _live, input: _bpmInput, focus: _bpmFocus, onTap: _tap, onSet: _setBpm, onSync: () => _cmd(LabCmd.sync, quiet: true)),
+              ),
+              SxCard(
+                child: FadersCard(live: _live, faders: _board!.faders, onMove: _moveFader),
+              ),
+            ],
+            if (_arranging) _arrangeBar(),
+            _boardCard(_boardWidth(context, box.maxWidth)),
           ],
-          if (_arranging) _arrangeBar(),
-          _boardCard(),
-        ],
+        ),
       ),
       // The old page's busy veil, without its spinner.
       if (_busy != null)
@@ -905,6 +909,13 @@ class _LabScreenState extends State<LabScreen> {
         ),
     ],
   );
+
+  /// The width inside the board card on a screen [screen] wide, worked out
+  /// the way [ScreenBody] places its cards.
+  static double _boardWidth(BuildContext context, double screen) {
+    final side = math.max(sxGutter(context), (MediaQuery.sizeOf(context).width - Sx.contentWidth) / 2);
+    return screen - 2 * side - 40;
+  }
 
   Widget _top() => SxCard(
     child: Column(
@@ -1134,7 +1145,10 @@ class _LabScreenState extends State<LabScreen> {
     ),
   );
 
-  Widget _boardCard() {
+  /// The board: each page's heading and each row of its tiles is one child
+  /// of an [SxListCard], so only the rows on screen are built. [inner] is
+  /// the width inside the card.
+  Widget _boardCard(double inner) {
     final b = _board;
     if (b == null) {
       return SxCard(
@@ -1147,33 +1161,27 @@ class _LabScreenState extends State<LabScreen> {
     final placed = placedPages(b, _lay, arranging: _arranging);
     final ids = {for (final p in allPages(b, _lay)) p.id};
     final nh = _lay.hidden.where(ids.contains).length;
-    return SxCard(
-      child: LayoutBuilder(
-        builder: (context, box) {
-          // `.lbb{flex:1 1 150px;min-width:140px;max-width:230px}` with 8 px gaps.
-          final cols = math.max(box.maxWidth >= 2 * 140 + 8 ? 2 : 1, ((box.maxWidth + 8) / (150 + 8)).floor());
-          final w = math.min(230.0, (box.maxWidth - 8 * (cols - 1)) / cols);
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (placed.isEmpty) Text('No live buttons in the show.', style: Sx.sub),
-              for (final (i, p) in placed.indexed) _page(p, w, first: i == 0),
-              if (!_arranging && nh > 0)
-                Padding(
-                  padding: const EdgeInsets.only(top: 14),
-                  child: Text(
-                    nh == 1 ? '1 page is hidden. Press Arrange to show it again.' : '$nh pages are hidden. Press Arrange to show them again.',
-                    style: Sx.sub,
-                  ),
-                ),
-            ],
-          );
-        },
-      ),
+    // `.lbb{flex:1 1 150px;min-width:140px;max-width:230px}` with 8 px gaps.
+    final cols = math.max(inner >= 2 * 140 + 8 ? 2 : 1, ((inner + 8) / (150 + 8)).floor());
+    final w = math.min(230.0, (inner - 8 * (cols - 1)) / cols);
+    return SxListCard(
+      children: [
+        if (placed.isEmpty) Text('No live buttons in the show.', style: Sx.sub),
+        for (final (i, p) in placed.indexed) ..._page(p, w, cols, first: i == 0),
+        if (!_arranging && nh > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(
+              nh == 1 ? '1 page is hidden. Press Arrange to show it again.' : '$nh pages are hidden. Press Arrange to show them again.',
+              style: Sx.sub,
+            ),
+          ),
+      ],
     );
   }
 
-  Widget _page(PlacedPage p, double w, {required bool first}) {
+  /// A page's rows: its heading, then its tiles [cols] to a row.
+  List<Widget> _page(PlacedPage p, double w, int cols, {required bool first}) {
     final id = p.page.id;
     final custom = _lay.custom.where((c) => c.id == id).firstOrNull;
     final tiles = _drag?.page == id ? _drag!.tiles : p.tiles;
@@ -1239,24 +1247,30 @@ class _LabScreenState extends State<LabScreen> {
         ],
       ],
     );
-    final dim = _arranging && p.hidden ? .45 : 1.0;
-    return Padding(
-      padding: EdgeInsets.only(top: first ? 0 : 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Opacity(opacity: dim, child: head),
-          const SizedBox(height: 6),
-          if (!p.collapsed)
-            Opacity(
-              opacity: dim,
-              child: Wrap(spacing: 8, runSpacing: 8, children: [for (final t in tiles) _arranging ? _dragTile(id, t, w, tiles) : _tile(t, w)]),
-            ),
-          if (!p.collapsed && p.page.custom && tiles.isEmpty)
-            Text(_arranging ? 'No buttons yet. Press Buttons.' : 'No buttons yet. Press Arrange, then Buttons.', style: Sx.sub),
-        ],
+    final dim = _arranging && p.hidden;
+    return [
+      Padding(
+        padding: EdgeInsets.only(top: first ? 0 : 16, bottom: 6),
+        child: dim ? Opacity(opacity: .45, child: head) : head,
       ),
-    );
+      if (!p.collapsed)
+        for (var r = 0; r < tiles.length; r += cols)
+          Padding(
+            padding: EdgeInsets.only(top: r == 0 ? 0 : 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final (j, t) in tiles.skip(r).take(cols).indexed) ...[
+                  if (j > 0) const SizedBox(width: 8),
+                  _arranging ? _dragTile(id, t, w, tiles, dim: dim) : _tile(t, w),
+                ],
+              ],
+            ),
+          ),
+      if (!p.collapsed && p.page.custom && tiles.isEmpty)
+        Text(_arranging ? 'No buttons yet. Press Buttons.' : 'No buttons yet. Press Arrange, then Buttons.', style: Sx.sub),
+    ];
   }
 
   Widget _tile(LabTile t, double w) =>
@@ -1317,16 +1331,22 @@ class _LabScreenState extends State<LabScreen> {
     if (edit == true && tab != null && mounted) _app.openFile(tab, t.file);
   }
 
-  Widget _dragTile(String page, LabTile t, double w, List<LabTile> tiles) {
+  /// A tile in Arrange. Moving it to another row while it is dragged, or
+  /// scrolling its row away, disposes its [Draggable], so the drag ends in
+  /// [Draggable.onDragCompleted] and [Draggable.onDraggableCanceled], which
+  /// run either way, and the tile being dragged shows faded wherever it is.
+  Widget _dragTile(String page, LabTile t, double w, List<LabTile> tiles, {required bool dim}) {
     Widget view({bool delete = true}) => TileView(
       tile: t,
       state: _live.tile(t),
       width: w,
       idle: !_running,
       arranging: true,
+      dim: dim,
       onMenu: (at) => _menu(t, at),
       onDelete: delete && t.custom ? () => _deleteButton(page, t.sec) : null,
     );
+    final ghost = Opacity(opacity: .35, child: view(delete: false));
     return Builder(
       key: ValueKey(t.sec),
       builder: (target) => DragTarget<String>(
@@ -1345,13 +1365,14 @@ class _LabScreenState extends State<LabScreen> {
               child: Material(type: MaterialType.transparency, child: view(delete: false)),
             ),
           ),
-          childWhenDragging: Opacity(opacity: .35, child: view(delete: false)),
+          childWhenDragging: ghost,
           onDragStarted: () {
             _dragSec = t.sec;
             setState(() => _drag = (page: page, tiles: [...tiles], start: [for (final x in tiles) x.sec]));
           },
-          onDragEnd: (_) => _dragDone(),
-          child: MouseRegion(cursor: SystemMouseCursors.grab, child: view()),
+          onDragCompleted: _dragDone,
+          onDraggableCanceled: (_, _) => _dragDone(),
+          child: _dragSec == t.sec ? ghost : MouseRegion(cursor: SystemMouseCursors.grab, child: view()),
         ),
       ),
     );

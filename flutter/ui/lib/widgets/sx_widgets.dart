@@ -126,7 +126,8 @@ class ScreenBody extends StatelessWidget {
               for (final (i, c) in children.indexed)
                 SliverPadding(
                   padding: EdgeInsets.fromLTRB(side, i == 0 ? (gutter < 22 ? 12 : 20) : gap, side, i == children.length - 1 ? 28 : 0),
-                  sliver: c is SxListCard ? c : SliverToBoxAdapter(child: c),
+                  // its own layer, so a change in one card redraws that card only
+                  sliver: c is SxListCard ? c : SliverToBoxAdapter(child: RepaintBoundary(child: c)),
                 ),
             ],
           ),

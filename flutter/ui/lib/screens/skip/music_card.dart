@@ -5,7 +5,6 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
-import '../../widgets/sx_menu.dart';
 import '../../widgets/sx_widgets.dart';
 
 /// The music detector, in the Strobe tab: listens to the DJ feed from the
@@ -173,7 +172,8 @@ class _MusicCardState extends State<MusicCard> {
               child: Text('Reading the settings.', style: Sx.sub),
             ),
           if (i != null) ...[
-            if (!i.canListen) _note('Listening to the mixer works on Windows for now. To try a recording here, type file: and the path of a WAV file as the input.'),
+            if (!i.canListen)
+              _note('Listening to the mixer works on Windows for now. To try a recording here, type file: and the path of a WAV file as the input.'),
             if (!i.os2lOn)
               _note(
                 "ShowXpress's VirtualDJ link is off, so it won't hear the beat or the button presses. Turn it on in ShowXpress: Preferences > Network > Virtual DJ: Enable (port ${i.os2lPort}).",
@@ -203,7 +203,11 @@ class _MusicCardState extends State<MusicCard> {
                 _numField('dropBars', 'Drop button on for', 'bars'),
                 _numField('leadMs', 'Beats go out', 'ms early'),
                 _check('Send the beat to ShowXpress', (_edit ?? i.settings).beats, (v) => setState(() => _edit = (_edit ?? i.settings).copyWith(beats: v))),
-                _check('Snare flashes outside builds too', (_edit ?? i.settings).snareAlways, (v) => setState(() => _edit = (_edit ?? i.settings).copyWith(snareAlways: v))),
+                _check(
+                  'Snare flashes outside builds too',
+                  (_edit ?? i.settings).snareAlways,
+                  (v) => setState(() => _edit = (_edit ?? i.settings).copyWith(snareAlways: v)),
+                ),
               ],
             ),
             const SizedBox(height: 14),
@@ -269,7 +273,10 @@ class _MusicCardState extends State<MusicCard> {
                 s.section.isEmpty ? 'LISTENING' : s.section,
                 style: TextStyle(fontFamily: Sx.display, fontSize: 18, fontWeight: FontWeight.w700, color: c, letterSpacing: 1),
               ),
-              Text(s.bpm > 0 ? '${s.bpm.toStringAsFixed(1)} BPM' : 'finding the beat', style: TextStyle(color: Sx.text, fontSize: 14, fontWeight: FontWeight.w600)),
+              Text(
+                s.bpm > 0 ? '${s.bpm.toStringAsFixed(1)} BPM' : 'finding the beat',
+                style: TextStyle(color: Sx.text, fontSize: 14, fontWeight: FontWeight.w600),
+              ),
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -302,7 +309,9 @@ class _MusicCardState extends State<MusicCard> {
                     alignment: Alignment.centerLeft,
                     child: FractionallySizedBox(
                       widthFactor: s.build.clamp(0.0, 1.0).toDouble(),
-                      child: Container(decoration: BoxDecoration(color: Sx.amber, borderRadius: BorderRadius.circular(4))),
+                      child: Container(
+                        decoration: BoxDecoration(color: Sx.amber, borderRadius: BorderRadius.circular(4)),
+                      ),
                     ),
                   ),
                 ),
@@ -312,7 +321,9 @@ class _MusicCardState extends State<MusicCard> {
           ],
           const SizedBox(height: 8),
           Text(
-            s.link.isNotEmpty ? 'Sending to ${s.link}.${s.on.isEmpty ? '' : ' Holding ${s.on.join(', ')}.'}' : (s.linkError.isEmpty ? 'Connecting to ShowXpress.' : s.linkError),
+            s.link.isNotEmpty
+                ? 'Sending to ${s.link}.${s.on.isEmpty ? '' : ' Holding ${s.on.join(', ')}.'}'
+                : (s.linkError.isEmpty ? 'Connecting to ShowXpress.' : s.linkError),
             style: TextStyle(color: s.link.isNotEmpty ? Sx.text : Sx.redText, fontSize: 12.5),
           ),
           Text('Listening to ${s.device}.', style: small),
@@ -359,7 +370,13 @@ class _MusicCardState extends State<MusicCard> {
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        SizedBox(width: 110, child: Text(label, style: TextStyle(color: Sx.text, fontSize: 13, fontWeight: FontWeight.w600))),
+        SizedBox(
+          width: 110,
+          child: Text(
+            label,
+            style: TextStyle(color: Sx.text, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
         SizedBox(
           width: 220,
           child: TextField(

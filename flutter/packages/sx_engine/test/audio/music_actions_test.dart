@@ -39,6 +39,28 @@ void main() {
     expect(read(a.event(beat, 0)), ['beat 4', 'off AUTO DROP']);
   });
 
+  test('in the gap the build buttons stay off, even if the level reads high again', () {
+    final a = MusicActions(const MusicSettings());
+    a.event(sec(MusicSection.breakdown), 0);
+    a.event(sec(MusicSection.build), 0);
+    a.event(lv(0.7), 0);
+    expect(read(a.event(const MusicEvent(0, MusicEventKind.gap), 0)), ['off AUTO BUILD 2', 'on AUTO GAP']);
+    expect(read(a.event(lv(0.47), 0)), isEmpty);
+    expect(a.on, {'AUTO GAP'});
+    expect(read(a.event(const MusicEvent(0, MusicEventKind.drop, value: 0.8), 0)), ['off AUTO GAP', 'on AUTO DROP']);
+  });
+
+  test('during a build the level only climbs, but a build that fades back to a break steps down', () {
+    final a = MusicActions(const MusicSettings());
+    a.event(sec(MusicSection.breakdown), 0);
+    a.event(sec(MusicSection.build), 0);
+    a.event(lv(0.7), 0);
+    expect(read(a.event(lv(0.5), 0)), isEmpty);
+    expect(a.on, {'AUTO BUILD 2'});
+    a.event(sec(MusicSection.breakdown), 0);
+    expect(read(a.event(lv(0.3), 0)), ['off AUTO BUILD 2']);
+  });
+
   test('snares flash during a build only, and a flash still on is restarted', () {
     final a = MusicActions(const MusicSettings());
     expect(read(a.event(snare, 0)), isEmpty);

@@ -86,9 +86,7 @@ class EdmTrack {
 
   void bass(double t0, double t1, {double gain = 0.35}) {
     final i0 = (t0 * fs).toInt(), i1 = math.min(y.length, (t1 * fs).toInt());
-    final raw = [
-      for (var i = 0; i < i1 - i0; i++) 0.5 * (2 * ((i / fs * 55.0) % 1.0) - 1) + 0.8 * math.sin(2 * math.pi * 55.0 * i / fs),
-    ];
+    final raw = [for (var i = 0; i < i1 - i0; i++) 0.5 * (2 * ((i / fs * 55.0) % 1.0) - 1) + 0.8 * math.sin(2 * math.pi * 55.0 * i / fs)];
     final sig = _smooth(raw, 20);
     for (var i = 0; i < sig.length; i++) {
       final ph = (i / fs / beat) % 1.0;

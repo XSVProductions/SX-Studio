@@ -21,7 +21,10 @@ List<MusicEvent> run(Float64List y, int fs, {double gain = 1}) {
   return out;
 }
 
-List<double> times(List<MusicEvent> ev, MusicEventKind k) => [for (final e in ev) if (e.kind == k) e.t];
+List<double> times(List<MusicEvent> ev, MusicEventKind k) => [
+  for (final e in ev)
+    if (e.kind == k) e.t,
+];
 
 double median(List<double> v) {
   final s = [...v]..sort();
@@ -52,15 +55,25 @@ void main() {
     });
 
     test('build starts during the build and climbs', () {
-      final b = [for (final e in ev) if (e.kind == MusicEventKind.section && e.section == MusicSection.build) e.t];
+      final b = [
+        for (final e in ev)
+          if (e.kind == MusicEventKind.section && e.section == MusicSection.build) e.t,
+      ];
       expect(b, hasLength(1));
       expect(b.single, inInclusiveRange(tr.builds.single.$1, tr.builds.single.$1 + 4));
-      final lv = [for (final e in ev) if (e.kind == MusicEventKind.build && e.t > tr.builds.single.$1 + 2 && e.t < tr.builds.single.$2) e.value];
-      expect(lv.last, greaterThan(lv.first));
+      final lv = [
+        for (final e in ev)
+          if (e.kind == MusicEventKind.build && e.t > tr.builds.single.$1 + 2 && e.t < tr.builds.single.$2) e.value,
+      ];
+      // it falls again in the last beat or so, when the roll stops for the gap
+      expect(lv.reduce((a, b) => a > b ? a : b), greaterThan(lv.first + 0.15));
     });
 
     test('tempo 128 and bar 1 on the downbeats after the drop', () {
-      final beats = [for (final e in ev) if (e.kind == MusicEventKind.beat && e.t > 8) e];
+      final beats = [
+        for (final e in ev)
+          if (e.kind == MusicEventKind.beat && e.t > 8) e,
+      ];
       expect(median([for (final e in beats) e.value]), closeTo(128, 0.3));
       final bar = 4 * 60 / 128;
       final down = [

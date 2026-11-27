@@ -27,6 +27,7 @@ class MusicActions {
   final _offAt = <String, double>{}; // flashes still to release
   MusicSection _section = MusicSection.groove;
   int _stage = 0; // build level 0..3
+  bool _gapOn = false; // the gap is held: no build buttons until the drop
   int _pos = 0; // beats sent
   int _dropLeft = 0; // beats until the drop button goes off
 
@@ -64,6 +65,7 @@ class MusicActions {
 
   /// The break, the build and the gap are over.
   void _endBreak(List<String> out) {
+    _gapOn = false;
     _setStage(0, out);
     _set(settings.gap, false, out);
     _set(settings.breakTitle, false, out);
@@ -87,18 +89,18 @@ class MusicActions {
         if (s == MusicSection.groove) _endBreak(out);
         _section = s;
       case MusicEventKind.build:
-        if (_section == MusicSection.build || _section == MusicSection.breakdown) {
+        if (!_gapOn && (_section == MusicSection.build || _section == MusicSection.breakdown)) {
           final lv = e.value;
-          _setStage(
-            lv >= 0.85
-                ? 3
-                : lv >= 0.6
-                ? 2
-                : lv >= 0.35
-                ? 1
-                : 0,
-            out,
-          );
+          final s = lv >= 0.85
+              ? 3
+              : lv >= 0.6
+              ? 2
+              : lv >= 0.35
+              ? 1
+              : 0;
+          // during a build the lights only climb: the roll thinning out just
+          // before the drop doesn't step them back down
+          _setStage(_section == MusicSection.build && s < _stage ? _stage : s, out);
         }
       case MusicEventKind.snare:
         final t = settings.snare;
@@ -110,6 +112,7 @@ class MusicActions {
         }
       case MusicEventKind.gap:
         _setStage(0, out);
+        _gapOn = true;
         _set(settings.gap, true, out);
       case MusicEventKind.drop:
         _endBreak(out);
@@ -143,6 +146,7 @@ class MusicActions {
     _offAt.clear();
     _stage = 0;
     _dropLeft = 0;
+    _gapOn = false;
     return out;
   }
 }

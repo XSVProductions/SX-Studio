@@ -103,7 +103,8 @@ class MusicEvent {
   final MusicSection? section;
 
   @override
-  String toString() => '${t.toStringAsFixed(3)} ${kind.name} ${value.toStringAsFixed(2)}${bar > 0 ? ' $bar' : ''}${section != null ? ' ${section!.label}' : ''}';
+  String toString() =>
+      '${t.toStringAsFixed(3)} ${kind.name} ${value.toStringAsFixed(2)}${bar > 0 ? ' $bar' : ''}${section != null ? ' ${section!.label}' : ''}';
 }
 
 double _db(double e) => 10.0 * math.log(e + 1e-12) / math.ln10;
@@ -184,8 +185,8 @@ class _Onsets {
     required int span,
     required this.lagS,
   }) : _decay = math.pow(0.5, _hopS / halfLife).toDouble(),
-       _en = List<double>.filled(win, 0),
-       _lv = List<double>.filled(back + span, _silenceDb);
+       _en = List<double>.filled(win, 0, growable: true),
+       _lv = List<double>.filled(back + span, _silenceDb, growable: true);
 
   final double minDb, gapS, rel, cap, lagS;
   final int win, back;

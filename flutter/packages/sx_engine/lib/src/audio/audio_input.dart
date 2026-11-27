@@ -45,9 +45,10 @@ class AudioInputError implements Exception {
 final _num = winmm.lookupFunction<Uint32 Function(), int Function()>('waveInGetNumDevs');
 final _caps = winmm.lookupFunction<Uint32 Function(IntPtr, Pointer<Uint8>, Uint32), int Function(int, Pointer<Uint8>, int)>('waveInGetDevCapsW');
 final _open = winmm
-    .lookupFunction<Uint32 Function(Pointer<IntPtr>, Uint32, Pointer<Uint8>, IntPtr, IntPtr, Uint32), int Function(Pointer<IntPtr>, int, Pointer<Uint8>, int, int, int)>(
-      'waveInOpen',
-    );
+    .lookupFunction<
+      Uint32 Function(Pointer<IntPtr>, Uint32, Pointer<Uint8>, IntPtr, IntPtr, Uint32),
+      int Function(Pointer<IntPtr>, int, Pointer<Uint8>, int, int, int)
+    >('waveInOpen');
 final _prepare = winmm.lookupFunction<Uint32 Function(IntPtr, Pointer<Uint8>, Uint32), int Function(int, Pointer<Uint8>, int)>('waveInPrepareHeader');
 final _unprepare = winmm.lookupFunction<Uint32 Function(IntPtr, Pointer<Uint8>, Uint32), int Function(int, Pointer<Uint8>, int)>('waveInUnprepareHeader');
 final _addBuffer = winmm.lookupFunction<Uint32 Function(IntPtr, Pointer<Uint8>, Uint32), int Function(int, Pointer<Uint8>, int)>('waveInAddBuffer');

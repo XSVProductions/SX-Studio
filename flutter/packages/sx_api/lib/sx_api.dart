@@ -10,6 +10,7 @@ export 'src/color.dart';
 export 'src/json.dart';
 export 'src/remote.dart';
 export 'src/move_edit.dart';
+export 'src/music.dart';
 export 'src/lab.dart';
 export 'src/looks.dart';
 export 'src/gdrive.dart';

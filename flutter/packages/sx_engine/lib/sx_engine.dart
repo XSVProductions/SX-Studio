@@ -1,6 +1,7 @@
 /// The laptop side of SX Studio.
 library;
 
+export 'src/audio/music_detector.dart';
 export 'src/dmx/dmx_hub.dart';
 export 'src/dmx/dmx_output.dart';
 export 'src/dmx/efk_dmx.dart' show dmxNotFound;

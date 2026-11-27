@@ -5,6 +5,7 @@ import 'gdrive.dart';
 import 'phone.dart';
 import 'settings.dart';
 import 'move.dart';
+import 'music.dart';
 import 'lab.dart';
 import 'color.dart';
 import 'looks.dart';
@@ -44,4 +45,5 @@ void registerRoutes(Engine e) {
   registerSceneRoutes(e);
   registerRigRoutes(e);
   registerConfigRoutes(e);
+  registerMusicRoutes(e);
 }

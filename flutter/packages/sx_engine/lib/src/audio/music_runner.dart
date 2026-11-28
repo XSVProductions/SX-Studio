@@ -67,6 +67,7 @@ class MusicRunner {
   final bool Function() playerRunning;
 
   _Listener? _l;
+  String _device = ''; // the input the running listener opened
   MusicStatus _status = const MusicStatus();
 
   bool get running => _l?.alive ?? false;
@@ -89,7 +90,9 @@ class MusicRunner {
     if (running) return status();
     _status = const MusicStatus();
     try {
-      _l = await _Listener.spawn((settings: readMusicSettings(settingsFile()).toJson(), port: os2lPort()), (s) => _status = s);
+      final s = readMusicSettings(settingsFile());
+      _device = s.device;
+      _l = await _Listener.spawn((settings: s.toJson(), port: os2lPort()), (s) => _status = s);
       // give it a moment to open the input, so the answer says whether it worked
       await Future<void>.delayed(const Duration(milliseconds: 400));
     } on Object catch (e) {
@@ -98,8 +101,17 @@ class MusicRunner {
     return status();
   }
 
-  /// New settings for a running listener.
-  void update(MusicSettings s) => _l?.commands.send(s.toJson());
+  /// New settings for a running listener. A different input can't be
+  /// swapped in on the fly, so then it stops and starts again on the new one.
+  Future<void> update(MusicSettings s) async {
+    if (!running) return;
+    if (s.device.trim() != _device.trim()) {
+      await stop();
+      await start();
+      return;
+    }
+    _l?.commands.send(s.toJson());
+  }
 
   /// Stops listening: every button it holds is released first.
   Future<MusicStatus> stop() async {

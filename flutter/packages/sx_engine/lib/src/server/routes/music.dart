@@ -70,12 +70,12 @@ void registerMusicRoutes(Engine e) {
 
   e.api.get('/api/music/status', (req) => {'ok': true, 'status': runner.status().toJson()});
 
-  e.api.post('/api/music/save', (req) {
+  e.api.post('/api/music/save', (req) async {
     final raw = req.body['settings'];
     if (raw is! Map) throw ToolError('Nothing to save.');
     final s = MusicSettings.fromJson(raw.cast<String, Object?>());
     writeMusicSettings(file(), s);
-    runner.update(s);
+    await runner.update(s); // a new input starts listening again on it
     return info(s);
   });
 

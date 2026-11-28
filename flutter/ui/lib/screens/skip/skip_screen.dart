@@ -5,8 +5,10 @@ import '../../app_state.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import '../rig/rig_widgets.dart';
+import 'music_card.dart';
 
-/// Strobe: which movers the SKIP FLASH button flashes tonight.
+/// Strobe: which movers the SKIP FLASH button flashes tonight, and the
+/// music detector that presses strobe buttons on builds and drops.
 class SkipScreen extends StatefulWidget {
   const SkipScreen(BuildContext _, {super.key});
 
@@ -134,6 +136,7 @@ class _SkipScreenState extends State<SkipScreen> with ShowWatcher, RigReloads {
           ),
         ),
         if (d != null) SxCard(child: _order(d)),
+        const MusicCard(),
       ],
     );
   }

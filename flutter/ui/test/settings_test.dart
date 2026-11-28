@@ -14,9 +14,10 @@ import 'package:sx_studio/theme.dart';
 
 /// A pretend engine: answers each route, and keeps every POST body.
 class _Engine {
-  _Engine({this.phone = false});
+  _Engine({this.phone = false, this.dmx = const DmxOutputSettings()});
 
   final bool phone;
+  final DmxOutputSettings dmx;
   var settings = const SxSettings().toJson();
   var pin = '';
   final posts = <String, List<Json>>{};
@@ -50,6 +51,7 @@ class _Engine {
       '/api/update/install' => {'ok': false, 'error': 'Download failed: no network', 'out': ''},
       '/api/gdrive' => const DriveInfo(show: '/shows/Awaaz Lightshow', here: true, found: false, target: '').toJson(),
       '/api/phone' => phoneInfo(),
+      '/api/dmx-output' => DmxOutputInfo(settings: dmx, ports: const ['COM3'], busy: false, test: false).toJson(),
       '/api/phone/pin' => () {
         pin = '482913';
         return phoneInfo();
@@ -61,7 +63,7 @@ class _Engine {
 }
 
 Future<AppState> _pump(WidgetTester tester, _Engine engine, {double width = 1200}) async {
-  tester.view.physicalSize = Size(width, 2400);
+  tester.view.physicalSize = Size(width, 3200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   final app = AppState(engine.client(), tab: 'settings');
@@ -92,7 +94,7 @@ final _apps = <AppState>[];
 void main() {
   _test('the laptop sees every section, a phone only the shared ones', (tester) async {
     await _pump(tester, _Engine());
-    for (final t in ['Tabs', 'Google Drive', 'Phone & iPad', 'ShowXpress', 'Updates']) {
+    for (final t in ['Tabs', 'Google Drive', 'Phone & iPad', 'ShowXpress', 'DMX output', 'Updates']) {
       expect(find.text(t), findsOneWidget, reason: t);
     }
   });
@@ -103,6 +105,7 @@ void main() {
     expect(find.text('Google Drive'), findsOneWidget);
     expect(find.text('Phone & iPad'), findsNothing);
     expect(find.text('Updates'), findsNothing);
+    expect(find.text('DMX output'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -195,6 +198,15 @@ void main() {
   _test('the settings fit a phone screen', (tester) async {
     await _pump(tester, _Engine(), width: 380);
     expect(tester.takeException(), isNull);
+  });
+
+  _test('the DMX output card fits a narrow window with the Enttec and Art-Net shown', (tester) async {
+    await _pump(tester, _Engine(dmx: const DmxOutputSettings(kind: DmxOutputKind.enttecArtnet)), width: 380);
+    await tester.scrollUntilVisible(find.text('ART-NET'), 300, scrollable: find.byType(Scrollable).first);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('ENTTEC DMX USB PRO'), findsOneWidget); // group labels are in capitals
+    expect(find.text('ART-NET'), findsOneWidget);
   });
 
   group('pairing screen', () {

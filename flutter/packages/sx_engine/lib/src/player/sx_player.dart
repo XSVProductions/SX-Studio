@@ -177,23 +177,20 @@ Future<void> _playerMain((PlayerConfig, SendPort) args) async {
   // watch the interface: unplugged -> stop sending, plugged back -> open it again.
   // Windows says whether the device is there. A Mac can't be asked, so there
   // the helper ending is the only sign. Opening again starts a new helper.
-  final device = cfg.dmx is EfkDmxSpec ? EfkDevice.find(out.name) : null;
+  // An Enttec Pro shows it by a write failing, Art-Net never goes away.
+  final device = efkPart(cfg.dmx) != null ? EfkDevice.find(efkName(out) ?? out.name) : null;
   bool plugged() => switch (cfg.dmx) {
     FakeDmxSpec(:final logPath?) => !File(p.join(p.dirname(logPath), '_iface_unplugged')).existsSync(),
-    EfkDmxSpec() => device?.present() ?? true,
-    _ => true,
+    _ => device?.present() ?? true,
   };
-  bool helperEnded() => switch (out) {
-    HelperDmx(:final alive) => !alive,
-    _ => false,
-  };
+  bool helperEnded() => dmxEnded(out);
 
-  final isWindows = Platform.isWindows && cfg.dmx is EfkDmxSpec;
+  final isWindows = Platform.isWindows && isRealDmx(cfg.dmx);
   // No sleep and the screen stays on while the player runs. Windows is asked
   // again every 30 seconds below. A Mac is held awake by `caffeinate`, which
   // ends with the app if the player never gets to stop it.
   Process? awake;
-  if (Platform.isMacOS && cfg.dmx is EfkDmxSpec) {
+  if (Platform.isMacOS && isRealDmx(cfg.dmx)) {
     try {
       awake = await Process.start('/usr/bin/caffeinate', ['-d', '-i', '-w', '$pid']);
     } on ProcessException {

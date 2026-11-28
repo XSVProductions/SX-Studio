@@ -27,3 +27,4 @@ export 'src/rig.dart';
 export 'src/rig_test.dart';
 export 'src/skip_flash.dart';
 export 'src/config.dart';
+export 'src/dmx_output.dart';

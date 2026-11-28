@@ -21,6 +21,7 @@ import 'speed.dart';
 import 'sx.dart';
 import 'update.dart';
 import 'config.dart';
+import 'dmx_output.dart';
 
 /// Every area's routes. One line per area, each in its own file.
 void registerRoutes(Engine e) {
@@ -45,5 +46,6 @@ void registerRoutes(Engine e) {
   registerSceneRoutes(e);
   registerRigRoutes(e);
   registerConfigRoutes(e);
+  registerDmxOutputRoutes(e);
   registerMusicRoutes(e);
 }

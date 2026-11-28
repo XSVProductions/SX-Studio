@@ -6,6 +6,7 @@ import '../../tabs.dart';
 import '../../theme.dart';
 import '../../widgets/sx_widgets.dart';
 import 'config_card.dart';
+import 'dmx_output_card.dart';
 import 'drive_card.dart';
 import 'phone_card.dart';
 import 'settings_bits.dart';
@@ -85,7 +86,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           if (m.loaded) ...[
             _tabsCard(m),
             const DriveCard(),
-            if (!m.phone) ...[const PhoneCard(), _SxCard(m), const UpdateCard(), const ConfigCard()],
+            if (!m.phone) ...[const PhoneCard(), _SxCard(m), const DmxOutputCard(), const UpdateCard(), const ConfigCard()],
           ],
         ],
       ),

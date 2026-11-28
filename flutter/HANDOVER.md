@@ -2,6 +2,8 @@
 
 For the coding agent picking this up, and for the maintainer. Written 25 November 2026.
 
+**Since then:** 2.0.0 was released on 25 November 2026, so the Flutter app is what every laptop runs, and new features (the music detector in 2.0.5, the DMX output setting) go here. The sections below describe the port as it was handed over.
+
 ## What this is
 
 This folder holds SX Studio rewritten in Dart and Flutter. It is a like-for-like port of the PowerShell app in `../src` as of commit `1b68d92` (version 1.9.15). Same tabs, same routes, same wording, same bytes in the ShowXpress show files. ShowXpress stays. The port adds no features.

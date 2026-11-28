@@ -24,14 +24,14 @@ void registerDmxOutputRoutes(Engine e) {
 
   apply(readDmxOutput(file));
 
-  DmxOutputInfo info({String message = '', DmxOutputSettings? s}) {
+  DmxOutputInfo info({String message = '', DmxOutputSettings? s, String found = ''}) {
     List<String> ports;
     try {
       ports = serialPortNames();
     } on Object {
       ports = const [];
     }
-    return DmxOutputInfo(settings: s ?? readDmxOutput(file), ports: ports, busy: e.dmx.busy, test: test, message: message);
+    return DmxOutputInfo(settings: s ?? readDmxOutput(file), ports: ports, busy: e.dmx.busy, test: test, message: message, found: found);
   }
 
   e.api.get('/api/dmx-output', (req) => info(), phone: false);
@@ -55,18 +55,21 @@ void registerDmxOutputRoutes(Engine e) {
   e.api.post('/api/dmx-output/find', (req) {
     if (e.dmx.busy) throw ToolError('SX Studio is sending DMX right now. Stop the SX Player or Live Aim first.');
     final port = findEnttecPort();
-    return info(message: port == null ? 'No Enttec DMX USB Pro answered. Check its USB cable.' : 'Found an Enttec DMX USB Pro on $port.');
+    return info(
+      message: port == null ? 'No Enttec DMX USB Pro answered. Check its USB cable.' : 'Found an Enttec DMX USB Pro on $port. Save to keep it.',
+      found: port ?? '',
+    );
   }, phone: false);
 
   e.api.post('/api/dmx-output/check', (req) async {
     if (e.dmx.busy) throw ToolError('SX Studio is sending DMX right now, so the output works. Stop the SX Player or Live Aim to check it again.');
     final s = readDmxOutput(file);
-    if (s.kind.chauvet && e.sx.running) throw ToolError('ShowXpress is open and holds the Chauvet box. Close it first, then check again.');
+    if (s.kind.usesChauvet && e.sx.running) throw ToolError('ShowXpress is open and holds the Chauvet box. Close it first, then check again.');
     try {
       final out = await openDmx(e.dmx.spec);
       final name = out.name;
       await out.close();
-      return info(message: 'Opened $name and closed it again.${s.kind.artnet ? ' Art-Net sends without an answer, so check a light to be sure.' : ''}');
+      return info(message: 'Opened $name and closed it again.${s.kind.usesArtnet ? ' Art-Net sends without an answer, so check a light to be sure.' : ''}');
     } on DmxError catch (err) {
       return info(message: err.message);
     }

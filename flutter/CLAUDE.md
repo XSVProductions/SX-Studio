@@ -1,8 +1,8 @@
-# SX Studio, Flutter port
+# SX Studio, Flutter app
 
-A like-for-like port of SX Studio from PowerShell to Dart and Flutter. Same features, same ShowXpress file handling, same wording. No new features.
+SX Studio in Dart and Flutter. It started as a like-for-like port of the PowerShell app in `../src`, and since 2.0.0 it is the app that ships. New features go here. The PowerShell app gets none.
 
-The old app is the answer key. A piece is done when the old tool and the new one give the same answer and leave the same bytes on disk.
+For anything the old app also does, the old app is still the answer key. A ported piece is done when the old tool and the new one give the same answer and leave the same bytes on disk. A change to one of those keeps its parity test passing. A new feature has no answer key: give it plain tests for its logic, and say in the commit what was tried on real hardware and what wasn't.
 
 New here? Read `HANDOVER.md` first. It says what state the port is in, what was checked and what wasn't, and how the switch from the PowerShell app works.
 
@@ -21,12 +21,12 @@ On the laptop the app starts the engine on its own isolate and connects to it on
 Around this folder:
 
 ```
-../src                The PowerShell app. Still the released version, and the answer key for this one.
+../src                The PowerShell app. No longer released, kept as the answer key for the ported parts.
 ../tools              Its own tests.
 ../windows, ../mac    Its installers.
 ```
 
-Until the Flutter app replaces it, a change to `../src` needs the same change here. `HANDOVER.md` says how.
+`../src` is frozen. Fix bugs here, not there.
 
 Three things the old-versus-new tests need, none of them in git:
 

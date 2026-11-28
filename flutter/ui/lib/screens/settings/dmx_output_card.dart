@@ -3,7 +3,6 @@ import 'package:sx_api/sx_api.dart';
 
 import '../../app_state.dart';
 import '../../theme.dart';
-import '../../widgets/sx_menu.dart';
 import '../../widgets/sx_widgets.dart';
 
 /// Settings > DMX output: which interface SX Studio itself sends DMX
@@ -66,6 +65,7 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
         _error = '';
         if (keepEdits) {
           _edit = edits;
+          if (i.found.isNotEmpty) _port.text = i.found; // found it: ready to save
         } else {
           _fill(i.settings);
         }
@@ -96,16 +96,16 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
             ),
           if (i != null) ...[
             const SizedBox(height: 12),
-            SizedBox(
-              width: 340,
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 340),
               child: SxMenu<DmxOutputKind>(
                 items: {for (final o in DmxOutputKind.values) o: o.label},
                 value: k,
                 onPick: _busy ? null : (v) => setState(() => _edit = _fromFields.copyWith(kind: v)),
               ),
             ),
-            if (k.chauvet) _line('Uses the driver from your ShowXpress install, as before. Close ShowXpress while SX Studio drives the lights.'),
-            if (k.enttec) ...[
+            if (k.usesChauvet) _line('Uses the driver from your ShowXpress install, as before. Close ShowXpress while SX Studio drives the lights.'),
+            if (k.usesEnttec) ...[
               GroupLabel('Enttec DMX USB Pro'),
               Wrap(
                 spacing: 10,
@@ -113,8 +113,8 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   if (i.ports.isNotEmpty)
-                    SizedBox(
-                      width: 260,
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 260),
                       child: SxMenu<String>(
                         items: {'': 'Find it each time', for (final p in i.ports) p: p},
                         value: i.ports.contains(_port.text) || _port.text.isEmpty ? _port.text : null,
@@ -123,13 +123,13 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
                       ),
                     )
                   else
-                    _field(_port, 'COM port, or empty to find it', 220),
+                    _field(_port, 'COM5, or empty', 220),
                   MiniButton('Find it', icon: Icons.search, onPressed: _busy ? null : () => _run((c) => c.dmxOutputFind(), keepEdits: true)),
                 ],
               ),
               _line('Universe 1 only. A DMXking ultraDMX works here too.'),
             ],
-            if (k.artnet) ...[
+            if (k.usesArtnet) ...[
               GroupLabel('Art-Net'),
               Wrap(
                 spacing: 14,
@@ -141,8 +141,10 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
                   _labelled('How many', _field(_count, '1', 56, number: true)),
                 ],
               ),
-              _line('SX Studio universe 1 goes to the Art-Net universe you type (0 is the first, often shown as 0:0:0), the next ones after it. '
-                  'You need an Art-Net node, or lights that take Art-Net, on the same network.'),
+              _line(
+                'SX Studio universe 1 goes to the Art-Net universe you type (0 is the first, often shown as 0:0:0), the next ones after it. '
+                'You need an Art-Net node, or lights that take Art-Net, on the same network.',
+              ),
             ],
             if (i.message.isNotEmpty)
               Container(
@@ -153,24 +155,41 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
                 child: Text(i.message, style: TextStyle(color: Sx.text, fontSize: 13)),
               ),
             const SizedBox(height: 14),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _changed
-                        ? 'Not saved yet.'
-                        : i.busy
-                        ? 'SX Studio is sending DMX now. A change applies the next time the player or Live Aim starts.'
-                        : 'Saved on this computer.',
-                    style: Sx.sub,
-                  ),
-                ),
-                OutlinedButton(onPressed: _busy || _changed ? null : () => _run((c) => c.dmxOutputCheck(), keepEdits: true), child: const Text('Check')),
-                const SizedBox(width: 8),
-                OutlinedButton(onPressed: _busy || !_changed ? null : () => setState(() => _fill(i.settings)), child: const Text('Undo')),
-                const SizedBox(width: 8),
-                FilledButton(onPressed: _busy || !_changed ? null : () => _run((c) => c.dmxOutputSave(_fromFields)), child: const Text('Save')),
-              ],
+            LayoutBuilder(
+              builder: (context, box) {
+                final hint = Text(
+                  _changed
+                      ? 'Not saved yet.'
+                      : i.busy
+                      ? 'SX Studio is sending DMX now. A change applies the next time the player or Live Aim starts.'
+                      : 'Saved on this computer.',
+                  style: Sx.sub,
+                );
+                final buttons = [
+                  OutlinedButton(onPressed: _busy || _changed ? null : () => _run((c) => c.dmxOutputCheck(), keepEdits: true), child: const Text('Check')),
+                  const SizedBox(width: 8),
+                  OutlinedButton(onPressed: _busy || !_changed ? null : () => setState(() => _fill(i.settings)), child: const Text('Undo')),
+                  const SizedBox(width: 8),
+                  FilledButton(onPressed: _busy || !_changed ? null : () => _run((c) => c.dmxOutputSave(_fromFields)), child: const Text('Save')),
+                ];
+                // a narrow window puts the hint above the buttons, which share the width, as SaveBar does on a phone
+                if (box.maxWidth < 520) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      hint,
+                      const SizedBox(height: 8),
+                      Row(children: [for (final b in buttons) b is SizedBox ? b : Expanded(child: b)]),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Expanded(child: hint),
+                    ...buttons,
+                  ],
+                );
+              },
             ),
           ],
         ],
@@ -188,12 +207,12 @@ class _DmxOutputCardState extends State<DmxOutputCard> {
     children: [
       Text(label, style: TextStyle(color: Sx.text, fontSize: 13)),
       const SizedBox(width: 8),
-      field,
+      Flexible(child: field), // a narrow window shortens the field, not the label
     ],
   );
 
-  Widget _field(TextEditingController c, String hint, double width, {bool number = false}) => SizedBox(
-    width: width,
+  Widget _field(TextEditingController c, String hint, double width, {bool number = false}) => ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: width),
     child: TextField(
       controller: c,
       keyboardType: number ? TextInputType.number : TextInputType.text,

@@ -43,6 +43,35 @@ void main() {
     });
   });
 
+  group('finding the Enttec', () {
+    test('on Windows the first port that answers as a Pro', () {
+      final asked = <String>[];
+      final p = pickEnttecPort(['COM3', 'COM5', 'COM7'], probe: (x) => (asked..add(x)).last == 'COM5');
+      expect(p, 'COM5');
+      expect(asked, ['COM3', 'COM5']); // stops at the Pro
+      expect(pickEnttecPort(['COM3'], probe: (_) => false), isNull);
+    });
+
+    test('on a Mac by its name, else the only USB serial port', () {
+      expect(pickEnttecPort(['/dev/cu.usbmodem1', '/dev/cu.usbserial-EN123456']), '/dev/cu.usbserial-EN123456');
+      expect(pickEnttecPort(['/dev/cu.usbserial-A1']), '/dev/cu.usbserial-A1');
+      expect(pickEnttecPort(['/dev/cu.usbserial-A1', '/dev/cu.usbmodem1']), isNull);
+    });
+
+    test('a set port is used as it is', () {
+      expect(enttecPortToOpen(' COM9 ', const [], 'COM5'), (port: 'COM9', gone: false));
+    });
+
+    test('found once, it is opened again without asking the other ports', () {
+      expect(enttecPortToOpen('', ['COM3', 'COM5'], 'COM5'), (port: 'COM5', gone: false));
+      expect(enttecPortToOpen('', ['COM3', 'COM5'], null), (port: null, gone: false)); // never found: search
+    });
+
+    test('unplugged after it was found: wait for its port, no search', () {
+      expect(enttecPortToOpen('', ['COM3'], 'COM5'), (port: null, gone: true));
+    });
+  });
+
   group('Art-Net', () {
     test('an ArtDmx packet', () {
       final data = Uint8List(512)
@@ -142,7 +171,10 @@ void main() {
       expect(spec.parts.first, same(chauvet));
       final art = spec.parts.last as ArtNetSpec;
       expect((art.host, art.first, art.count), ('2.0.0.10', 1, 2));
-      expect(dmxSpecFor(const DmxOutputSettings(kind: DmxOutputKind.enttec, enttecPort: 'COM5'), chauvet), isA<EnttecProSpec>().having((e) => e.port, 'port', 'COM5'));
+      expect(
+        dmxSpecFor(const DmxOutputSettings(kind: DmxOutputKind.enttec, enttecPort: 'COM5'), chauvet),
+        isA<EnttecProSpec>().having((e) => e.port, 'port', 'COM5'),
+      );
       expect(dmxSpecFor(const DmxOutputSettings(kind: DmxOutputKind.enttecArtnet), chauvet), isA<MultiDmxSpec>());
       dir.deleteSync(recursive: true);
     });

@@ -74,10 +74,23 @@ List<String> serialPortNames() {
 /// Enttec's own name is used (its serial number starts EN), else the only
 /// USB serial port. Null when none is found.
 String? findEnttecPort() {
-  final ports = serialPortNames();
-  if (Platform.isWindows) {
+  final p = pickEnttecPort(serialPortNames(), probe: Platform.isWindows ? _WinSerial.probe : null);
+  if (p != null) _lastFound = p;
+  return p;
+}
+
+/// The port the last search found, in this isolate. While it is gone (the Pro
+/// was unplugged) [EnttecProDmx.open] waits for it instead of asking every
+/// other port again, which can take seconds each on a Bluetooth port.
+String? _lastFound;
+
+/// The Pro's port among [ports]. With [probe] (Windows), the first port that
+/// answers as a Pro. Without it, by name: an Enttec's own (`usbserial-EN`),
+/// else the only one.
+String? pickEnttecPort(List<String> ports, {bool Function(String port)? probe}) {
+  if (probe != null) {
     for (final p in ports) {
-      if (_WinSerial.probe(p)) return p;
+      if (probe(p)) return p;
     }
     return null;
   }
@@ -86,13 +99,24 @@ String? findEnttecPort() {
   return ports.length == 1 ? ports.single : null;
 }
 
+/// Where to open a Pro set to [port] ('' = find it): the set port, else the
+/// one found last time while it is still there. Null means search, and
+/// [gone] means the last one found is not plugged in, so don't search yet.
+({String? port, bool gone}) enttecPortToOpen(String port, List<String> ports, String? lastFound) {
+  if (port.trim().isNotEmpty) return (port: port.trim(), gone: false);
+  if (lastFound == null) return (port: null, gone: false);
+  return ports.contains(lastFound) ? (port: lastFound, gone: false) : (port: null, gone: true);
+}
+
 /// DMX through an Enttec DMX USB Pro on serial port [port] ('' = find it).
 class EnttecProDmx implements DmxOutput {
   EnttecProDmx._(this.name, this._port);
 
   /// Opens the Pro. Throws [DmxError] with a message for the user.
   static EnttecProDmx open(String port) {
-    final p = port.trim().isEmpty ? findEnttecPort() : port.trim();
+    final to = enttecPortToOpen(port, port.trim().isEmpty ? serialPortNames() : const [], _lastFound);
+    if (to.gone) throw DmxError('The Enttec DMX USB Pro on $_lastFound is unplugged. Plug it back in.');
+    final p = to.port ?? findEnttecPort();
     if (p == null) {
       throw DmxError(
         'The Enttec DMX USB Pro was not found. Check its USB cable, and on Windows that it shows up as a COM port in Device Manager. '
@@ -164,12 +188,15 @@ class _FileSerial implements _SerialPort {
   /// Puts the port in raw mode first, so no byte is changed on the way (a
   /// 0x0A would otherwise go out as 0x0D 0x0A).
   static _FileSerial open(String path) {
+    // opened first: a Mac puts a port's settings back when the last program
+    // holding it lets go, so stty's change only sticks while this holds it
+    final f = File(path).openSync(mode: FileMode.writeOnlyAppend);
     final r = Process.runSync('/bin/stty', [if (Platform.isMacOS) '-f' else '-F', path, 'raw', '-echo', '250000']);
     if (r.exitCode != 0) {
       // some drivers refuse that speed. The Pro ignores the speed anyway, raw is what matters.
       Process.runSync('/bin/stty', [if (Platform.isMacOS) '-f' else '-F', path, 'raw', '-echo']);
     }
-    return _FileSerial(File(path).openSync(mode: FileMode.writeOnlyAppend));
+    return _FileSerial(f);
   }
 
   final RandomAccessFile _f;
@@ -184,17 +211,20 @@ class _FileSerial implements _SerialPort {
 // ---------------------------------------------------------------- Windows: kernel32
 
 final _createFile = kernel32
-    .lookupFunction<IntPtr Function(Pointer<Uint16>, Uint32, Uint32, Pointer<Void>, Uint32, Uint32, IntPtr), int Function(Pointer<Uint16>, int, int, Pointer<Void>, int, int, int)>(
-      'CreateFileW',
-    );
+    .lookupFunction<
+      IntPtr Function(Pointer<Uint16>, Uint32, Uint32, Pointer<Void>, Uint32, Uint32, IntPtr),
+      int Function(Pointer<Uint16>, int, int, Pointer<Void>, int, int, int)
+    >('CreateFileW');
 final _writeFile = kernel32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Void>), int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>)>(
-      'WriteFile',
-    );
+    .lookupFunction<
+      Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Void>),
+      int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>)
+    >('WriteFile');
 final _readFile = kernel32
-    .lookupFunction<Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Void>), int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>)>(
-      'ReadFile',
-    );
+    .lookupFunction<
+      Int32 Function(IntPtr, Pointer<Uint8>, Uint32, Pointer<Uint32>, Pointer<Void>),
+      int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>)
+    >('ReadFile');
 final _setCommTimeouts = kernel32.lookupFunction<Int32 Function(IntPtr, Pointer<Uint32>), int Function(int, Pointer<Uint32>)>('SetCommTimeouts');
 final _purgeComm = kernel32.lookupFunction<Int32 Function(IntPtr, Uint32), int Function(int, int)>('PurgeComm');
 final _closeHandle = kernel32.lookupFunction<Int32 Function(IntPtr), int Function(int)>('CloseHandle');
@@ -203,11 +233,14 @@ final _queryDosDevice = kernel32.lookupFunction<Uint32 Function(Pointer<Uint16>,
 );
 
 /// COM1, COM2..., from the list of DOS device names.
-List<String> _winComPorts() {
-  const chars = 65536;
+List<String> _winComPorts() => _winComPortsIn(65536) ?? _winComPortsIn(1 << 21) ?? const [];
+
+/// The COM ports, read with room for [chars] characters of names. Null when they didn't fit.
+List<String>? _winComPortsIn(int chars) {
   final buf = winAlloc<Uint16>(chars * 2);
   try {
     final n = _queryDosDevice(nullptr, buf, chars);
+    if (n == 0) return null;
     final all = buf.asTypedList(n);
     final names = <String>[];
     var start = 0;
@@ -216,8 +249,7 @@ List<String> _winComPorts() {
       if (i > start) names.add(String.fromCharCodes(all.sublist(start, i)));
       start = i + 1;
     }
-    final com = names.where((s) => RegExp(r'^COM\d+$').hasMatch(s)).toList()
-      ..sort((a, b) => int.parse(a.substring(3)).compareTo(int.parse(b.substring(3))));
+    final com = names.where((s) => RegExp(r'^COM\d+$').hasMatch(s)).toList()..sort((a, b) => int.parse(a.substring(3)).compareTo(int.parse(b.substring(3))));
     return com;
   } finally {
     winFree(buf);

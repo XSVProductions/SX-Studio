@@ -201,4 +201,4 @@ Pushing a tag such as `v1.1.0` makes GitHub Actions build both installers and pu
 
 ## Flutter port
 
-`flutter/` holds a like-for-like port of SX Studio to Dart and Flutter. It is not released. The PowerShell app above is still what the installers ship. Start with `flutter/HANDOVER.md`.
+`flutter/` holds SX Studio in Dart and Flutter. Since 2.0.0 it is what the installers ship, and new features go there. The PowerShell app above is frozen and kept as the answer key for the ported parts. Start with `flutter/HANDOVER.md`.

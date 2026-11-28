@@ -29,9 +29,14 @@ enum DmxOutputKind {
   /// What the Settings card shows.
   final String label;
 
-  bool get chauvet => this == DmxOutputKind.chauvet || this == DmxOutputKind.chauvetArtnet;
-  bool get enttec => this == DmxOutputKind.enttec || this == DmxOutputKind.enttecArtnet;
-  bool get artnet => this == DmxOutputKind.artnet || this == DmxOutputKind.chauvetArtnet || this == DmxOutputKind.enttecArtnet;
+  /// True when this choice sends through the Chauvet box.
+  bool get usesChauvet => this == DmxOutputKind.chauvet || this == DmxOutputKind.chauvetArtnet;
+
+  /// True when this choice sends through an Enttec Pro.
+  bool get usesEnttec => this == DmxOutputKind.enttec || this == DmxOutputKind.enttecArtnet;
+
+  /// True when this choice sends Art-Net.
+  bool get usesArtnet => this == DmxOutputKind.artnet || this == DmxOutputKind.chauvetArtnet || this == DmxOutputKind.enttecArtnet;
 
   static DmxOutputKind byId(String id) => DmxOutputKind.values.firstWhere((k) => k.id == id, orElse: () => DmxOutputKind.chauvet);
 }
@@ -80,7 +85,7 @@ class DmxOutputSettings {
 
 /// What the DMX output card shows.
 class DmxOutputInfo {
-  const DmxOutputInfo({required this.settings, required this.ports, required this.busy, required this.test, this.message = ''});
+  const DmxOutputInfo({required this.settings, required this.ports, required this.busy, required this.test, this.message = '', this.found = ''});
 
   factory DmxOutputInfo.fromJson(Json j) => DmxOutputInfo(
     settings: DmxOutputSettings.fromJson(j.obj('settings')),
@@ -88,6 +93,7 @@ class DmxOutputInfo {
     busy: j.boolean('busy'),
     test: j.boolean('test'),
     message: j.str('message'),
+    found: j.str('found'),
   );
 
   final DmxOutputSettings settings;
@@ -104,7 +110,10 @@ class DmxOutputInfo {
   /// The answer to the last action (a found port, a check), '' for none.
   final String message;
 
-  Json toJson() => {'ok': true, 'settings': settings.toJson(), 'ports': ports, 'busy': busy, 'test': test, 'message': message};
+  /// The port "Find it" found an Enttec Pro on, '' for none.
+  final String found;
+
+  Json toJson() => {'ok': true, 'settings': settings.toJson(), 'ports': ports, 'busy': busy, 'test': test, 'message': message, 'found': found};
 }
 
 extension DmxOutputApi on SxClient {

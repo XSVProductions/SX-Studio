@@ -94,12 +94,16 @@ void main() {
   }
 
   group('phone', () {
-    test("a phone is kept off exactly the old server's six routes", () {
+    test("a phone is kept off exactly the old server's six routes, and the new DMX output setting", () {
       final never = {
         for (final r in engine.api.routes)
           if (!r.phone) r.path,
       };
-      expect(never, {'/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open'});
+      expect(never, {
+        '/api/update/install', '/api/phone', '/api/phone/set', '/api/phone/pin', '/api/phone/unpair', '/api/open',
+        // new in the Flutter app: which interface this computer sends DMX through
+        '/api/dmx-output', '/api/dmx-output/save', '/api/dmx-output/find', '/api/dmx-output/check',
+      });
     });
 
     test('a laptop only route says so, before the key is looked at', () async {
